@@ -42,18 +42,20 @@ function generatePWAManifest(siteTitle) {
     start_url: BASE_PATH || "/",
     scope: BASE_PATH || "/",
     display: "standalone",
-    background_color: "#0A100F",
-    theme_color: "#0A100F",
+    background_color: "#0A0A0B",
+    theme_color: "#0A0A0B",
     icons: [
       {
-        src: `${BASE_PATH}/assets/dumbterm.png`,
-        type: "image/png",
-        sizes: "192x192"
+        src: `${BASE_PATH}/assets/terminal-icon.svg`,
+        type: "image/svg+xml",
+        sizes: "any",
+        purpose: "any"
       },
       {
-        src: `${BASE_PATH}/assets/dumbterm.png`,
-        type: "image/png",
-        sizes: "512x512"
+        src: `${BASE_PATH}/assets/terminal-icon.svg`,
+        type: "image/svg+xml",
+        sizes: "any",
+        purpose: "maskable"
       }
     ],
     orientation: "any"
