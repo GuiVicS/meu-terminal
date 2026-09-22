@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="pageTitle">DumbTerm</title>
+    <script src="config.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/svg+xml" href="assets/dumbterm.svg">
+    <script>
+        (function() { // Sempre dark - aplica o tema antes do render para evitar flicker
+            var theme = 'dark';
+            localStorage.setItem('theme', theme);
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
+</head>
+<body>
+    <main>
+        <div class="header-top">
+            <div id="demo-banner" style="display: none;" class="demo-banner">
+                <span>🧪 DEMO MODE - Terminal is simulated</span>
+            </div>
+        </div>
+        <form id="pinForm" action="verify-pin" method="POST">
+            <div class="header-right">
+                <button id="themeToggle" aria-label="Toggle theme" type="button">
+                    <svg class="moon" viewBox="0 0 24 24">
+                        <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                        <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+                    </svg>
+                    <svg class="sun" viewBox="0 0 24 24">
+                        <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                        <path d="M14.828 14.828a4 4 0 1 0 -5.656 -5.656a4 4 0 0 0 5.656 5.656z" />
+                        <path d="M6.343 17.657l-1.414 1.414" />
+                        <path d="M6.343 6.343l-1.414 -1.414" />
+                        <path d="M17.657 6.343l1.414 -1.414" />
+                        <path d="M17.657 17.657l1.414 1.414" />
+                        <path d="M4 12h-2" />
+                        <path d="M12 4v-2" />
+                        <path d="M20 12h2" />
+                        <path d="M12 20v2" />
+                    </svg>
+                </button>
+            </div>
+            <h1 id="siteTitle">DumbTerm</h1>
+            <h2>Enter PIN</h2>
+            <div class="pin-input-container"></div>
+            <div class="pin-error" role="alert" aria-hidden="true">Incorrect PIN. Please try again.</div>
+        </form>
+    </main>
+    <div class="dumbware-credit">
+        Built by <a href="https://dumbware.io" target="_blank" rel="noopener noreferrer">DumbWare</a>
+    </div>
+    <script type="module" src="login.js"></script>
+</body>
+</html> 

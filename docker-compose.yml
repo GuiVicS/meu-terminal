@@ -1,0 +1,27 @@
+services:
+  dumbterm:
+    # image: dumbwareio/dumbterm:latest
+    build: .
+    container_name: dumbterm
+    restart: unless-stopped
+    ports:
+      - ${DUMBTERM_PORT:-3000}:3000
+    volumes:
+      - ${DUMBTERM_CONFIG:-./config}:/root/.config
+      - ${DUMBTERM_DATA_DIR:-./data}:/root/data # Map the data directory to a local folder
+    environment:
+      # Container timezone
+      TZ: ${DUMBTERM_TZ:-America/Los_Angeles}
+      # The title shown in the web interface
+      SITE_TITLE: ${DUMBTERM_SITE_TITLE:-DumbTerm}
+      # Optional PIN protection (leave empty to disable)
+      DUMBTERM_PIN: ${DUMBTERM_PIN:-1234}
+      # The base URL for the application
+      BASE_URL: ${DUMBTERM_BASE_URL:-http://localhost:3000} # Use ALLOWED_ORIGINS below to restrict cors to specific origins
+      ENABLE_STARSHIP: ${ENABLE_STARSHIP:-true} # Enable starship prompt
+      LOCKOUT_TIME: ${DUMBTERM_LOCKOUT_TIME:-15} # Minutes
+      MAX_SESSION_AGE: ${DUMBTERM_MAX_SESSION_AGE:-24} # Hours
+
+      # (OPTIONAL)
+      # Usage: Comma-separated list of urls: http://localhost:port,http://internalip:port,https://base.proxy.tld,https://authprovider.domain.tld
+      # ALLOWED_ORIGINS: ${DUMBTERM_ALLOWED_ORIGINS:-http://localhost:3000} # Comment out to allow all origins (*)

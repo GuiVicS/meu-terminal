@@ -1,0 +1,1027 @@
+/* NerdFont Integration */
+@font-face {
+    font-family: 'FiraCode Nerd Font';
+    src: url('/assets/fonts/FiraCodeNerdFontMono-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: block; /* Block render text until font loads */
+}
+
+@font-face {
+    font-family: 'FiraCode Nerd Font';
+    src: url('/assets/fonts/FiraCodeNerdFontMono-Medium.ttf') format('truetype');
+    font-weight: 500;
+    font-style: normal;
+    font-display: block;
+}
+
+@font-face {
+    font-family: 'FiraCode Nerd Font';
+    src: url('/assets/fonts/FiraCodeNerdFontMono-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+    font-display: block;
+}
+
+/* Other weights can use swap strategy since they're less critical */
+@font-face {
+    font-family: 'FiraCode Nerd Font';
+    src: url('/assets/fonts/FiraCodeNerdFontMono-Light.ttf') format('truetype');
+    font-weight: 300;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'FiraCode Nerd Font';
+    src: url('/assets/fonts/FiraCodeNerdFontMono-SemiBold.ttf') format('truetype');
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'FiraCode Nerd Font';
+    src: url('/assets/fonts/FiraCodeNerdFontMono-Retina.ttf') format('truetype');
+    font-weight: 450;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'FiraCode Nerd Font';
+    src: url('/assets/fonts/FiraCodeNerdFont-Regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: italic;
+    font-display: swap;
+}
+
+/* =========================================================
+   Verde turquesa + Dark (tema fixo - todas as variantes usam a mesma paleta)
+   ========================================================= */
+:root, [data-theme="light"], [data-theme="dark"] {
+    /* Brand */
+    --primary: #2DD4BF;
+    --primary-hover: #5EE6D8;
+    --ink: #04211C;
+    /* UI surfaces */
+    --secondary-color: #14312C;
+    --background: #0A100F;
+    --container: #0E1615;
+    --text: #DDF6F0;
+    --border: #1D3733;
+    --shadow: 0 2px 4px rgba(0,0,0,0.45);
+    --transition: 0.2s ease;
+    /* Terminal */
+    --terminal-tabs-container: #0A0F0E;
+    --terminal-bg: #0B1211;
+    --terminal-active: rgba(45, 212, 191, 0.92);
+    --terminal-text: #D9F6EF;
+    --terminal-cursor: #2DD4BF;
+    --terminal-selection: rgba(45, 212, 191, 0.35);
+    --terminal-border: rgba(45, 212, 191, 0.16);
+    --btn-default: rgba(45, 212, 191, 0.12);
+    --terminal-font: 'FiraCode Nerd Font', Menlo, Monaco, 'Courier New', monospace;
+    --tooltip-bg: rgba(255, 255, 255, 0.85);
+    --tooltip-text: #333;
+    --accent-color: var(--primary);
+    --input-element-transition: background-color 0.2s ease;
+}
+
+/* Base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: var(--background);
+    color: var(--text);
+    transition: background var(--transition), color var(--transition);
+    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Main content - layout em tela cheia, o terminal manda */
+main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    /* centraliza o form de login; não afeta .container (que tem flex: 1) */
+    justify-content: center;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Container styling - 100% de largura e altura */
+.container {
+    position: relative;
+    background: var(--container);
+    padding: 4px;
+    border-radius: 0;
+    box-shadow: none;
+    width: 100%;
+    max-width: 100%;
+    min-height: 0;
+    flex: 1;
+    height: auto;
+    max-height: none;
+    transition: background var(--transition);
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Banner de demo acima da barra de abas */
+.header-top {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: static;
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--text);
+    border-radius: 8px;
+    transition: var(--input-element-transition);
+    font-size: 1.5rem;
+}
+
+/* Controles do topo (busca) - fixados no fim direito da barra de abas */
+.header-right {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    position: absolute;
+    right: 10px;
+    top: 8px;
+    z-index: 6;
+    gap: 0.25rem;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text);
+    border-radius: 8px;
+    transition: var(--input-element-transition);
+    font-size: 1.5rem;
+}
+
+#terminal {
+    flex: 1;
+    padding: 0.75rem;
+    background: var(--terminal-bg);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 0.5rem;
+    min-height: 0;
+    height: calc(100% - 3rem);
+    max-height: calc(100% - 3rem);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--terminal-border);
+}
+
+.xterm {
+    height: 100%;
+    padding: 0.5rem;
+    font-family: var(--terminal-font) !important;
+    font-feature-settings: "liga" 1, "calt" 1; /* Enable ligatures */
+    padding-right: 15px; /* Match scrollbar width */
+    padding-bottom: 5px;
+    position: relative;
+    top: -5px; /* Move terminal content up */
+}
+
+.xterm-viewport {
+    overflow-y: auto !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.xterm-viewport::-webkit-scrollbar {
+    width: 10px;
+    display: block;
+}
+
+.xterm-viewport::-webkit-scrollbar-track {
+    background: var(--terminal-bg);
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb {
+    background: var(--terminal-border);
+    border-radius: 5px;
+    border: 2px solid var(--terminal-bg);
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Form styling */
+form {
+    position: relative;
+    background: var(--container);
+    padding: 3rem 1.5rem 2rem;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    width: calc(100% - 2rem);
+    max-width: 400px;
+    transition: background var(--transition), box-shadow var(--transition);
+    text-align: center;
+    margin: 1rem auto;
+    transform: translateY(-10%);
+}
+
+/* header-right buttons */
+#themeToggle, #logoutBtn, #search-open {
+    /* position: absolute; */
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.35rem;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: background-color var(--transition);
+}
+
+#themeToggle:hover, #logoutBtn:hover, #search-open:hover {
+    background: rgba(128, 128, 128, 0.1);
+}
+
+#themeToggle svg, #logoutBtn svg, #search-open svg {
+    width: 20px;
+    height: 20px;
+    stroke: var(--text);
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: stroke var(--transition);
+}
+
+[data-theme="light"] .moon {
+    display: block;
+}
+
+[data-theme="light"] .sun {
+    display: none;
+}
+
+[data-theme="dark"] .moon {
+    display: none;
+}
+
+[data-theme="dark"] .sun {
+    display: block;
+}
+
+/* Headings */
+h1 {
+    font-size: 2rem;
+    font-weight: 500;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+    text-align: center;
+}
+
+h2 {
+    font-size: 0.875rem;
+    font-weight: 400;
+    margin-bottom: 2rem;
+    color: var(--text);
+    opacity: 0.7;
+    text-align: center;
+}
+
+/* PIN input styling */
+.pin-input-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+    margin: 2rem 0;
+    padding: 0 0.5rem;
+}
+
+.pin-input-container input.pin-input {
+    width: 44px;
+    height: 44px;
+    text-align: center;
+    font-size: 1.25rem;
+    font-weight: 500;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    background: var(--container);
+    color: var(--text);
+    transition: all var(--transition);
+    -webkit-appearance: none;
+    -moz-appearance: textfield;
+}
+
+.pin-input-container input.pin-input::-webkit-outer-spin-button,
+.pin-input-container input.pin-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.pin-input-container input.pin-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.25);
+}
+
+.pin-input-container input.pin-input.has-value {
+    border-color: var(--primary);
+    background-color: var(--primary);
+    color: var(--ink);
+}
+
+.pin-error {
+    color: #ff4444;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+    text-align: center;
+    display: none;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity var(--transition), transform var(--transition);
+}
+
+.pin-error[aria-hidden="false"] {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* =========================================================
+   Foco total no terminal (tela principal)
+   - sem título, sem rodapé de crédito
+   - sem botão de logout/tema (o app é sempre dark)
+   ========================================================= */
+.page-terminal h1#siteTitle,
+.page-terminal .dumbware-credit,
+#themeToggle,
+#logoutBtn {
+    display: none !important;
+}
+
+/* Credit styling */
+.dumbware-credit {
+    position: fixed;
+    bottom: 14px;
+    width: 100%;
+    text-align: center;
+    font-size: 0.75em;
+    opacity: 0.5;
+    padding: 8px;
+    z-index: 100;
+    pointer-events: none;
+    margin: 0;
+    font-family: 'FiraCode Nerd Font', monospace;
+}
+
+.dumbware-credit a {
+    color: inherit;
+    text-decoration: none;
+    pointer-events: auto;
+}
+
+.dumbware-credit a:hover {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+.version-display {
+    font-size: 0.75rem;
+    opacity: 0.8;
+    color: var(--text);
+}
+
+.version-display.loading::after {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-left: 5px;
+    border: 2px solid var(--text);
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.tooltip {
+    position: absolute;
+    background-color: var(--secondary-color);
+    color: var(--text-color);
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 1000; /* Ensure it's above other elements */
+}
+
+.tooltip.show {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Terminal search styling - abre dentro da barra de abas */
+.terminal-search-container {
+    position: absolute;
+    top: 9px;
+    right: 48px;
+    left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--terminal-tabs-container);
+    padding: 0 0.4rem;
+    border-radius: 6px;
+    border: 1px solid var(--terminal-border);
+    box-shadow: none;
+    z-index: 1000;
+    width: clamp(200px, 35%, 380px);
+    height: 30px;
+}
+
+.terminal-search-container input {
+    background: var(--terminal-bg);
+    color: var(--terminal-text);
+    border: 1px solid var(--terminal-border);
+    border-radius: 4px;
+    padding: 0.15rem 0.4rem;
+    font-family: inherit;
+    font-size: 13px;
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+}
+
+.terminal-search-container input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.search-buttons {
+    display: flex;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.search-buttons button {
+    background: var(--terminal-bg);
+    color: var(--terminal-text);
+    border: 1px solid var(--terminal-border);
+    border-radius: 4px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0;
+}
+
+.search-buttons button:hover {
+    background: var(--terminal-border);
+}
+
+/* Terminal tabs styling */
+.terminal-tabs {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 30px;
+    position: relative;
+    /* Reserva o espaço do botão de busca à direita para as abas não passarem por baixo dele */
+    padding-right: 36px;
+}
+
+/* Show scrollbar only when needed */
+.tab-list::-webkit-scrollbar {
+    height: 6px;
+    display: block;
+}
+
+.tab-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tab-list::-webkit-scrollbar-thumb {
+    background: var(--terminal-border);
+    border-radius: 3px;
+}
+
+.tab-list::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
+}
+
+/* Firefox scrollbar */
+.tab-list {
+    scrollbar-width: thin;
+    scrollbar-color: var(--terminal-border) transparent;
+}
+
+/* Hide scrollbar when not needed (no overflow) */
+.tab-list.no-scroll::-webkit-scrollbar {
+    display: none;
+}
+.tab-list.no-scroll {
+    scrollbar-width: none;
+}
+
+.tab-list {
+    display: flex;
+    align-items: center; /* Ensure tabs are centered vertically */
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 6px; /* Space for scrollbar */
+}
+
+.terminal-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.15rem 0.6rem;
+    background: var(--terminal-bg);
+    color: var(--terminal-text);
+    border: 1px solid var(--terminal-border);
+    border-radius: 6px;
+    cursor: grab;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.1s ease;
+    will-change: transform, opacity;
+    min-width: 90px;
+    max-width: 200px;
+    height: 24px; /* Match the height of the add button */
+    user-select: none;
+    position: relative; /* Added to ensure proper positioning of the tooltip */
+    z-index: 1;
+}
+
+/* Add this to handle text overflow */
+.terminal-tab span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.terminal-tab.active {
+    background: var(--terminal-active);
+    border-color: var(--primary);
+    color: var(--ink);
+}
+
+.terminal-tab:hover:not(.active) {
+    background: var(--terminal-border);
+}
+
+.terminal-tab .close-tab {
+    padding: 2px;
+    margin-left: auto;
+    border-radius: 4px;
+    opacity: 0.7;
+    transition: opacity var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    margin-left: auto;
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.6;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.terminal-tab .close-tab::before,
+.terminal-tab .close-tab::after {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 1.5px;
+    background-color: currentColor;
+    border-radius: 1px;
+    transition: transform var(--transition);
+}
+
+.terminal-tab .close-tab::before {
+    transform: rotate(45deg);
+}
+
+.terminal-tab .close-tab::after {
+    transform: rotate(-45deg);
+}
+
+.terminal-tab .close-tab:hover {
+    opacity: 1;
+}
+
+.terminal-tab .close-tab:hover::before {
+    transform: rotate(45deg) scale(1.2);
+}
+
+.terminal-tab .close-tab:hover::after {
+    transform: rotate(-45deg) scale(1.2);
+}
+
+.terminal-tab.dragging {
+    opacity: 0.7;
+    z-index: 10;
+}
+
+.terminal-tab.drag-over {
+    background-color: var(--tab-hover-bg);
+}
+
+.terminal-tab.just-moved {
+    animation: slideIn 0.25s ease-out forwards;
+}
+
+@keyframes slideIn {
+    0% { transform: translateX(15px); opacity: 0.7; }
+    100% { transform: translateX(0); opacity: 1; }
+}
+
+/* Style for drop indicator */
+.drop-indicator {
+    position: absolute;
+    background: var(--accent);
+    width: 2px;
+    top: 0;
+    bottom: 0;
+    transition: left 0.15s ease;
+    z-index: 5;
+}
+
+.ghost-tab {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.new-tab-button {
+    background: var(--btn-default);
+    color: var(--terminal-text);
+    border: 1px solid var(--terminal-border);
+    border-radius: 6px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    position: relative;
+    bottom: 0;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    margin-right: 6px;
+    transition: all var(--transition);
+    flex-shrink: 0;
+    align-self: center; /* Ensure button is centered vertically */
+}
+
+.new-tab-button:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--ink);
+}
+
+.terminals-container {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    height: calc(100% - 8px); /* Adjust for the margin we added */
+    margin-top: 0;
+    border-radius: 12px; /* Round all corners */
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.terminals-container > div {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--terminal-bg);
+    border-radius: 8px;
+    border: 1px solid var(--terminal-border);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition);
+    padding: 0.4rem;
+    display: flex;
+    flex-direction: column;
+    /* overflow: hidden; */
+}
+
+.terminals-container > div.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.xterm-viewport,
+.xterm-screen,
+.xterm-link-layer {
+    /* overflow: hidden !important; */
+    position: absolute;
+    inset: 0;
+    top: -5px; /* Move these components up to match */
+}
+
+.xterm-link-layer {
+    pointer-events: none;
+}
+
+.xterm-link-layer > div {
+    pointer-events: auto;
+}
+
+/* Tab renaming styles */
+.rename-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: inherit;
+    font-size: inherit;
+    font-family: inherit;
+    width: 100%;
+    max-width: 200px;
+    padding: 0 2px;
+    margin: 0;
+    border-bottom: 1px solid var(--accent-color);
+}
+
+/* Tabs container styling */
+.tabs-container {
+    background: var(--terminal-tabs-container);
+    border-radius: 8px; /* Rounded corners all around */
+    padding: 4px 8px 1px;
+    border: 1px solid var(--terminal-border);
+    margin-bottom: 4px; /* Add space between tabs and terminal */
+    position: relative;
+    z-index: 5;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); /* Slight shadow for depth */
+}
+
+/* Update notification styling */
+.update-notification {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: var(--container);
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    border-left: 4px solid var(--primary);
+    max-width: 300px;
+    animation: slideInNotification 0.3s ease forwards;
+}
+
+.update-notification.error {
+    border-left-color: #ff4444;
+}
+
+.update-notification.error button {
+    background: var(--secondary-color);
+    color: var(--text);
+}
+
+@keyframes slideInNotification {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.update-notification p {
+    margin: 0;
+    font-weight: 500;
+}
+
+.update-notification button {
+    background: var(--primary);
+    color: var(--ink);
+    border: none;
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.update-notification button:hover {
+    background: var(--primary-hover);
+}
+
+.update-notification button:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+
+.update-notification button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.update-notification button.secondary:hover {
+    background: var(--btn-default);
+}
+
+.demo-banner {
+    background: linear-gradient(135deg, #14B8A6 0%, #2DD4BF 100%);
+    color: var(--ink);
+    text-align: center;
+    padding: 0.5rem 1rem;
+    margin: 0 auto 1rem auto;
+    font-weight: 500;
+    font-size: 0.9rem;
+    animation: pulse 2s infinite;
+    box-shadow: 0 2px 8px rgba(45, 212, 191, 0.3);
+    border-radius: 0 0 8px 8px;
+    position: relative;
+    z-index: 5;
+    width: fit-content;
+    max-width: 90%;
+    backdrop-filter: blur(8px);
+    /* border: 1px solid rgba(255, 255, 255, 0.1); */
+}
+
+.demo-banner span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.70; }
+    100% { opacity: 1; }
+}
+
+/* Responsive adjustments */
+@media (max-width: 1000px) {
+    .container {
+        width: calc(100%);
+        max-width: 100%;
+        /* padding: 1.5rem 0.75rem 1rem;
+        margin: 0.5rem auto; */
+    }
+
+    #terminal {
+        padding: 0.5rem;
+        min-height: 250px;
+        margin-top: 0.5rem;
+    }
+
+    #siteTitle {
+        font-size: 1.5rem;
+    }
+
+    .header-right {
+        position: absolute;
+        padding: 0;
+        margin: 0;
+        top: 8px;
+        right: 10px;
+        z-index: 6;
+    }
+
+    .terminal-search-container {
+        top: 9px;
+        right: 48px;
+        left: auto;
+        width: calc(100% - 100px);
+        height: 30px;
+    }
+
+    .terminal-search-container input {
+        width: auto;
+        height: 100%;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .terminal-search-container button {
+        width: 2rem;
+        height: 2rem;
+    }
+
+    .demo-banner {
+        padding: 0.5rem;
+        margin: 0 auto 1rem auto;
+        font-size: 0.8rem;
+    }
+}
+
+/* Responsive adjustments for update notification */
+@media (max-width: 600px) {
+    main {
+        padding: 0;
+    }
+
+    .container {
+        width: 100%;
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+
+    .terminal-search-container {
+        width: calc(100% - 100px);
+        right: 48px;
+    }
+
+    .update-notification {
+        bottom: 1rem;
+        right: 1rem;
+        left: 1rem;
+        max-width: none;
+    }
+}
+
+@media (max-width: 450px) {
+    form {
+        padding: 3rem 0.75rem 1.5rem;
+        width: calc(100% - 1rem);
+        margin: 0.5rem auto;
+    }
+
+    .pin-input-container {
+        gap: 0.4rem;
+        padding: 0;
+    }
+
+    .pin-input-container input.pin-input {
+        width: 36px;
+        height: 36px;
+        font-size: 1rem;
+        border-radius: 8px;
+    }
+
+    h1 {
+        font-size: 1.75rem;
+    }
+
+    #terminal {
+        padding: 0.25rem;
+        min-height: 200px;
+    }
+}
+
+@media (max-width: 320px) {
+    .pin-input-container input.pin-input {
+        width: 32px;
+        height: 32px;
+    }
+}
