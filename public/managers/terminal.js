@@ -28,6 +28,8 @@ async function api(method, path, body) {
     const response = await fetch(joinPath(`api/${path}`), {
         method,
         credentials: 'same-origin',
+        cache: 'no-store', // the tab list must always come from the server
+
         headers: body ? { 'Content-Type': 'application/json' } : undefined,
         body: body ? JSON.stringify(body) : undefined,
     });

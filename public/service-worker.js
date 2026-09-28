@@ -1,5 +1,5 @@
 // Core service worker configuration
-let CACHE_VERSION = "2.1.0"; // Default fallback version
+let CACHE_VERSION = "2.1.1"; // Default fallback version
 let CACHE_NAME = `DUMBTERM_CACHE_V${CACHE_VERSION}`; // Default format, will be overridden
 const ASSETS_TO_CACHE = [];
 const BASE_PATH = self.registration.scope;
@@ -402,7 +402,43 @@ self.addEventListener("activate", event => {
     );
 });
 
+// Dynamic routes must always hit the server. Caching them served a stale session list,
+// so every page load recreated a tab that no longer existed (a new shell each visit).
+const SCOPE_PATH = new URL(self.registration.scope).pathname;
+const NETWORK_ONLY = ['api/', 'login', 'logout', 'auth-mode', 'verify-pin', 'pin-length'];
+
+function isNetworkOnly(request) {
+    if (request.method !== 'GET' || request.cache === 'no-store') return true;
+    const url = new URL(request.url);
+    if (url.origin !== self.location.origin) return true;
+    const path = url.pathname.startsWith(SCOPE_PATH) ? url.pathname.slice(SCOPE_PATH.length) : url.pathname;
+    return NETWORK_ONLY.some(prefix => path.startsWith(prefix));
+}
+
+// config.js carries the deployed version. Served cache-first, the page never learned a
+// new version existed, so updates never started. Network-first, cache only offline.
+function isNetworkFirst(request) {
+    const url = new URL(request.url);
+    return url.origin === self.location.origin && url.pathname === `${SCOPE_PATH}config.js`;
+}
+
 self.addEventListener("fetch", event => {
+    // Not calling respondWith() lets the browser fetch from the network as usual
+    if (isNetworkOnly(event.request)) return;
+    if (isNetworkFirst(event.request)) {
+        event.respondWith(
+            fetch(event.request)
+                .then(response => {
+                    if (response && response.status === 200) {
+                        const copy = response.clone();
+                        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+                    }
+                    return response;
+                })
+                .catch(() => caches.match(event.request))
+        );
+        return;
+    }
     event.respondWith(
         caches.match(event.request)
             .then(cachedResponse => {
