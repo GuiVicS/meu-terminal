@@ -225,7 +225,8 @@ export default class ShortcutBar {
             const [normal, app, final] = NAV[key.nav];
             const mod = (this.modifiers.alt ? 2 : 0) + (this.modifiers.ctrl ? 4 : 0);
             if (mod) data = `\x1b[1;${mod + 1}${final}`; // xterm modifier encoding
-            else data = session.terminal.modes.applicationCursorKeysMode ? app : normal;
+            // Browser tabs have no terminal modes; they translate these sequences into keys
+            else data = session.terminal?.modes.applicationCursorKeysMode ? app : normal;
         } else if (key.char) {
             data = key.char;
             if (this.modifiers.ctrl) data = ctrlChar(data) ?? data;

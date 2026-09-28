@@ -157,6 +157,7 @@ export default class TabBar {
         if (nameEl && nameEl.textContent !== session.name) nameEl.textContent = session.name;
         el.dataset.state = session.state;
         el.dataset.color = session.color;
+        el.classList.toggle('browser', session.kind === 'browser');
         el.classList.toggle('pinned', session.pinned);
         el.classList.toggle('activity', session.hasActivity && session.id !== this.activeId);
         const stateLabel = STATE_LABELS[session.state] || session.state;

@@ -8,7 +8,7 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 const COLUMNS = ['name', 'color', 'pinned', 'position', 'cwd', 'start_cwd', 'status',
-    'pid', 'snapshot', 'updated_at', 'closed_at'];
+    'pid', 'snapshot', 'updated_at', 'closed_at', 'url'];
 
 class SessionStore {
     /** @param {string} file - database file path (directory is created if missing) */
@@ -35,6 +35,10 @@ class SessionStore {
             CREATE INDEX IF NOT EXISTS sessions_status ON sessions(status, position);
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
         `);
+        // Columns added after the first release (databases created by 2.1.x lack them)
+        const existing = new Set(this.db.prepare('PRAGMA table_info(sessions)').all().map(c => c.name));
+        if (!existing.has('kind')) this.db.exec(`ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'terminal'`);
+        if (!existing.has('url')) this.db.exec('ALTER TABLE sessions ADD COLUMN url TEXT');
     }
 
     listOpen() {
@@ -42,7 +46,7 @@ class SessionStore {
     }
 
     listClosed(limit = 8) {
-        return this.db.prepare(`SELECT id, name, color, cwd, start_cwd, closed_at FROM sessions
+        return this.db.prepare(`SELECT id, name, color, cwd, start_cwd, closed_at, kind, url FROM sessions
             WHERE status = 'closed' ORDER BY closed_at DESC LIMIT ?`).all(limit);
     }
 
@@ -53,9 +57,9 @@ class SessionStore {
     insert(row) {
         const now = Date.now();
         this.db.prepare(`INSERT INTO sessions (id, name, color, pinned, position, cwd, start_cwd,
-            status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`)
+            status, created_at, updated_at, kind, url) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`)
             .run(row.id, row.name, row.color, row.pinned ? 1 : 0, row.position,
-                row.cwd || null, row.start_cwd || null, now, now);
+                row.cwd || null, row.start_cwd || null, now, now, row.kind || 'terminal', row.url || null);
         return this.get(row.id);
     }
 

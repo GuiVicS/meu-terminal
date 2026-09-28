@@ -14,6 +14,7 @@ const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('
 const SessionStore = require('./scripts/session-store');
 const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
+const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
 
 const app = express();
 const server = http.createServer(app);
@@ -286,6 +287,7 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         isPinRequired: isAuthRequired, // kept name: "a login is required" (shows logout)
         authMode: AUTH_MODE,
         isDemoMode: DEMO_MODE,
+        browserAvailable: browsers.available, // Chromium installed: browser tabs enabled
         version: APP_VERSION,
         cacheName: CACHE_NAME
     }
@@ -480,13 +482,35 @@ const sessions = new SessionManager({
     log: debugLog,
 });
 
+// Browser tabs: pages of one headless Chromium on this server (images streamed to the tab)
+const browsers = new BrowserManager({
+    // Cookies/logins of the pages live next to the database (same volume)
+    profileDir: path.join(path.dirname(DB_PATH), 'chromium-profile'),
+    onUrlChange: (id, url) => {
+        sessionStore.update(id, { url });
+        sessions.changed(); // other devices update the tab's subtitle
+    },
+    hiddenPorts: [Number(PORT)],
+    log: (...args) => console.log('[navegador]', ...args),
+});
+
 app.get(BASE_PATH + '/api/sessions', (req, res) => {
     res.json(sessions.list());
 });
 
 app.post(BASE_PATH + '/api/sessions', (req, res) => {
-    const { name, cwd, color, afterId, reopenId } = req.body || {};
-    res.status(201).json(sessions.create({ name, cwd, color, afterId, reopenId }));
+    const { name, cwd, color, afterId, reopenId, kind, url } = req.body || {};
+    if (kind === 'browser' && !browsers.available) {
+        return res.status(503).json({ error: 'Chromium não está instalado no servidor.' });
+    }
+    // "localhost:5173" -> "http://localhost:5173" (same rules as the address bar)
+    const pageUrl = kind === 'browser' && url ? normalizeUrl(url) : url;
+    res.status(201).json(sessions.create({ name, cwd, color, afterId, reopenId, kind, url: pageUrl }));
+});
+
+// Ports listening on the server ("localhost:5173 detectado" in the new tab page)
+app.get(BASE_PATH + '/api/ports', async (req, res) => {
+    res.json(await listPorts([Number(PORT)]));
 });
 
 // Declared before "/:id" so "order" isn't taken for an id
@@ -501,8 +525,10 @@ app.patch(BASE_PATH + '/api/sessions/:id', (req, res) => {
     res.json(updated);
 });
 
-// Closing a tab: the only action that kills its shell
+// Closing a tab: the only action that kills its shell (or closes its browser page)
 app.delete(BASE_PATH + '/api/sessions/:id', (req, res) => {
+    const row = sessionStore.get(req.params.id);
+    if (row && row.kind === 'browser') browsers.closePage(row.id);
     if (!sessions.close(req.params.id)) return res.status(404).json({ error: 'Session not found' });
     res.json({ success: true });
 });
@@ -609,7 +635,21 @@ wss.on('connection', (ws, req) => {
     const connect = () => {
         const params = new URL(req.url, 'http://localhost').searchParams;
         const sessionId = params.get('session');
-        if (sessionId) {
+        const row = sessionId ? sessionStore.get(sessionId) : null;
+        if (row && row.status === 'open' && row.kind === 'browser') {
+            debugLog('Attaching to browser tab', sessionId);
+            // Also receives "tab list changed" notices, like terminal tabs
+            sessions.sockets.add(ws);
+            ws.on('close', () => sessions.sockets.delete(ws));
+            browsers.attach(ws, row, {
+                width: params.get('width'),
+                height: params.get('height'),
+                dpr: params.get('dpr'),
+                mobile: params.get('mobile') === '1',
+                quality: params.get('quality'),
+                visible: params.get('visible') !== '0',
+            });
+        } else if (sessionId) {
             debugLog('Attaching to session', sessionId);
             sessions.attach(ws, sessionId, { cols: params.get('cols'), rows: params.get('rows') });
         } else {
@@ -784,6 +824,7 @@ function shutdown() {
     } catch (e) {
         console.error('Failed to save sessions on shutdown:', e);
     }
+    browsers.shutdown();
     wss.close();
     process.exit(0);
 }

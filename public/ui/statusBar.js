@@ -72,6 +72,7 @@ export default class StatusBar {
         this.setText('.status-branch', session.branch || '');
         this.setText('.status-process', session.process || '');
         const t = session.terminal;
-        this.q('.status-size').textContent = t ? `${t.cols}×${t.rows}` : '';
+        // Terminal: columns×rows. Browser tab: page size in CSS pixels.
+        this.q('.status-size').textContent = t ? `${t.cols}×${t.rows}` : (session.sizeLabel || '');
     }
 }

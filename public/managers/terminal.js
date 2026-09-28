@@ -6,6 +6,7 @@
  */
 import StorageManager from './storage.js';
 import TerminalSession, { STATE } from './session.js';
+import BrowserSession from './browserSession.js';
 import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
@@ -118,7 +119,8 @@ export default class TerminalManager {
     /** Creates a tab view for a server session (no request). Idempotent. */
     addSession(row, { index, activate = false } = {}) {
         if (this.sessions.has(row.id)) return this.sessions.get(row.id);
-        const session = new TerminalSession({ row, settings: this.settings, hooks: this.hooks });
+        const Kind = row.kind === 'browser' ? BrowserSession : TerminalSession;
+        const session = new Kind({ row, settings: this.settings, hooks: this.hooks });
 
         const at = index ?? this.sessions.size;
         const entries = Array.from(this.sessions.entries());
@@ -136,14 +138,16 @@ export default class TerminalManager {
      * Creates a new session on the server and opens its tab.
      * @param {{name?: string, cwd?: string, color?: string, afterId?: string, reopenId?: string}} opts
      */
-    async create({ name, cwd, color, afterId, reopenId } = {}) {
+    async create({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
         try {
             const row = await api('POST', 'sessions', {
                 name,
-                cwd: cwd || this.settings.get('defaultCwd') || undefined,
+                cwd: kind === 'browser' ? undefined : (cwd || this.settings.get('defaultCwd') || undefined),
                 color,
                 afterId,
                 reopenId,
+                kind,
+                url,
             });
             const index = afterId && this.sessions.has(afterId) ? this.order.indexOf(afterId) + 1 : undefined;
             this.addSession(row, { index });
@@ -230,6 +234,10 @@ export default class TerminalManager {
     duplicate(id) {
         const s = this.sessions.get(id);
         if (!s) return;
+        if (s.kind === 'browser') {
+            this.create({ kind: 'browser', name: s.name, url: s.url, afterId: id });
+            return;
+        }
         // A duplicate is a new shell in the same directory - processes can't be cloned
         this.create({ name: s.name, cwd: s.cwd || s.startCwd, afterId: id });
     }
@@ -334,11 +342,21 @@ export default class TerminalManager {
         if (refocus) this.focusActive();
     }
 
-    createFromPage({ name, cwd, fromRecent }) {
+    createFromPage({ name, cwd, fromRecent, kind, url }) {
         const recent = fromRecent !== undefined ? this.recents[fromRecent] : null;
         this.closeNewSessionPage(false);
         if (recent) this.create({ reopenId: recent.id });
+        else if (kind === 'browser') this.create({ kind, name, url });
         else this.create({ name, cwd });
+    }
+
+    /** New browser tab (optionally already at a URL, e.g. "localhost:5173"). */
+    createBrowser(url) {
+        if (!window.appConfig?.browserAvailable) {
+            toast('Abas de navegador precisam do Chromium instalado no servidor.', { tone: 'error' });
+            return;
+        }
+        this.create({ kind: 'browser', url });
     }
 
     async forgetRecent(index) {
@@ -377,7 +395,8 @@ export default class TerminalManager {
         const k = this.shortcutLabels();
         showMenu([
             { label: 'Nova sessão', icon: 'plus', hint: k.newTab, run: () => this.create() },
-            { label: 'Duplicar sessão', icon: 'copy', run: () => this.duplicate(id) },
+            { label: 'Nova aba de navegador', icon: 'globe', hint: `${k.mod}+B`, run: () => this.createBrowser() },
+            { label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) },
             { label: 'Renomear', icon: 'edit', hint: k.rename, run: () => this.tabBar.startRename(id) },
             { label: s.pinned ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(id) },
             'separator',
@@ -440,6 +459,7 @@ export default class TerminalManager {
         if (mod) {
             if (key === 't' && e.shiftKey) return 'reopen';
             if (key === 't') return 'new';
+            if (key === 'b') return 'newBrowser';
             if (key === 'n') return 'newPage';
             if (key === 'w') return 'close';
             if (key === 'r') return 'rename';
@@ -474,13 +494,17 @@ export default class TerminalManager {
         if (action.startsWith('select')) return this.selectIndex(Number(action.slice(6)));
         switch (action) {
             case 'new': return this.create();
+            case 'newBrowser': return this.createBrowser();
             case 'newPage': return this.openNewSessionPage();
             case 'reopen': return this.restoreLastClosed();
             case 'close': return this.activeId !== null && this.close(this.activeId);
             case 'rename': return this.activeId !== null && this.tabBar.startRename(this.activeId);
             case 'next': return this.cycle(1);
             case 'prev': return this.cycle(-1);
-            case 'search': return this.search.open();
+            case 'search':
+                // Browser tabs are images of a page: there's no text here to search
+                if (this.active?.kind === 'browser') return this.active.focus();
+                return this.search.open();
             default: return this.events.onAction(action); // fullscreen, settings: handled by the shell
         }
     }
@@ -500,6 +524,7 @@ export default class TerminalManager {
         const c = this.isMacOS ? '⌘' : 'Ctrl';
         return [
             { keys: `${m}+T`, label: 'Nova sessão' },
+            { keys: `${m}+B`, label: 'Nova aba de navegador' },
             { keys: `${m}+N`, label: 'Nova sessão com opções' },
             { keys: `${m}+Shift+T`, label: 'Reabrir sessão fechada' },
             { keys: `${m}+W`, label: 'Fechar sessão (encerra o processo)' },
