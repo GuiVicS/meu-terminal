@@ -1,17 +1,9 @@
+/**
+ * login.js
+ * Login page: email + password (AUTH_EMAIL/AUTH_PASSWORD) or the legacy PIN,
+ * depending on what the server reports at /auth-mode.
+ */
 document.addEventListener('DOMContentLoaded', () => {
-    // Theme toggle functionality
-    function initThemeToggle() {
-        const themeToggle = document.getElementById('themeToggle');
-
-        themeToggle.addEventListener('click', () => {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-            
-            document.documentElement.setAttribute('data-theme', newTheme);
-            localStorage.setItem('theme', newTheme);
-        });
-    }
-    
     // Helper function to join paths with base path
     function joinPath(path) {
         const basePath = window.appConfig?.basePath || '';
@@ -139,9 +131,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             } else {
                 // Handle invalid PIN
-                const message = data.attemptsLeft > 0 
-                    ? `Incorrect PIN. ${data.attemptsLeft} attempts remaining.` 
-                    : 'Incorrect PIN. Last attempt before lockout.';
+                const message = data.attemptsLeft > 0
+                    ? `PIN incorreto. ${data.attemptsLeft} tentativa(s) restante(s).`
+                    : 'PIN incorreto. Última tentativa antes do bloqueio.';
                 
                 errorElement.textContent = message;
                 errorElement.setAttribute('aria-hidden', 'false');
@@ -154,22 +146,92 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .catch(error => {
             console.error('Error:', error);
-            errorElement.textContent = 'An error occurred. Please try again.';
+            errorElement.textContent = 'Ocorreu um erro. Tente novamente.';
             errorElement.setAttribute('aria-hidden', 'false');
         });
     }
-    
+
+    // Email + password login
+    function setupEmailForm() {
+        const form = document.getElementById('emailForm');
+        const errorEl = document.getElementById('loginError');
+        const button = form.querySelector('button[type="submit"]');
+        form.hidden = false;
+        form.email.focus();
+
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const email = form.email.value.trim();
+            const password = form.password.value;
+            if (!email || !password) {
+                errorEl.textContent = 'Informe email e senha.';
+                return;
+            }
+
+            errorEl.textContent = '';
+            button.disabled = true;
+            button.textContent = 'Entrando…';
+            try {
+                const response = await fetch(joinPath('login'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password }),
+                    credentials: 'same-origin',
+                });
+                const data = await response.json().catch(() => ({}));
+
+                if (response.ok && data.success) {
+                    window.location.replace(data.redirect || './');
+                    return;
+                }
+                if (response.status === 429) {
+                    errorEl.textContent = data.error;
+                    form.querySelectorAll('input').forEach(input => { input.disabled = true; });
+                    return;
+                }
+                errorEl.textContent = data.attemptsLeft > 0
+                    ? `${data.error} ${data.attemptsLeft} tentativa(s) restante(s).`
+                    : (data.error || 'Não foi possível entrar.');
+                form.password.value = '';
+                form.password.focus();
+            } catch (error) {
+                console.error('Login error:', error);
+                errorEl.textContent = 'Ocorreu um erro. Tente novamente.';
+            } finally {
+                if (!form.password.disabled) {
+                    button.disabled = false;
+                    button.textContent = 'Entrar';
+                }
+            }
+        });
+    }
+
     async function initialize() {
         // Set site title
-        const siteTitle = window.appConfig?.siteTitle || 'DumbTerm';
+        const siteTitle = window.appConfig?.siteTitle || 'MeuTerminal';
         document.getElementById('pageTitle').textContent = siteTitle;
         document.getElementById('siteTitle').textContent = siteTitle;
         // Show demo banner if in demo mode
         if (window.appConfig?.isDemoMode) {
-            document.getElementById('demo-banner').style.display = 'block';
+            document.getElementById('demo-banner').hidden = false;
         }
-        initThemeToggle();
-        setupPinInputs();
+
+        let mode = window.appConfig?.authMode;
+        if (!mode) {
+            try {
+                mode = (await (await fetch(joinPath('auth-mode'))).json()).mode;
+            } catch {
+                mode = 'pin';
+            }
+        }
+
+        if (mode === 'email') {
+            setupEmailForm();
+        } else {
+            document.getElementById('loginSubtitle').textContent = 'Digite seu PIN';
+            document.getElementById('pinForm').hidden = false;
+            setupPinInputs();
+        }
     }
     
     initialize();

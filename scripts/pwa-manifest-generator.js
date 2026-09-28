@@ -38,24 +38,34 @@ function generatePWAManifest(siteTitle) {
   const pwaManifest = {
     name: siteTitle,
     short_name: siteTitle,
-    description: "A stupidly simple web-based terminal emulator",
+    description: "Navegador de sessões de terminal",
+    lang: "pt-BR",
     start_url: BASE_PATH || "/",
     scope: BASE_PATH || "/",
     display: "standalone",
-    background_color: "#0A0A0B",
-    theme_color: "#0A0A0B",
+    display_override: ["standalone", "minimal-ui"],
+    background_color: "#121212",
+    theme_color: "#121212",
+    // Artwork is opaque and inside the maskable safe zone, so every icon is "any maskable".
+    // PNGs cover platforms that ignore SVG manifest icons.
     icons: [
       {
         src: `${BASE_PATH}/assets/terminal-icon.svg`,
         type: "image/svg+xml",
         sizes: "any",
-        purpose: "any"
+        purpose: "any maskable"
       },
       {
-        src: `${BASE_PATH}/assets/terminal-icon.svg`,
-        type: "image/svg+xml",
-        sizes: "any",
-        purpose: "maskable"
+        src: `${BASE_PATH}/assets/icon-192.png`,
+        type: "image/png",
+        sizes: "192x192",
+        purpose: "any maskable"
+      },
+      {
+        src: `${BASE_PATH}/assets/icon-512.png`,
+        type: "image/png",
+        sizes: "512x512",
+        purpose: "any maskable"
       }
     ],
     orientation: "any"

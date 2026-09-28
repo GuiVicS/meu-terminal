@@ -13,8 +13,11 @@ services:
       # Container timezone
       TZ: ${DUMBTERM_TZ:-America/Los_Angeles}
       # The title shown in the web interface
-      SITE_TITLE: ${DUMBTERM_SITE_TITLE:-DumbTerm}
-      # Optional PIN protection (leave empty to disable)
+      SITE_TITLE: ${DUMBTERM_SITE_TITLE:-MeuTerminal}
+      # Email + password login (when both are set they replace the PIN)
+      AUTH_EMAIL: ${AUTH_EMAIL:-}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
+      # Optional PIN protection (leave empty to disable; ignored when email login is set)
       DUMBTERM_PIN: ${DUMBTERM_PIN:-1234}
       # The base URL for the application
       BASE_URL: ${DUMBTERM_BASE_URL:-http://localhost:3000} # Use ALLOWED_ORIGINS below to restrict cors to specific origins
