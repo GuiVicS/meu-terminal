@@ -15,6 +15,7 @@ async function request(method, path, body) {
     const response = await fetch(joinPath(`api/${path}`), {
         method,
         credentials: 'same-origin',
+        cache: 'no-store',
         headers: body ? { 'Content-Type': 'application/json' } : undefined,
         body: body ? JSON.stringify(body) : undefined,
     });

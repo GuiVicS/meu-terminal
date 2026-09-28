@@ -255,6 +255,9 @@ app.use(BASE_PATH, (req, res, next) => {
         '/styles.css',
         '/manifest.json',
         '/asset-manifest.json',
+        // The browser fetches the worker script on its own to check for updates; if that
+        // hits the login redirect the update fails silently and the PWA stays on old code.
+        '/service-worker.js',
     ];
 
     // Check if the current path matches any of the public paths
