@@ -11,6 +11,9 @@ const os = require('os');
 const fs = require('fs');
 const { generatePWAManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
+const SessionStore = require('./scripts/session-store');
+const SessionManager = require('./scripts/session-manager');
+const CommandStore = require('./scripts/command-store');
 
 const app = express();
 const server = http.createServer(app);
@@ -28,6 +31,10 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const ptyModule = DEMO_MODE ? require('./scripts/demo/terminal') : require('node-pty');
 const ASSETS_DIR = path.join(PUBLIC_DIR, 'assets');
 const CACHE_NAME = `DUMBTERM_CACHE_V${APP_VERSION}`;
+// SQLite file with the sessions (tabs). Mount its folder as a volume to keep it across deploys.
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'meuterminal.db');
+const SHELL = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash');
+const HOME_DIR = DEMO_MODE ? '/home/demo' : (process.env.HOME || os.homedir());
 
 generatePWAManifest(SITE_TITLE);
 
@@ -458,6 +465,75 @@ app.get(BASE_PATH + '/api/require-pin', (req, res) => {
     return res.json({ success: hasValidAuthCookie(req.cookies), required: true, mode: AUTH_MODE });
 });
 
+// ---------- Terminal sessions (tabs) stored on the server ----------
+// All /api routes sit behind the global auth + origin middleware above.
+const sessionStore = new SessionStore(DB_PATH);
+const sessions = new SessionManager({
+    store: sessionStore,
+    spawnShell,
+    shellInfo,
+    getProcessInfo,
+    defaultCwd: HOME_DIR,
+    log: debugLog,
+});
+
+app.get(BASE_PATH + '/api/sessions', (req, res) => {
+    res.json(sessions.list());
+});
+
+app.post(BASE_PATH + '/api/sessions', (req, res) => {
+    const { name, cwd, color, afterId, reopenId } = req.body || {};
+    res.status(201).json(sessions.create({ name, cwd, color, afterId, reopenId }));
+});
+
+// Declared before "/:id" so "order" isn't taken for an id
+app.put(BASE_PATH + '/api/sessions/order', (req, res) => {
+    sessions.setOrder((req.body || {}).ids);
+    res.json({ success: true });
+});
+
+app.patch(BASE_PATH + '/api/sessions/:id', (req, res) => {
+    const updated = sessions.update(req.params.id, req.body || {});
+    if (!updated) return res.status(404).json({ error: 'Session not found' });
+    res.json(updated);
+});
+
+// Closing a tab: the only action that kills its shell
+app.delete(BASE_PATH + '/api/sessions/:id', (req, res) => {
+    if (!sessions.close(req.params.id)) return res.status(404).json({ error: 'Session not found' });
+    res.json({ success: true });
+});
+
+// Removes a closed session from "recent"
+app.delete(BASE_PATH + '/api/recent/:id', (req, res) => {
+    sessions.forget(req.params.id);
+    res.json({ success: true });
+});
+
+// ---------- Quick commands (managed in Settings, used from the shortcut bar) ----------
+const commands = new CommandStore(sessionStore.db);
+
+app.get(BASE_PATH + '/api/commands', (req, res) => {
+    res.json(commands.list());
+});
+
+app.post(BASE_PATH + '/api/commands', (req, res) => {
+    const created = commands.create(req.body || {});
+    if (!created) return res.status(400).json({ error: 'Informe o comando.' });
+    res.status(201).json(created);
+});
+
+app.patch(BASE_PATH + '/api/commands/:id', (req, res) => {
+    const updated = commands.update(req.params.id, req.body || {});
+    if (!updated) return res.status(404).json({ error: 'Command not found or empty' });
+    res.json(updated);
+});
+
+app.delete(BASE_PATH + '/api/commands/:id', (req, res) => {
+    if (!commands.remove(req.params.id)) return res.status(404).json({ error: 'Command not found' });
+    res.json({ success: true });
+});
+
 // Logout endpoint
 app.post(BASE_PATH + '/logout', (req, res) => {
     debugLog('Logout request received');
@@ -525,10 +601,23 @@ wss.on('connection', (ws, req) => {
     // Optional starting directory requested by the client (?cwd=...)
     const requestedCwd = getRequestedCwd(req);
 
+    // ?session=<id>: attach to a persistent server-side session (current client).
+    // Without it: legacy one-shot terminal, kept for pages still cached by old versions.
+    const connect = () => {
+        const params = new URL(req.url, 'http://localhost').searchParams;
+        const sessionId = params.get('session');
+        if (sessionId) {
+            debugLog('Attaching to session', sessionId);
+            sessions.attach(ws, sessionId, { cols: params.get('cols'), rows: params.get('rows') });
+        } else {
+            createTerminal(ws, requestedCwd);
+        }
+    };
+
     // No login configured: allow the connection
     if (!isAuthRequired) {
-        debugLog('No login required, creating terminal');
-        createTerminal(ws, requestedCwd);
+        debugLog('No login required, connecting');
+        connect();
         return;
     }
 
@@ -558,9 +647,40 @@ wss.on('connection', (ws, req) => {
         return;
     }
 
-    debugLog('Authentication successful, creating terminal');
-    createTerminal(ws, requestedCwd);
+    debugLog('Authentication successful, connecting');
+    connect();
 });
+
+/** Spawns a shell process (real PTY, or the simulated one in demo mode). */
+function spawnShell({ cwd, cols = 80, rows = 24 }) {
+    return ptyModule.spawn(SHELL, [], {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd: DEMO_MODE ? '/home/demo' : cwd,
+        env: {
+            ...process.env,
+            TERM: 'xterm-256color',
+            COLORTERM: 'truecolor',
+            LANG: 'en_US.UTF-8',
+            // Force buffer flushing for better alternate buffer handling
+            STDBUF: 'L',
+            // Ensure proper handling of alternate buffer in applications
+            TERM_PROGRAM: 'xterm-256color'
+        }
+    });
+}
+
+/** Static facts about a shell, shown in the status bar. */
+function shellInfo(pty, cwd) {
+    return {
+        shell: DEMO_MODE ? 'demo' : path.basename(SHELL).replace(/\.exe$/i, ''),
+        pid: pty.pid,
+        cwd: DEMO_MODE ? '/home/demo' : cwd,
+        home: HOME_DIR,
+        platform: DEMO_MODE ? 'demo' : os.platform()
+    };
+}
 
 /**
  * Reads the optional ?cwd= query parameter from the WebSocket upgrade request.
@@ -653,46 +773,29 @@ const heartbeatInterval = setInterval(() => {
     });
 }, 15000); // Check every 15 seconds
 
-// Clean up interval on server shutdown
-process.on('SIGTERM', () => {
+// Graceful shutdown: save every session's screen so tabs come back after a deploy
+function shutdown() {
     clearInterval(heartbeatInterval);
+    try {
+        sessions.persistAll();
+    } catch (e) {
+        console.error('Failed to save sessions on shutdown:', e);
+    }
     wss.close();
-});
+    process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
-// Terminal creation helper function
+// Legacy one-shot terminal (no ?session=): killed when its socket closes, as before
 function createTerminal(ws, requestedCwd = null) {
-    // Create terminal process
-    const shell = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash');
-    const cwd = DEMO_MODE ? '/home/demo' : (requestedCwd || process.env.HOME || '/root');
-
-    const term = ptyModule.spawn(shell, [], {
-        name: 'xterm-256color',
-        cols: 80,
-        rows: 24,
-        cwd,
-        env: {
-            ...process.env,
-            TERM: 'xterm-256color',
-            COLORTERM: 'truecolor',
-            LANG: 'en_US.UTF-8',
-            // Force buffer flushing for better alternate buffer handling
-            STDBUF: 'L',
-            // Ensure proper handling of alternate buffer in applications
-            TERM_PROGRAM: 'xterm-256color'
-        }
-    });
+    const cwd = DEMO_MODE ? '/home/demo' : (requestedCwd || HOME_DIR);
+    const term = spawnShell({ cwd });
 
     debugLog(`Terminal created with PID: ${term.pid}${DEMO_MODE ? ' (Demo Mode)' : ''}`);
 
     // Tell the client which shell it got (shown in the status bar)
-    ws.send(JSON.stringify({
-        type: 'info',
-        shell: DEMO_MODE ? 'demo' : path.basename(shell).replace(/\.exe$/i, ''),
-        pid: term.pid,
-        cwd,
-        home: DEMO_MODE ? '/home/demo' : (process.env.HOME || os.homedir()),
-        platform: DEMO_MODE ? 'demo' : os.platform()
-    }));
+    ws.send(JSON.stringify({ type: 'info', ...shellInfo(term, cwd) }));
 
     // Handle incoming data from client
     ws.on('message', (data) => {

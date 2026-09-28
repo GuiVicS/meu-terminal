@@ -45,6 +45,12 @@ const PATHS = {
         + '<path d="M5 12h0"/><path d="M5 18h0"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
     activity: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
+    bolt: '<path d="M13 3L4 14h7l-1 7 9-11h-7l1-7z"/>',
+    clipboard: '<rect x="8" y="3" width="8" height="4" rx="1"/>'
+        + '<path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/>'
+        + '<path d="M9 12h6"/><path d="M9 16h4"/>',
+    trash: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/>'
+        + '<path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>',
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/>'
         + '<path d="M12 18v3"/><path d="M8 21h8"/>',
 };

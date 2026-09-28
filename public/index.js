@@ -7,6 +7,10 @@ import TerminalManager from './managers/terminal.js';
 import ServiceWorkerManager from './managers/serviceWorker.js';
 import SettingsManager from './managers/settings.js';
 import StorageManager from './managers/storage.js';
+import CommandsManager from './managers/commands.js';
+import ClipboardHistory from './managers/clipboard.js';
+import { openPopover } from './ui/listPopover.js';
+import { relativeTime } from './ui/newSession.js';
 import ViewportManager from './ui/viewport.js';
 import StatusBar from './ui/statusBar.js';
 import ShortcutBar from './ui/shortcutBar.js';
@@ -66,10 +70,98 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await waitForFonts();
 
-    // ---------- mobile shortcut bar ----------
+    // ---------- quick commands & clipboard ----------
     let workspace;
+    let settingsDialog;
+    const commands = new CommandsManager();
+    commands.load().catch(e => console.warn('Could not load quick commands:', e));
+    const clipboard = new ClipboardHistory();
+
+    /** Types a quick command into the active terminal (Enter only if it's set to run). */
+    const runCommand = item => {
+        const session = workspace?.active;
+        if (!session) return;
+        // Multi-line commands: each line is a line of shell input
+        const text = item.command.replace(/\r?\n/g, '\r');
+        session.sendInput(item.run ? text + '\r' : text);
+    };
+
+    const openCommands = async anchor => {
+        try {
+            await commands.load(); // may have been edited on another device
+        } catch { /* show the cached list */ }
+        openPopover({
+            title: 'Comandos rápidos',
+            anchor,
+            empty: 'Nenhum comando ainda. Cadastre em Configurações.',
+            items: commands.items.map(item => ({
+                primary: item.label,
+                secondary: item.command.split('\n')[0],
+                badge: item.run ? 'Enter' : '',
+                onSelect: () => runCommand(item),
+            })),
+            actions: [{ label: 'Gerenciar comandos', onClick: () => settingsDialog.open() }],
+        });
+    };
+
+    const pasteText = text => {
+        const session = workspace?.active;
+        if (!session || !text) return;
+        // xterm's paste() applies the terminal's paste rules (e.g. line endings)
+        session.terminal.paste(text);
+    };
+
+    /** Pastes what is currently copied on the device. */
+    const pasteFromDevice = async () => {
+        const status = await clipboard.captureDeviceClipboard();
+        if (status === 'ok') pasteText(clipboard.items[0].text);
+        else if (status === 'empty') toast('A área de transferência está vazia.');
+        else if (status === 'denied') toast('Permita o acesso à área de transferência para colar.', { tone: 'error' });
+        else toast('Colar por botão exige HTTPS. Use colar do teclado ou segure o botão para o histórico.', {
+            tone: 'error', duration: 6000,
+        });
+    };
+
+    const openClipboardHistory = anchor => {
+        openPopover({
+            title: 'Copiados recentemente',
+            note: 'Fica só neste aparelho. Toque para colar.',
+            anchor,
+            empty: 'Nada copiado ainda. O que você copiar no terminal ou colar pelo botão aparece aqui.',
+            items: clipboard.items.map(entry => {
+                const lines = entry.text.split('\n').length;
+                const firstLine = entry.text.split('\n')[0];
+                return {
+                    primary: firstLine.length > 80 ? firstLine.slice(0, 80) + '…' : firstLine,
+                    secondary: relativeTime(entry.at),
+                    badge: lines > 1 ? `${lines} linhas` : '',
+                    onSelect: () => pasteText(entry.text),
+                    onRemove: () => clipboard.remove(entry.text),
+                    removeLabel: 'Remover do histórico',
+                };
+            }),
+            actions: [
+                { label: 'Colar do aparelho', onClick: pasteFromDevice },
+                { label: 'Limpar histórico', tone: 'danger', onClick: () => clipboard.clear() },
+            ],
+        });
+    };
+
+    // Everything copied inside the app goes to the history
+    document.addEventListener('copy', () => {
+        const term = workspace?.active?.terminal;
+        const text = term?.hasSelection() ? term.getSelection() : String(window.getSelection() || '');
+        clipboard.add(text);
+    });
+
+    // ---------- mobile shortcut bar ----------
     const shortcutBar = new ShortcutBar(document.getElementById('shortcutBar'), {
         getSession: () => workspace?.active,
+        onAction: (name, button) => {
+            if (name === 'commands') openCommands(button);
+            else if (name === 'paste') pasteFromDevice();
+            else if (name === 'clipboard-history') openClipboardHistory(button);
+        },
     });
     let terminalFocused = false;
     let blurTimer;
@@ -142,7 +234,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncExpanded();
 
     // ---------- dialogs ----------
-    const settingsDialog = createSettingsDialog(settings, () => workspace?.active);
+    settingsDialog = createSettingsDialog(settings, () => workspace?.active, commands);
 
     // ---------- workspace ----------
     workspace = new TerminalManager({
@@ -167,6 +259,28 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             },
             transformInput: data => shortcutBar.transform(data),
+            // Two-finger tap on the terminal (when the program doesn't use the mouse)
+            onTerminalMenu: (session, x, y) => {
+                const term = session.terminal;
+                // Popups anchor to a visible button: the bar's paste key, or the ⋮ menu
+                const anchor = () => {
+                    const key = document.querySelector('#shortcutBar:not([hidden]) [data-key="clip"]');
+                    return key || menuBtn;
+                };
+                showMenu([
+                    { label: 'Colar', icon: 'clipboard', run: pasteFromDevice },
+                    { label: 'Copiar tudo', icon: 'copy', run: async () => {
+                        term.selectAll();
+                        const text = term.getSelection();
+                        term.clearSelection();
+                        const ok = await clipboard.copy(text);
+                        toast(ok ? 'Conteúdo do terminal copiado.' : 'Salvo em "Copiados recentemente".');
+                    } },
+                    'separator',
+                    { label: 'Comandos rápidos', icon: 'bolt', run: () => openCommands(anchor()) },
+                    { label: 'Copiados recentemente', icon: 'history', run: () => openClipboardHistory(anchor()) },
+                ], { x, y, label: 'Terminal' });
+            },
             onAction: action => {
                 if (action === 'fullscreen') toggleFullscreen();
                 else if (action === 'settings') settingsDialog.open();
@@ -185,7 +299,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ---------- overflow menu ----------
     const logout = () => {
-        workspace.saveNow();
         fetch(joinPath('logout'), { method: 'POST', credentials: 'same-origin' })
             .then(response => response.json())
             .then(data => {
@@ -208,6 +321,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 run: () => workspace.restoreLastClosed() },
             'separator',
             { label: 'Buscar no terminal', icon: 'search', hint: `${c}+F`, run: () => workspace.search.open() },
+            { label: 'Comandos rápidos', icon: 'bolt', run: () => openCommands(menuBtn) },
+            { label: 'Copiados recentemente', icon: 'clipboard', run: () => openClipboardHistory(menuBtn) },
             { label: 'Modo foco', icon: 'focus', checked: focusMode, run: () => setFocusMode(!focusMode) },
             { label: dark ? 'Tema claro' : 'Tema escuro', icon: dark ? 'sun' : 'moon',
                 run: () => settings.set('theme', dark ? 'light' : 'dark') },

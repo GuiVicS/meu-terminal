@@ -1,7 +1,8 @@
 /**
  * session.js
- * One terminal session = one xterm.js instance + one WebSocket + one server-side shell.
- * Owns the connection state machine and cleans up every listener it creates on dispose().
+ * One tab = one xterm.js view attached (over WebSocket) to a persistent server-side session.
+ * The shell lives on the server: closing the page only detaches; on reconnect the server
+ * sends the current screen. Cleans up every listener it creates on dispose().
  */
 import { attachTouchScroll } from '../ui/touchScroll.js';
 
@@ -15,9 +16,9 @@ export const STATE = {
     ERROR: 'error',
 };
 
-const MAX_RECONNECT_ATTEMPTS = 5;
+const MAX_RECONNECT_ATTEMPTS = 6;
 const BASE_RECONNECT_DELAY = 1000;
-const SERIALIZE_LINES = 1000; // keeps localStorage small even with many tabs
+const CLOSE_SESSION_GONE = 4404; // server: session was closed (maybe on another device)
 
 // Identity colors for tabs (like browser tab groups). Stored per session.
 export const SESSION_COLORS = ['green', 'blue', 'purple', 'orange', 'pink', 'cyan', 'yellow'];
@@ -40,17 +41,6 @@ const PALETTES = {
     },
 };
 
-// Lines that look like a bare shell prompt. Trailing prompts are stripped before
-// saving so a restored tab doesn't show a stale prompt above the new one.
-const PROMPT_PATTERNS = [
-    /^.*@.*[:~][#$>]\s*$/,
-    /^[^@]+@[^:]+:[^$#>]+[#$>]\s*$/,
-    /^[$#>]\s*$/,
-    /^\w+:\s*[\w/~]+[$#>]\s*$/,
-    /^\s*\u001b\[\d+(?:;\d+)*m/,
-    /\u001b\[\?\d+[hl]/,
-];
-
 function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -69,38 +59,34 @@ export function terminalTheme(themeName) {
 export default class TerminalSession {
     /**
      * @param {object} opts
-     * @param {number} opts.id
-     * @param {string} opts.name
-     * @param {boolean} [opts.pinned]
-     * @param {string} [opts.cwd] - directory to start the shell in
-     * @param {string} [opts.content] - serialized output to re-print (restored tab)
+     * @param {object} opts.row - session as returned by /api/sessions (id, name, color, ...)
      * @param {object} opts.settings - SettingsManager
      * @param {object} opts.hooks - callbacks into the workspace
      */
-    constructor({ id, name, pinned = false, color = 'green', cwd = '', content = '', settings, hooks }) {
-        this.id = id;
-        this.name = name;
-        this.pinned = pinned;
-        this.color = SESSION_COLORS.includes(color) ? color : 'green';
+    constructor({ row, settings, hooks }) {
+        this.id = row.id;         // server session id (UUID)
+        this.name = row.name;
+        this.pinned = !!row.pinned;
+        this.color = SESSION_COLORS.includes(row.color) ? row.color : 'green';
         this.branch = null;       // git branch of cwd (Linux only)
-        this.startCwd = cwd || '';
+        this.startCwd = row.startCwd || '';
+        this.pid = row.pid || null;
         this.settings = settings;
         this.hooks = hooks;
+        const id = this.id;
 
         // Connection / process state
         this.state = STATE.CONNECTING;
         this.shell = null;
         this.home = null;
         this.platform = null;
-        this.cwd = null;          // live cwd (Linux only)
+        this.cwd = row.cwd || null; // live cwd (Linux only)
         this.process = null;      // foreground process (Linux only)
         this.title = '';          // OSC title set by the shell, if any
         this.hasActivity = false; // new output while in background
-        this.lastContent = content || '';
 
         this.ws = null;
         this.reconnectAttempts = 0;
-        this.hadShell = false;
         this.disposed = false;
         this.timers = new Set();
 
@@ -162,10 +148,11 @@ export default class TerminalSession {
         term.loadAddon(addons.unicode11);
         term.unicode.activeVersion = '11';
 
-        // Existing handlers kept as-is (engine configuration not touched by the redesign)
+        // OSC 133 (shell integration marks) is ignored, as before.
+        // The old handlers that swallowed every CSI "h"/"l" (DECSET/DECRST) were removed:
+        // they kept programs from enabling mouse reporting (needed for touch scrolling
+        // inside TUIs), the alternate screen (vim/htop) and bracketed paste.
         term.parser.registerOscHandler(133, () => true);
-        term.parser.registerCsiHandler({ final: 'h' }, () => true);
-        term.parser.registerCsiHandler({ final: 'l' }, () => true);
 
         term.loadAddon(addons.fit);
         term.loadAddon(addons.webLinks);
@@ -206,17 +193,10 @@ export default class TerminalSession {
 
         this.safeFit();
 
-        if (this.lastContent) {
-            try {
-                term.write(this.lastContent);
-                term.write('\x1b[2m── sessão restaurada · novo shell ──\x1b[0m\r\n');
-            } catch (e) {
-                console.warn('Failed to restore terminal content:', e);
-            }
-        }
-
-        // Finger-drag scrolling (xterm's native touch support is too limited on phones)
-        this.detachTouch = attachTouchScroll(this.panel, term, data => this.sendInput(data));
+        // Touch gestures: 1-finger scroll (positional inside TUIs), 2-finger tap = right click
+        this.detachTouch = attachTouchScroll(this.panel, term, data => this.sendInput(data), {
+            onSecondaryTap: (x, y) => this.hooks.onTerminalMenu(this, x, y),
+        });
 
         term.onData(data => this.handleInput(data));
         term.onResize(({ cols, rows }) => {
@@ -252,9 +232,14 @@ export default class TerminalSession {
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const basePath = window.appConfig?.basePath || '';
-        const cwd = this.cwd || this.startCwd;
-        const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
-        const ws = new WebSocket(`${protocol}//${window.location.host}${basePath}/${query}`);
+        this.safeFit();
+        // The size goes along so the server's screen copy matches before it's sent back
+        const query = new URLSearchParams({
+            session: this.id,
+            cols: String(this.terminal.cols),
+            rows: String(this.terminal.rows),
+        });
+        const ws = new WebSocket(`${protocol}//${window.location.host}${basePath}/?${query}`);
         this.ws = ws;
 
         const connectionTimeout = this.later(() => {
@@ -264,16 +249,7 @@ export default class TerminalSession {
         ws.onopen = () => {
             clearTimeout(connectionTimeout);
             this.reconnectAttempts = 0;
-            if (this.hadShell) {
-                this.terminal.write('\r\n\x1b[2m── conexão restabelecida · novo shell ──\x1b[0m\r\n');
-            }
-            this.hadShell = true;
             this.setState(STATE.CONNECTED);
-            // Initial size sync once layout has settled
-            this.later(() => {
-                this.safeFit();
-                this.send({ type: 'resize', cols: this.terminal.cols, rows: this.terminal.rows });
-            }, 100);
             this.startHeartbeat(ws);
         };
 
@@ -288,11 +264,24 @@ export default class TerminalSession {
             if (message.type === 'output') {
                 this.terminal.write(message.data);
                 this.hooks.onOutput(this);
+            } else if (message.type === 'snapshot') {
+                // Full current screen from the server (first connect or re-attach):
+                // replaces whatever this view showed, so nothing is duplicated
+                this.terminal.reset();
+                this.terminal.write(message.data, () => this.terminal.scrollToBottom());
+                if (this.state === STATE.EXITED) this.setState(STATE.CONNECTED);
+            } else if (message.type === 'exit') {
+                this.process = null;
+                this.setState(STATE.EXITED);
+            } else if (message.type === 'workspace') {
+                this.hooks.onWorkspaceChanged();
             } else if (message.type === 'info') {
                 this.shell = message.shell;
                 this.home = message.home;
                 this.platform = message.platform;
-                this.cwd = message.cwd;
+                this.pid = message.pid;
+                this.cwd = message.cwd || this.cwd;
+                if (this.state === STATE.EXITED) this.setState(STATE.CONNECTED); // shell restarted
                 this.hooks.onInfo(this);
             } else if (message.type === 'process-info') {
                 this.cwd = message.cwd || this.cwd;
@@ -321,13 +310,14 @@ export default class TerminalSession {
             return;
         }
 
-        // Server closes cleanly when the shell process exits
-        if (event && event.wasClean) {
-            this.setState(STATE.EXITED);
-            this.terminal.write('\r\n\x1b[2m[processo encerrado — pressione Enter para iniciar um novo shell]\x1b[0m\r\n');
+        // The session no longer exists on the server (closed on another device)
+        if (event && event.code === CLOSE_SESSION_GONE) {
+            this.hooks.onRemoved(this);
             return;
         }
 
+        // Anything else is a dropped connection: the shell is still running on the
+        // server, so keep trying to re-attach
         if (this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             const delay = BASE_RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts);
             this.reconnectAttempts++;
@@ -372,7 +362,12 @@ export default class TerminalSession {
         // Sticky CTRL/ALT from the mobile shortcut bar apply to the next typed key
         const out = raw ? data : this.hooks.transformInput(data);
 
-        if (this.state === STATE.EXITED || this.state === STATE.DISCONNECTED) {
+        // Shell ended: Enter asks the server for a new shell in this same tab
+        if (this.state === STATE.EXITED) {
+            if (out.includes('\r')) this.send({ type: 'restart' });
+            return;
+        }
+        if (this.state === STATE.DISCONNECTED) {
             if (out.includes('\r')) {
                 this.reconnectAttempts = 0;
                 this.connect();
@@ -437,30 +432,12 @@ export default class TerminalSession {
         }
     }
 
-    /**
-     * Returns the output to persist for this tab, or the previous snapshot while a
-     * full-screen program (vim, htop...) owns the alternate buffer.
-     */
-    serialize() {
-        if (!this.terminal || !this.settings.get('restoreContent')) return '';
-        if (this.terminal.buffer.active.type === 'alternate') return this.lastContent;
-        try {
-            const raw = this.addons.serialize.serialize({ scrollback: SERIALIZE_LINES });
-            const lines = raw.split(/\r?\n/);
-            let last = -1;
-            for (let i = lines.length - 1; i >= 0; i--) {
-                const line = lines[i].trimEnd();
-                if (line === '') continue;
-                if (!PROMPT_PATTERNS.some(p => p.test(line))) {
-                    last = i;
-                    break;
-                }
-            }
-            this.lastContent = last >= 0 ? lines.slice(0, last + 1).join('\n') + '\n' : '';
-        } catch (e) {
-            console.warn('Failed to serialize terminal content:', e);
-        }
-        return this.lastContent;
+    /** Applies metadata changed elsewhere (another device / tab). */
+    applyRow(row) {
+        this.name = row.name;
+        this.pinned = !!row.pinned;
+        if (SESSION_COLORS.includes(row.color)) this.color = row.color;
+        this.terminal?.textarea?.setAttribute('aria-label', `Terminal: ${this.name}`);
     }
 
     /** Directory to show / reuse: live cwd if known, otherwise where it started. */
@@ -479,6 +456,7 @@ export default class TerminalSession {
         return t;
     }
 
+    /** Removes the view only. The shell keeps running on the server. */
     dispose() {
         this.disposed = true;
         this.timers.forEach(clearTimeout);

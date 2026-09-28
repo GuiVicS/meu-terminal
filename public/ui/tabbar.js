@@ -199,7 +199,7 @@ export default class TabBar {
     }
 
     order() {
-        return Array.from(this.list.children).map(el => Number(el.dataset.id));
+        return Array.from(this.list.children).map(el => el.dataset.id);
     }
 
     focusTab(id) {
@@ -210,7 +210,7 @@ export default class TabBar {
         const tab = e.target.closest('.tab');
         if (!tab || e.target.closest('.tab-rename')) return;
         const ids = this.order();
-        const i = ids.indexOf(Number(tab.dataset.id));
+        const i = ids.indexOf(tab.dataset.id);
         const move = j => {
             const el = this.tabs.get(ids[(j + ids.length) % ids.length]);
             el?.focus();

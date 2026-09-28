@@ -17,7 +17,6 @@ export const DEFAULT_SETTINGS = {
     scrollback: 5000,
     // Session
     defaultCwd: '',           // empty = server default (HOME)
-    restoreContent: true,     // re-print last output of tabs after reopening
     shortcutBar: 'auto',      // 'auto' (with virtual keyboard) | 'always' | 'never'
 };
 
