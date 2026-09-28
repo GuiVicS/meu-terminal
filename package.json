@@ -1,6 +1,6 @@
 {
   "name": "dumbterm",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "A stupidly simple web-based terminal emulator, with common tools and Starship enabled (via Docker)! 🚀",
   "main": "server.js",
   "engines": {

@@ -34,15 +34,26 @@ export default class NewSessionPage {
                 <div class="new-session-mark" aria-hidden="true">${icon('terminal', 22)}</div>
                 <h2 id="new-session-title" class="new-session-title">Nova sessão</h2>
                 <form class="new-session-form" autocomplete="off">
+                    <div class="kind-toggle" role="radiogroup" aria-label="Tipo de aba">
+                        <button type="button" role="radio" data-kind="terminal" aria-checked="true">${icon('terminal', 16)} Terminal</button>
+                        <button type="button" role="radio" data-kind="browser" aria-checked="false">${icon('globe', 16)} Navegador</button>
+                    </div>
                     <label class="field">
                         <span class="field-label">Nome</span>
                         <input name="name" type="text" maxlength="60" autocapitalize="off" spellcheck="false">
                     </label>
-                    <label class="field">
+                    <label class="field" data-for="terminal">
                         <span class="field-label">Diretório inicial</span>
                         <input name="cwd" type="text" class="mono" autocapitalize="off" autocorrect="off" spellcheck="false">
                         <span class="field-help">Se o caminho não existir, o shell abre no diretório padrão do servidor.</span>
                     </label>
+                    <div class="field" data-for="browser" hidden>
+                        <label class="field-label" for="new-session-url">Endereço</label>
+                        <input id="new-session-url" name="url" type="text" inputmode="url" class="mono"
+                            autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="localhost:5173 ou site.com">
+                        <div class="port-chips" aria-label="Portas abertas no servidor"></div>
+                        <span class="field-help">O navegador roda no servidor: "localhost" são os projetos rodando lá.</span>
+                    </div>
                     <div class="new-session-actions">
                         <button type="button" class="btn btn-ghost" data-action="cancel">Cancelar</button>
                         <button type="submit" class="btn btn-primary">Criar sessão</button>
@@ -59,13 +70,21 @@ export default class NewSessionPage {
         // form.name would return the form's own name attribute, so keep direct refs
         this.nameInput = this.form.querySelector('input[name="name"]');
         this.cwdInput = this.form.querySelector('input[name="cwd"]');
+        this.urlInput = this.form.querySelector('input[name="url"]');
+        this.kind = 'terminal';
         this.form.addEventListener('submit', e => {
             e.preventDefault();
             const data = new FormData(this.form);
             this.handlers.onCreate({
+                kind: this.kind,
                 name: String(data.get('name') || '').trim(),
                 cwd: String(data.get('cwd') || '').trim(),
+                url: String(data.get('url') || '').trim(),
             });
+        });
+        this.el.querySelector('.kind-toggle').addEventListener('click', e => {
+            const btn = e.target.closest('[data-kind]');
+            if (btn) this.setKind(btn.dataset.kind);
         });
         this.el.querySelector('[data-action="cancel"]').addEventListener('click', () => this.handlers.onCancel());
         this.el.addEventListener('keydown', e => {
@@ -88,6 +107,10 @@ export default class NewSessionPage {
         this.nameInput.placeholder = defaultName;
         this.cwdInput.value = '';
         this.cwdInput.placeholder = defaultCwd || '~  (padrão do servidor)';
+        this.urlInput.value = '';
+        // No Chromium on the server: browser tabs can't be created
+        this.el.querySelector('.kind-toggle').hidden = !window.appConfig?.browserAvailable;
+        this.setKind('terminal');
         this.renderRecents(recents);
         this.el.hidden = false;
         // On touch devices don't pop the keyboard - the primary action is one tap away
@@ -99,6 +122,40 @@ export default class NewSessionPage {
 
     close() {
         this.el.hidden = true;
+    }
+
+    setKind(kind) {
+        this.kind = kind;
+        this.el.querySelectorAll('.kind-toggle [data-kind]').forEach(b => {
+            b.setAttribute('aria-checked', String(b.dataset.kind === kind));
+        });
+        this.el.querySelectorAll('[data-for]').forEach(f => { f.hidden = f.dataset.for !== kind; });
+        this.el.querySelector('.new-session-title').textContent = kind === 'browser' ? 'Nova aba de navegador' : 'Nova sessão';
+        this.form.querySelector('[type="submit"]').textContent = kind === 'browser' ? 'Abrir navegador' : 'Criar sessão';
+        if (kind === 'browser') this.loadPorts();
+    }
+
+    /** Suggests the dev servers running on the server ("localhost:5173"). */
+    async loadPorts() {
+        const box = this.el.querySelector('.port-chips');
+        box.textContent = '';
+        try {
+            const base = (window.appConfig?.basePath || '').replace(/\/+$/, '');
+            const response = await fetch(`${base}/api/ports`, { credentials: 'same-origin', cache: 'no-store' });
+            const ports = response.ok ? await response.json() : [];
+            ports.forEach(({ port, name }) => {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'port-chip';
+                chip.textContent = `localhost:${port}`;
+                if (name) chip.title = name;
+                chip.addEventListener('click', () => {
+                    this.urlInput.value = `localhost:${port}`;
+                    this.form.requestSubmit();
+                });
+                box.appendChild(chip);
+            });
+        } catch { /* no suggestions */ }
     }
 
     renderRecents(recents) {

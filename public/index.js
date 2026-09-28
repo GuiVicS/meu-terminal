@@ -107,8 +107,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const pasteText = text => {
         const session = workspace?.active;
         if (!session || !text) return;
-        // xterm's paste() applies the terminal's paste rules (e.g. line endings)
-        session.terminal.paste(text);
+        // Browser tab: typed into the page. Terminal: xterm's paste() applies paste rules.
+        if (session.kind === 'browser') session.sendText(text);
+        else session.terminal.paste(text);
     };
 
     /** Pastes what is currently copied on the device. */
@@ -316,11 +317,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const dark = settings.resolvedTheme() === 'dark';
         const items = [
             { label: 'Nova sessão', icon: 'plus', hint: k.newTab, run: () => workspace.create() },
+            { label: 'Nova aba de navegador', icon: 'globe', hint: `${k.mod}+B`, run: () => workspace.createBrowser() },
             { label: 'Nova sessão com opções…', icon: 'terminal', run: () => workspace.openNewSessionPage() },
             { label: 'Reabrir sessão fechada', icon: 'restore', disabled: workspace.recents.length === 0,
                 run: () => workspace.restoreLastClosed() },
             'separator',
-            { label: 'Buscar no terminal', icon: 'search', hint: `${c}+F`, run: () => workspace.search.open() },
+            { label: 'Buscar no terminal', icon: 'search', hint: `${c}+F`, run: () => workspace.run('search') },
             { label: 'Comandos rápidos', icon: 'bolt', run: () => openCommands(menuBtn) },
             { label: 'Copiados recentemente', icon: 'clipboard', run: () => openClipboardHistory(menuBtn) },
             { label: 'Modo foco', icon: 'focus', checked: focusMode, run: () => setFocusMode(!focusMode) },

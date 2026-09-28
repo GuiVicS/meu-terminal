@@ -72,7 +72,7 @@ export default class SearchBar {
     /** Hooks the result counter to the active session's search addon. */
     bind(session) {
         this.resultsListener?.dispose();
-        this.resultsListener = session?.addons.search.onDidChangeResults?.(({ resultIndex, resultCount }) => {
+        this.resultsListener = session?.addons?.search?.onDidChangeResults?.(({ resultIndex, resultCount }) => {
             this.count.textContent = resultCount
                 ? `${resultIndex + 1}/${resultCount}` : (this.input.value ? '0/0' : '');
         });
@@ -82,7 +82,7 @@ export default class SearchBar {
     find(dir, incremental = false) {
         const session = this.getSession();
         const term = this.input.value;
-        if (!session) return;
+        if (!session?.addons?.search) return;
         const search = session.addons.search;
         if (!term) {
             search.clearDecorations();
@@ -102,7 +102,7 @@ export default class SearchBar {
         this.el.hidden = true;
         this.count.textContent = '';
         const session = this.getSession();
-        session?.addons.search.clearDecorations();
+        session?.addons?.search?.clearDecorations();
         session?.focus();
     }
 }

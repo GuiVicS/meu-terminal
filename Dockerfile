@@ -18,6 +18,10 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --fix-missing \
     traceroute \
     build-essential \
     python3 \
+    # Browser tabs: headless Chromium on the server + fonts so pages render text/emoji
+    chromium \
+    fonts-liberation \
+    fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure locales
@@ -29,7 +33,8 @@ RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
 ENV LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8 \
-    SHELL=/bin/bash
+    SHELL=/bin/bash \
+    CHROMIUM_PATH=/usr/bin/chromium
 
 # Install Starship
 RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes

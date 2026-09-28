@@ -51,7 +51,9 @@ class SessionManager {
                 id: row.id,
                 name: row.name,
                 color: row.color,
-                cwd: row.cwd || row.start_cwd || '',
+                kind: row.kind || 'terminal',
+                cwd: row.kind === 'browser' ? (row.url || '') : (row.cwd || row.start_cwd || ''),
+                url: row.url || null,
                 closedAt: row.closed_at,
             })),
         };
@@ -61,6 +63,8 @@ class SessionManager {
         const rt = this.runtimes.get(row.id);
         return {
             id: row.id,
+            kind: row.kind || 'terminal',
+            url: row.url || null,
             name: row.name,
             color: row.color,
             pinned: !!row.pinned,
@@ -72,22 +76,34 @@ class SessionManager {
         };
     }
 
-    create({ name, cwd, color, afterId, reopenId } = {}) {
-        // Reopening a closed session = new shell with the same name/dir/color
+    /**
+     * Creates a tab. kind 'terminal' (default) gets a shell; kind 'browser' gets a page
+     * in the server's Chromium (see browser-manager.js).
+     */
+    create({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
+        // Reopening a closed session = new shell/page with the same name/dir/URL/color
         let base = {};
         if (reopenId) {
             const old = this.store.get(reopenId);
             if (old && old.status === 'closed') {
-                base = { name: old.name, cwd: old.cwd || old.start_cwd, color: old.color };
+                base = { name: old.name, cwd: old.cwd || old.start_cwd, color: old.color, kind: old.kind, url: old.url };
                 this.store.forget(reopenId);
             }
         }
+        const type = (kind || base.kind) === 'browser' ? 'browser' : 'terminal';
         const n = this.store.nextCounter();
-        const startCwd = (typeof cwd === 'string' && cwd.trim().slice(0, 4096)) || base.cwd || null;
+        const startCwd = type === 'terminal'
+            ? (typeof cwd === 'string' && cwd.trim().slice(0, 4096)) || base.cwd || null
+            : null;
+        const startUrl = type === 'browser'
+            ? (typeof url === 'string' && url.trim().slice(0, 4096)) || base.url || null
+            : null;
         const pick = color || base.color;
         const row = this.store.insert({
             id: crypto.randomUUID(),
-            name: cleanName(name) || base.name || `Term ${n}`,
+            kind: type,
+            url: startUrl,
+            name: cleanName(name) || base.name || (type === 'browser' ? `Navegador ${n}` : `Term ${n}`),
             color: COLORS.includes(pick) ? pick : COLORS[(n - 1) % COLORS.length],
             pinned: false,
             position: this.store.positionAfter(afterId),
@@ -160,7 +176,8 @@ class SessionManager {
         let rt = this.runtimes.get(id);
         if (rt) return rt;
         const row = this.store.get(id);
-        if (!row || row.status !== 'open') return null;
+        // Browser tabs have no shell (server.js routes them to the BrowserManager)
+        if (!row || row.status !== 'open' || row.kind === 'browser') return null;
 
         // convertEol matches the browser terminal so both render output identically
         const headless = new Terminal({
