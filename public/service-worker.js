@@ -1,5 +1,5 @@
 // Core service worker configuration
-let CACHE_VERSION = "2.0.0"; // Default fallback version
+let CACHE_VERSION = "2.1.0"; // Default fallback version
 let CACHE_NAME = `DUMBTERM_CACHE_V${CACHE_VERSION}`; // Default format, will be overridden
 const ASSETS_TO_CACHE = [];
 const BASE_PATH = self.registration.scope;

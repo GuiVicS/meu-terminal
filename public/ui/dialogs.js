@@ -27,14 +27,145 @@ function createDialog(id, title) {
 }
 
 /**
+ * "Quick commands" admin: list + add/edit/delete form. Saved on the server.
+ * @param {HTMLElement} section
+ * @param {import('../managers/commands.js').default} commands
+ */
+function mountCommandsAdmin(section, commands) {
+    section.innerHTML = `
+        <h3 class="section-label">Comandos rápidos</h3>
+        <p class="setting-help commands-help">Aparecem no botão ${icon('bolt', 13)} da barra de atalhos.
+            Salvos no servidor: iguais em todos os aparelhos.</p>
+        <ul class="commands-list" role="list"></ul>
+        <form class="commands-form" autocomplete="off">
+            <label class="field">
+                <span class="field-label">Nome</span>
+                <input name="label" type="text" maxlength="60" placeholder="Ex.: Subir o projeto">
+            </label>
+            <label class="field">
+                <span class="field-label">Comando</span>
+                <textarea name="command" rows="2" class="mono" required maxlength="4000"
+                    autocapitalize="off" autocorrect="off" spellcheck="false"
+                    placeholder="cd ~/projetos/api && npm run dev"></textarea>
+            </label>
+            <label class="setting setting-inline">
+                <span class="setting-text">Executar ao tocar
+                    <span class="setting-help">Aperta Enter sozinho. Desligado: só digita, você confere e envia.</span></span>
+                <input type="checkbox" class="switch" name="run">
+            </label>
+            <p class="commands-error" role="alert"></p>
+            <div class="commands-actions">
+                <button type="button" class="btn btn-ghost" data-cancel hidden>Cancelar</button>
+                <button type="submit" class="btn btn-primary">Adicionar</button>
+            </div>
+        </form>`;
+
+    const list = section.querySelector('.commands-list');
+    const form = section.querySelector('.commands-form');
+    const submit = form.querySelector('[type="submit"]');
+    const cancel = form.querySelector('[data-cancel]');
+    const error = section.querySelector('.commands-error');
+    const fields = {
+        label: form.querySelector('[name="label"]'),
+        command: form.querySelector('[name="command"]'),
+        run: form.querySelector('[name="run"]'),
+    };
+    let editingId = null;
+
+    const resetForm = () => {
+        editingId = null;
+        form.reset();
+        submit.textContent = 'Adicionar';
+        cancel.hidden = true;
+        error.textContent = '';
+    };
+
+    const render = items => {
+        list.innerHTML = '';
+        if (!items.length) {
+            const li = document.createElement('li');
+            li.className = 'commands-empty';
+            li.textContent = 'Nenhum comando cadastrado ainda.';
+            list.appendChild(li);
+            return;
+        }
+        items.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'command-row';
+            li.innerHTML = `
+                <span class="command-text">
+                    <span class="command-label"></span>
+                    <span class="command-code mono"></span>
+                </span>
+                <span class="command-badge" hidden>Enter</span>
+                <button type="button" class="icon-btn" data-edit>${icon('edit', 15)}</button>
+                <button type="button" class="icon-btn" data-delete>${icon('trash', 15)}</button>`;
+            li.querySelector('.command-label').textContent = item.label;
+            li.querySelector('.command-code').textContent = item.command;
+            li.querySelector('.command-badge').hidden = !item.run;
+            li.querySelector('[data-edit]').setAttribute('aria-label', `Editar ${item.label}`);
+            li.querySelector('[data-delete]').setAttribute('aria-label', `Excluir ${item.label}`);
+            li.querySelector('[data-edit]').addEventListener('click', () => {
+                editingId = item.id;
+                fields.label.value = item.label;
+                fields.command.value = item.command;
+                fields.run.checked = item.run;
+                submit.textContent = 'Salvar';
+                cancel.hidden = false;
+                fields.command.focus();
+            });
+            li.querySelector('[data-delete]').addEventListener('click', async () => {
+                try {
+                    await commands.remove(item.id);
+                    if (editingId === item.id) resetForm();
+                } catch {
+                    error.textContent = 'Não foi possível excluir.';
+                }
+            });
+            list.appendChild(li);
+        });
+    };
+
+    cancel.addEventListener('click', resetForm);
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const data = {
+            label: fields.label.value.trim(),
+            command: fields.command.value.replace(/\r?\n$/, ''),
+            run: fields.run.checked,
+        };
+        if (!data.command.trim()) {
+            error.textContent = 'Informe o comando.';
+            return;
+        }
+        submit.disabled = true;
+        try {
+            if (editingId) await commands.update(editingId, data);
+            else await commands.add(data);
+            resetForm();
+        } catch {
+            error.textContent = 'Não foi possível salvar. Tente novamente.';
+        } finally {
+            submit.disabled = false;
+        }
+    });
+
+    commands.onChange(render);
+    render(commands.items);
+    return { refresh: () => commands.load().catch(() => {}) };
+}
+
+/**
  * Settings dialog. Every control maps to a real setting in SettingsManager.
  * @param {import('../managers/settings.js').default} settings
  * @param {() => any} getSession - active session (for read-only shell info)
+ * @param {import('../managers/commands.js').default} commands - quick commands (server)
  */
-export function createSettingsDialog(settings, getSession) {
+export function createSettingsDialog(settings, getSession, commands) {
     const dialog = createDialog('settings-dialog', 'Configurações');
     const body = dialog.querySelector('.dialog-body');
     body.innerHTML = `
+        <section class="settings-section" data-commands></section>
         <section class="settings-section">
             <h3 class="section-label">Terminal</h3>
             <label class="setting">
@@ -114,12 +245,11 @@ export function createSettingsDialog(settings, getSession) {
                 <input type="text" class="mono" data-setting="defaultCwd" placeholder="~"
                     autocapitalize="off" autocorrect="off" spellcheck="false">
             </label>
-            <label class="setting">
-                <span class="setting-text">Restaurar conteúdo das abas
-                    <span class="setting-help">Guarda a última saída neste navegador para mostrar ao reabrir.
-                    Desative se o terminal exibir dados sensíveis.</span></span>
-                <input type="checkbox" class="switch" data-setting="restoreContent">
-            </label>
+            <div class="setting">
+                <span class="setting-text">Sessões no servidor
+                    <span class="setting-help">As abas e os processos ficam no servidor: fechar o app não
+                    encerra nada. Só fechar a aba (✕) encerra o processo dela.</span></span>
+            </div>
         </section>`;
 
     const sync = () => {
@@ -150,9 +280,12 @@ export function createSettingsDialog(settings, getSession) {
         if (input?.type === 'text') settings.set(input.dataset.setting, input.value.trim());
     });
 
+    const commandsAdmin = mountCommandsAdmin(body.querySelector('[data-commands]'), commands);
+
     return {
         open() {
             sync();
+            commandsAdmin.refresh();
             dialog.showModal();
         },
     };

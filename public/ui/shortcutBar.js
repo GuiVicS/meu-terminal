@@ -27,6 +27,11 @@ const KEYS = [
     { id: 'down', label: '↓', aria: 'Seta para baixo', nav: 'down', repeat: true },
     { id: 'left', label: '←', aria: 'Seta para esquerda', nav: 'left', repeat: true },
     { id: 'right', label: '→', aria: 'Seta para direita', nav: 'right', repeat: true },
+    // Pinned: always visible at the right edge, outside the scrolling keys
+    { id: 'cmds', icon: 'bolt', aria: 'Comandos rápidos', action: 'commands', pinned: true },
+    // Tap pastes the device clipboard; long press opens the "recently copied" list
+    { id: 'clip', icon: 'clipboard', aria: 'Colar (segure para ver copiados recentemente)',
+        action: 'paste', longAction: 'clipboard-history', pinned: true },
     { id: 'mic', icon: 'mic', aria: 'Transcrever voz', dictation: true },
     { id: 'more', label: '…', aria: 'Mais teclas', toggle: true },
     // Extra keys: revealed by "…"
@@ -58,11 +63,12 @@ export function ctrlChar(ch) {
 export default class ShortcutBar {
     /**
      * @param {HTMLElement} el - container element
-     * @param {{ getSession: () => any }} deps
+     * @param {{ getSession: () => any, onAction: (name: string, button: Element) => void }} deps
      */
-    constructor(el, { getSession }) {
+    constructor(el, { getSession, onAction }) {
         this.el = el;
         this.getSession = getSession;
+        this.onAction = onAction;
         this.modifiers = { ctrl: false, alt: false };
         this.repeatTimer = null;
         this.render();
@@ -99,15 +105,19 @@ export default class ShortcutBar {
             });
         }
 
+        const row = document.createElement('div');
+        row.className = 'shortcut-row';
         const scroller = document.createElement('div');
         scroller.className = 'shortcut-scroll';
+        const pinned = document.createElement('div');
+        pinned.className = 'shortcut-pinned';
         KEYS.forEach(key => {
             if (key.dictation && !this.dictation) return; // browser has no speech recognition
             const btn = document.createElement('button');
             btn.type = 'button';
             const wide = key.label && key.label.length > 2;
             btn.className = 'shortcut-key' + (wide ? ' wide' : '') + (key.extra ? ' extra' : '')
-                + (key.dictation ? ' mic' : '');
+                + (key.icon ? ' icon-key' : '');
             btn.dataset.key = key.id;
             if (key.icon) btn.innerHTML = icon(key.icon, 19);
             else btn.textContent = key.label;
@@ -116,12 +126,17 @@ export default class ShortcutBar {
             if (key.modifier) btn.setAttribute('aria-pressed', 'false');
             if (key.toggle) btn.setAttribute('aria-expanded', 'false');
             this.bindKey(btn, key);
-            scroller.appendChild(btn);
+            (key.pinned ? pinned : scroller).appendChild(btn);
         });
-        this.el.appendChild(scroller);
+        row.append(scroller, pinned);
+        this.el.appendChild(row);
     }
 
     bindKey(btn, key) {
+        if (key.longAction) {
+            this.bindLongPressKey(btn, key);
+            return;
+        }
         // Acting on pointerdown + preventDefault keeps focus in the terminal, so the
         // native keyboard stays open while the user taps shortcut keys.
         btn.addEventListener('pointerdown', e => {
@@ -150,8 +165,45 @@ export default class ShortcutBar {
         });
     }
 
+    /** Tap = key.action (on release), hold 500ms = key.longAction. Focus stays in the terminal. */
+    bindLongPressKey(btn, key) {
+        let timer = null;
+        let longFired = false;
+        btn.addEventListener('pointerdown', e => {
+            e.preventDefault();
+            btn.classList.add('pressed');
+            longFired = false;
+            timer = setTimeout(() => {
+                longFired = true;
+                navigator.vibrate?.(15);
+                this.onAction?.(key.longAction, btn);
+            }, 500);
+        });
+        const end = run => {
+            btn.classList.remove('pressed');
+            clearTimeout(timer);
+            timer = null;
+            if (run && !longFired) {
+                navigator.vibrate?.(8);
+                this.onAction?.(key.action, btn);
+            }
+        };
+        btn.addEventListener('pointerup', () => end(true));
+        btn.addEventListener('pointercancel', () => end(false));
+        btn.addEventListener('pointerleave', () => { if (timer) end(false); });
+        btn.addEventListener('mousedown', e => e.preventDefault());
+        btn.addEventListener('contextmenu', e => e.preventDefault());
+        btn.addEventListener('click', e => {
+            if (e.detail === 0) this.onAction?.(key.action, btn); // keyboard activation
+        });
+    }
+
     press(key, repeating = false) {
         if (!repeating) navigator.vibrate?.(8);
+        if (key.action) {
+            this.onAction?.(key.action, this.el.querySelector(`[data-key="${key.id}"]`));
+            return;
+        }
         if (key.dictation) {
             this.dictation?.toggle();
             return;

@@ -1,19 +1,18 @@
 /**
  * terminal.js
- * Workspace manager: the ordered set of terminal sessions ("tabs"), their persistence,
- * recently closed sessions and the tab-level keyboard shortcuts.
- * The data model is one workspace for now, shaped so more workspaces can be added later.
+ * Workspace manager: the ordered set of tabs, backed by the server (/api/sessions).
+ * Tabs, names, order and pins live in the server database, so they are the same on
+ * every device; shells keep running when the page closes and only end when a tab is closed.
  */
 import StorageManager from './storage.js';
-import TerminalSession, { STATE, SESSION_COLORS } from './session.js';
+import TerminalSession, { STATE } from './session.js';
 import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { toast } from '../ui/toast.js';
 
-const MAX_RECENTS = 8;
-const SAVE_DELAY = 800;
+const RECONCILE_DELAY = 250;
 
 function joinPath(path) {
     const basePath = window.appConfig?.basePath || '';
@@ -23,6 +22,22 @@ function joinPath(path) {
 }
 
 const isCoarse = () => window.matchMedia('(pointer: coarse)').matches;
+
+/** JSON request to the sessions API. Redirects to login when the session expired. */
+async function api(method, path, body) {
+    const response = await fetch(joinPath(`api/${path}`), {
+        method,
+        credentials: 'same-origin',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    if (response.redirected && /\/login$/.test(new URL(response.url).pathname)) {
+        window.location.href = joinPath('login');
+        throw new Error('Authentication required');
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
 
 export default class TerminalManager {
     /**
@@ -39,13 +54,12 @@ export default class TerminalManager {
         this.settings = settings;
         this.workspaceEl = workspace;
         this.events = events;
+        // Only per-device UI state stays in the browser (which tab is active here)
         this.storage = new StorageManager('dumbterm-');
 
         this.sessions = new Map(); // id -> TerminalSession, insertion order = tab order
         this.activeId = null;
-        this.counter = 1;
-        this.colorIndex = 0;
-        this.recents = this.storage.get('recent', []);
+        this.recents = [];         // recently closed sessions, from the server
 
         this.tabBar = new TabBar(tabList, {
             onActivate: id => this.activate(id, { focus: true }),
@@ -68,6 +82,9 @@ export default class TerminalManager {
             onOutput: s => this.onOutput(s),
             onFocusChange: (s, focused) => this.events.onFocusChange(focused),
             onAuthRequired: () => { window.location.href = joinPath('login'); },
+            onRemoved: s => this.removeLocal(s.id),
+            onWorkspaceChanged: () => this.scheduleReconcile(),
+            onTerminalMenu: (s, x, y) => this.events.onTerminalMenu?.(s, x, y),
             isAppShortcut: e => !!this.matchShortcut(e),
             transformInput: data => this.events.transformInput(data),
         };
@@ -79,11 +96,9 @@ export default class TerminalManager {
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
                 this.sessions.forEach(s => s.reconnectIfDropped());
-            } else {
-                this.saveNow(); // mobile browsers may kill a hidden page without unload
+                this.scheduleReconcile();
             }
         });
-        window.addEventListener('pagehide', () => this.saveNow());
 
         this.restore();
     }
@@ -98,38 +113,46 @@ export default class TerminalManager {
 
     // ---------- lifecycle ----------
 
-    /**
-     * Creates a session and its tab.
-     * @returns {TerminalSession}
-     */
-    create({ name, cwd = '', pinned = false, color, content = '', id, index, activate = true } = {}) {
-        const sessionId = id ?? this.counter;
-        this.counter = Math.max(this.counter, sessionId + 1);
-        const session = new TerminalSession({
-            id: sessionId,
-            name: name || `Term ${sessionId}`,
-            pinned,
-            color: color || SESSION_COLORS[this.colorIndex++ % SESSION_COLORS.length],
-            cwd: cwd || this.settings.get('defaultCwd'),
-            content,
-            settings: this.settings,
-            hooks: this.hooks,
-        });
+    /** Creates a tab view for a server session (no request). Idempotent. */
+    addSession(row, { index, activate = false } = {}) {
+        if (this.sessions.has(row.id)) return this.sessions.get(row.id);
+        const session = new TerminalSession({ row, settings: this.settings, hooks: this.hooks });
 
-        // Insert into the ordered map at the requested position
-        const ids = this.order;
-        const at = index ?? ids.length;
+        const at = index ?? this.sessions.size;
         const entries = Array.from(this.sessions.entries());
-        entries.splice(at, 0, [sessionId, session]);
+        entries.splice(at, 0, [row.id, session]);
         this.sessions = new Map(entries);
 
         this.tabBar.add(session, at);
         session.mount(this.workspaceEl.querySelector('.terminal-panels'));
         session.setActive(false);
-        this.normalizeOrder();
-        if (activate) this.activate(sessionId, { focus: !isCoarse() });
-        this.scheduleSave();
+        if (activate) this.activate(row.id, { focus: !isCoarse() });
         return session;
+    }
+
+    /**
+     * Creates a new session on the server and opens its tab.
+     * @param {{name?: string, cwd?: string, color?: string, afterId?: string, reopenId?: string}} opts
+     */
+    async create({ name, cwd, color, afterId, reopenId } = {}) {
+        try {
+            const row = await api('POST', 'sessions', {
+                name,
+                cwd: cwd || this.settings.get('defaultCwd') || undefined,
+                color,
+                afterId,
+                reopenId,
+            });
+            const index = afterId && this.sessions.has(afterId) ? this.order.indexOf(afterId) + 1 : undefined;
+            this.addSession(row, { index });
+            this.normalizeOrder();
+            this.activate(row.id, { focus: !isCoarse() });
+            return this.sessions.get(row.id);
+        } catch (e) {
+            console.error('Failed to create session:', e);
+            toast('Não foi possível criar a sessão.', { tone: 'error' });
+            return null;
+        }
     }
 
     activate(id, { focus = false } = {}) {
@@ -144,16 +167,15 @@ export default class TerminalManager {
             this.tabBar.update(next);
             this.search.bind(next);
             this.events.onActiveChange(next);
-            this.scheduleSave();
+            this.storage.set('activeSession', id);
         }
         if (focus) next.focus();
     }
 
-    close(id, { record = true, silent = false } = {}) {
+    /** Removes a tab view locally (the server already dropped or will drop it). */
+    removeLocal(id) {
         const session = this.sessions.get(id);
         if (!session) return;
-        if (record) this.remember(session);
-
         // Browser behaviour: focus the tab to the right, else the one to the left
         const ids = this.order;
         const i = ids.indexOf(id);
@@ -163,18 +185,30 @@ export default class TerminalManager {
         this.tabBar.remove(id);
         this.sessions.delete(id);
 
-        if (this.sessions.size === 0) {
+        if (this.activeId === id) {
             this.activeId = null;
-            this.create();
-        } else if (this.activeId === id) {
-            this.activeId = null;
-            this.activate(neighbor, { focus: !isCoarse() });
+            if (neighbor !== undefined) this.activate(neighbor, { focus: !isCoarse() });
         }
-        this.scheduleSave();
+        if (this.sessions.size === 0) this.create();
+    }
 
-        if (record && !silent) {
-            toast(`"${session.name}" fechada`, {
-                action: { label: 'Reabrir', run: () => this.restoreLastClosed() },
+    /** Closing a tab is what ends its shell on the server. */
+    async close(id, { silent = false } = {}) {
+        const session = this.sessions.get(id);
+        if (!session) return;
+        const name = session.name;
+        this.removeLocal(id);
+        try {
+            await api('DELETE', `sessions/${encodeURIComponent(id)}`);
+        } catch (e) {
+            console.error('Failed to close session:', e);
+            toast('Não foi possível encerrar a sessão no servidor.', { tone: 'error' });
+            this.scheduleReconcile();
+            return;
+        }
+        if (!silent) {
+            toast(`"${name}" fechada`, {
+                action: { label: 'Reabrir', run: () => this.create({ reopenId: id }) },
             });
         }
     }
@@ -195,20 +229,15 @@ export default class TerminalManager {
         const s = this.sessions.get(id);
         if (!s) return;
         // A duplicate is a new shell in the same directory - processes can't be cloned
-        this.create({
-            name: s.name,
-            cwd: s.cwd || s.startCwd,
-            index: this.order.indexOf(id) + 1,
-        });
+        this.create({ name: s.name, cwd: s.cwd || s.startCwd, afterId: id });
     }
 
     rename(id, name) {
         const s = this.sessions.get(id);
         if (!s) return;
-        s.name = name;
-        s.terminal?.textarea?.setAttribute('aria-label', `Terminal: ${name}`);
+        s.applyRow({ name, pinned: s.pinned, color: s.color });
         this.onSessionChanged(s);
-        this.scheduleSave();
+        this.patch(id, { name });
     }
 
     togglePin(id) {
@@ -216,8 +245,17 @@ export default class TerminalManager {
         if (!s) return;
         s.pinned = !s.pinned;
         this.tabBar.update(s);
+        this.patch(id, { pinned: s.pinned });
         this.normalizeOrder();
-        this.scheduleSave();
+        this.saveOrder();
+    }
+
+    patch(id, fields) {
+        api('PATCH', `sessions/${encodeURIComponent(id)}`, fields).catch(e => {
+            console.error('Failed to update session:', e);
+            toast('Não foi possível salvar a alteração.', { tone: 'error' });
+            this.scheduleReconcile();
+        });
     }
 
     move(id, delta) {
@@ -229,11 +267,18 @@ export default class TerminalManager {
         this.setOrder(ids);
     }
 
-    /** Applies a new tab order (from drag and drop or menu). */
+    /** Applies a new tab order (from drag and drop or menu) and saves it. */
     setOrder(ids) {
         this.sessions = new Map(ids.filter(id => this.sessions.has(id)).map(id => [id, this.sessions.get(id)]));
         this.normalizeOrder();
-        this.scheduleSave();
+        this.saveOrder();
+    }
+
+    saveOrder() {
+        api('PUT', 'sessions/order', { ids: this.order }).catch(e => {
+            console.error('Failed to save tab order:', e);
+            this.scheduleReconcile();
+        });
     }
 
     /** Pinned sessions always stay on the left, like pinned browser tabs. */
@@ -265,13 +310,19 @@ export default class TerminalManager {
 
     // ---------- new session page & recents ----------
 
-    openNewSessionPage() {
-        this.newSessionPage.open({
-            defaultName: `Term ${this.counter}`,
+    async openNewSessionPage() {
+        const open = () => this.newSessionPage.open({
+            defaultName: 'Automático (Term N)',
             defaultCwd: this.settings.get('defaultCwd'),
             recents: this.recents,
         });
+        open();
         this.workspaceEl.classList.add('showing-new-session');
+        // Refresh "recent" from the server (may include tabs closed on other devices)
+        try {
+            this.recents = (await api('GET', 'sessions')).recent || [];
+            if (this.newSessionPage.isOpen) this.newSessionPage.renderRecents(this.recents);
+        } catch { /* keep what we have */ }
     }
 
     closeNewSessionPage(refocus = true) {
@@ -283,37 +334,33 @@ export default class TerminalManager {
 
     createFromPage({ name, cwd, fromRecent }) {
         const recent = fromRecent !== undefined ? this.recents[fromRecent] : null;
-        if (recent) this.forgetRecent(fromRecent, false);
         this.closeNewSessionPage(false);
-        this.create({ name, cwd, color: recent?.color });
+        if (recent) this.create({ reopenId: recent.id });
+        else this.create({ name, cwd });
     }
 
-    remember(session) {
-        this.recents.unshift({
-            name: session.name,
-            cwd: session.displayCwd() || '',
-            rawCwd: session.cwd || session.startCwd || '',
-            color: session.color,
-            closedAt: Date.now(),
-        });
-        this.recents = this.recents.slice(0, MAX_RECENTS);
-        this.storage.set('recent', this.recents);
-    }
-
-    forgetRecent(index, rerender = true) {
+    async forgetRecent(index) {
+        const recent = this.recents[index];
+        if (!recent) return;
         this.recents.splice(index, 1);
-        this.storage.set('recent', this.recents);
-        if (rerender && this.newSessionPage.isOpen) this.newSessionPage.renderRecents(this.recents);
+        if (this.newSessionPage.isOpen) this.newSessionPage.renderRecents(this.recents);
+        try {
+            await api('DELETE', `recent/${encodeURIComponent(recent.id)}`);
+        } catch (e) {
+            console.error('Failed to forget recent session:', e);
+        }
     }
 
-    restoreLastClosed() {
-        const last = this.recents.shift();
+    async restoreLastClosed() {
+        try {
+            this.recents = (await api('GET', 'sessions')).recent || [];
+        } catch { /* use cached list */ }
+        const last = this.recents[0];
         if (!last) {
             toast('Nenhuma sessão fechada recentemente');
             return;
         }
-        this.storage.set('recent', this.recents);
-        this.create({ name: last.name, cwd: last.rawCwd || last.cwd, color: last.color });
+        this.create({ reopenId: last.id });
     }
 
     // ---------- menus ----------
@@ -336,7 +383,7 @@ export default class TerminalManager {
             { label: 'Mover para a direita', icon: 'chevronRight', disabled: i === ids.length - 1,
                 run: () => this.move(id, 1) },
             'separator',
-            { label: 'Fechar', icon: 'x', hint: k.close, run: () => this.close(id) },
+            { label: 'Fechar (encerra o processo)', icon: 'x', hint: k.close, run: () => this.close(id) },
             { label: 'Fechar outras', icon: 'closeOthers', disabled: !hasOthers, run: () => this.closeOthers(id) },
             { label: 'Fechar à direita', icon: 'arrowRightBar', disabled: !hasRight,
                 run: () => this.closeToTheRight(id) },
@@ -366,12 +413,10 @@ export default class TerminalManager {
     }
 
     onOutput(session) {
-        session.dirty = true;
         if (session.id !== this.activeId && !session.hasActivity) {
             session.hasActivity = true;
             this.tabBar.update(session);
         }
-        this.scheduleSave(1500);
     }
 
     // ---------- keyboard shortcuts ----------
@@ -455,7 +500,7 @@ export default class TerminalManager {
             { keys: `${m}+T`, label: 'Nova sessão' },
             { keys: `${m}+N`, label: 'Nova sessão com opções' },
             { keys: `${m}+Shift+T`, label: 'Reabrir sessão fechada' },
-            { keys: `${m}+W`, label: 'Fechar sessão' },
+            { keys: `${m}+W`, label: 'Fechar sessão (encerra o processo)' },
             { keys: `${m}+R / F2`, label: 'Renomear sessão' },
             { keys: `Ctrl+Tab / ${m}+.`, label: 'Próxima sessão' },
             { keys: `Ctrl+Shift+Tab / ${m}+,`, label: 'Sessão anterior' },
@@ -466,87 +511,82 @@ export default class TerminalManager {
         ];
     }
 
-    // ---------- persistence ----------
+    // ---------- sync with the server ----------
 
-    scheduleSave(delay = SAVE_DELAY) {
-        clearTimeout(this.saveTimer);
-        this.saveTimer = setTimeout(() => this.saveNow(), delay);
+    scheduleReconcile() {
+        clearTimeout(this.reconcileTimer);
+        this.reconcileTimer = setTimeout(() => this.reconcile(), RECONCILE_DELAY);
     }
 
     /**
-     * Persists UI state (tabs, order, names, pins, colors, active tab) plus the last
-     * output of each tab. Only tabs with new output are re-serialized.
+     * Brings local tabs in line with the server: tabs opened/closed/renamed/reordered
+     * on another device or browser tab show up here too.
      */
-    saveNow() {
-        clearTimeout(this.saveTimer);
-        const sessions = this.order.map(id => {
-            const s = this.sessions.get(id);
-            let content = s.lastContent;
-            if (s.dirty) {
-                content = s.serialize();
-                s.dirty = false;
-            }
-            return {
-                id,
-                name: s.name,
-                pinned: s.pinned,
-                color: s.color,
-                cwd: s.cwd || s.startCwd || '',
-                content: this.settings.get('restoreContent') ? content : '',
-            };
-        });
-        const ok = this.storage.set('workspace', {
-            version: 2,
-            workspaces: [{ id: 'default', name: 'Padrão', activeId: this.activeId, sessions }],
-            currentWorkspace: 'default',
-            counter: this.counter,
-            colorIndex: this.colorIndex,
-        });
-        if (!ok && !this.warnedQuota) {
-            this.warnedQuota = true;
-            toast('Não foi possível salvar o estado das abas (armazenamento cheio).', { tone: 'error' });
-        }
-    }
-
-    /** Loads the saved workspace, migrating the pre-2.0 format if needed. */
-    restore() {
-        let data = this.storage.get('workspace');
-        if (!data) {
-            const legacy = this.storage.get('sessionState');
-            if (legacy?.terminals?.length) {
-                data = {
-                    workspaces: [{
-                        id: 'default',
-                        activeId: legacy.activeTabId,
-                        sessions: legacy.terminals
-                            .sort((a, b) => (a.order || 0) - (b.order || 0))
-                            .map(t => ({ id: t.id, name: t.name, content: t.content || '' })),
-                    }],
-                };
-                this.storage.remove('sessionState');
-            }
-        }
-
-        const ws = data?.workspaces?.find(w => w.id === (data.currentWorkspace || 'default'))
-            || data?.workspaces?.[0];
-        if (!ws || !ws.sessions?.length) {
-            this.create();
+    async reconcile() {
+        let data;
+        try {
+            data = await api('GET', 'sessions');
+        } catch (e) {
+            console.warn('Could not refresh sessions:', e);
             return;
         }
+        this.recents = data.recent || [];
+        const rows = data.sessions || [];
+        const ids = new Set(rows.map(r => r.id));
 
-        this.colorIndex = data.colorIndex || 0;
-        ws.sessions.forEach(s => this.create({
-            id: s.id,
-            name: s.name,
-            pinned: !!s.pinned,
-            color: s.color,
-            cwd: s.cwd,
-            content: this.settings.get('restoreContent') ? (s.content || '') : '',
-            activate: false,
-        }));
-        this.counter = Math.max(this.counter, data.counter || 0);
-        const activeId = this.sessions.has(ws.activeId) ? ws.activeId : this.order[0];
-        this.activate(activeId, { focus: !isCoarse() });
+        this.order.filter(id => !ids.has(id)).forEach(id => this.removeLocal(id));
+        rows.forEach(row => {
+            const existing = this.sessions.get(row.id);
+            if (existing) {
+                existing.applyRow(row);
+                this.onSessionChanged(existing);
+            } else {
+                this.addSession(row);
+            }
+        });
+        // Server order is the source of truth
+        this.sessions = new Map(rows.filter(r => this.sessions.has(r.id)).map(r => [r.id, this.sessions.get(r.id)]));
+        this.normalizeOrder();
+        if (this.activeId === null && this.sessions.size) this.activate(this.order[0]);
+    }
+
+    /** Loads the tabs from the server (first run: migrates tabs saved by older versions). */
+    async restore() {
+        let data;
+        try {
+            data = await api('GET', 'sessions');
+        } catch (e) {
+            console.error('Failed to load sessions:', e);
+            toast('Não foi possível carregar as sessões.', {
+                tone: 'error',
+                duration: 10000,
+                action: { label: 'Tentar de novo', run: () => this.restore() },
+            });
+            return;
+        }
+        this.recents = data.recent || [];
+        let rows = data.sessions || [];
+
+        // Older versions kept tabs in localStorage: carry names/dirs over once
+        const legacy = this.storage.get('workspace')?.workspaces?.[0]?.sessions
+            || this.storage.get('sessionState')?.terminals || [];
+        if (!rows.length && legacy.length) {
+            for (const tab of legacy) {
+                try {
+                    rows.push(await api('POST', 'sessions', { name: tab.name, cwd: tab.cwd || undefined }));
+                } catch { /* skip */ }
+            }
+        }
+        ['workspace', 'sessionState', 'recent'].forEach(key => this.storage.remove(key));
+
+        if (!rows.length) {
+            await this.create();
+            return;
+        }
+        rows.forEach(row => this.addSession(row));
+        this.normalizeOrder();
+        const saved = this.storage.get('activeSession');
+        this.activate(this.sessions.has(saved) ? saved : this.order[0], { focus: !isCoarse() });
     }
 }
 

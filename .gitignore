@@ -143,3 +143,6 @@ data/
 # Generated PWA Files
 /public/*manifest.json
 /public/assets/*manifest.json
+
+# Sessions database (local runs and docker-compose volume)
+db/
