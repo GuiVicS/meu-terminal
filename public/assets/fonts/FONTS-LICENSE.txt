@@ -1,0 +1,18 @@
+Bundled fonts
+=============
+
+Inter (Inter-*.woff2)
+  Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  Licensed under the SIL Open Font License, Version 1.1
+
+JetBrains Mono (JetBrainsMono-*.woff2)
+  Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+  Licensed under the SIL Open Font License, Version 1.1
+
+FiraCode Nerd Font (FiraCodeNerdFontMono-*.ttf)
+  Fira Code: Copyright (c) 2014 The Fira Code Project Authors (https://github.com/tonsky/FiraCode)
+  Nerd Fonts patches: https://github.com/ryanoasis/nerd-fonts
+  Licensed under the SIL Open Font License, Version 1.1
+
+The woff2 files are the Latin subsets distributed by Fontsource (https://fontsource.org).
+Full license text: https://openfontlicense.org/open-font-license-official-text/

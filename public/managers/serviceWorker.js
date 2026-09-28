@@ -375,114 +375,44 @@ export default class ServiceWorkerManager {
     }
 
     /**
-     * Shows a notification when updates are available
+     * Silently applies an available update (no "new version" prompt)
      * @param {string} currentVersion - Current installed version
      * @param {string} newVersion - New available version
      */
     showUpdateNotification(currentVersion, newVersion) {
-        console.log(`Showing update notification: current=${currentVersion}, new=${newVersion}`);
-        
-        // Validate versions before showing
-        if (!this.shouldShowUpdateNotification(currentVersion, newVersion)) {
-            console.log("Update notification skipped - invalid version comparison");
-            return;
-        }
-        
-        // Check if we're already showing a notification for this version pair
+        if (!this.shouldShowUpdateNotification(currentVersion, newVersion)) return;
+
+        // Avoid triggering the same update more than once
         const versionPair = `${currentVersion}-${newVersion}`;
-        if (this.updateNotificationActive && this.lastCheckedVersionPair === versionPair) {
-            console.log("Update notification already active for this version pair, skipping duplicate");
-            return;
-        }
-        
-        // Clear any existing update timeout to prevent race conditions
-        if (this.updateTimeout) {
-            clearTimeout(this.updateTimeout);
-            this.updateTimeout = null;
-        }
-        
-        // Update tracking variables
+        if (this.updateNotificationActive && this.lastCheckedVersionPair === versionPair) return;
+
         this.updateNotificationActive = true;
         this.lastCheckedVersionPair = versionPair;
-        
-        // Remove any existing notifications
-        const existingNotifications = document.querySelectorAll('.update-notification');
-        existingNotifications.forEach(notification => notification.remove());
-        
-        // Create new notification
-        const updateNotification = document.createElement('div');
-        updateNotification.className = 'update-notification';
-        updateNotification.innerHTML = `
-            <p>New version v${newVersion} available!</p>
-            <p class="update-details">Current: v${currentVersion}</p>
-            <button id="update-now">Update Now</button>
-            <button id="update-later" class="secondary">Later</button>
-        `;
-        document.body.appendChild(updateNotification);
-        
-        // Set up buttons
-        document.getElementById('update-now').addEventListener('click', () => {
-            this.handleUpdateRequest(updateNotification);
-        });
-        
-        document.getElementById('update-later').addEventListener('click', () => {
-            updateNotification.remove();
-            this.updateNotificationActive = false;
-        });
-        
-        // Log to console for debugging
-        console.log(`Update notification displayed for ${currentVersion} → ${newVersion}`);
+
+        console.log(`Applying update silently: ${currentVersion} → ${newVersion}`);
+        this.handleUpdateRequest();
     }
 
     /**
-     * Handles a user request to update the application
-     * @param {HTMLElement} notification - The notification element
+     * Requests the service worker to update the application
      */
-    handleUpdateRequest(notification) {
-        // Show loading state
-        const updateButton = notification.querySelector('#update-now');
-        updateButton.innerHTML = 'Updating...';
-        updateButton.disabled = true;
-        
-        // Also update version display to show loading state
-        if (this.updateVersionDisplayCallback) {
-            this.updateVersionDisplayCallback(null, true); // true indicates loading state
-        }
-        
-        // Set a timeout to handle cases where the update might hang
+    handleUpdateRequest() {
+        // Allow a new attempt if the update hangs
         if (this.updateTimeout) clearTimeout(this.updateTimeout);
         this.updateTimeout = setTimeout(() => {
-            // Remove any notifications
-            const existingNotifications = document.querySelectorAll('.update-notification');
-            existingNotifications.forEach(notification => notification.remove());
-            
-            // Show timeout error
-            const errorNotification = document.createElement('div');
-            errorNotification.className = 'update-notification error';
-            errorNotification.innerHTML = `
-                <p>Update timed out. Please try again.</p>
-                <button onclick="this.parentElement.remove()">Dismiss</button>
-            `;
-            document.body.appendChild(errorNotification);
-            setTimeout(() => {
-                errorNotification.remove();
-                this.updateNotificationActive = false;
-            }, 5000);
-            
-            // Restore version display
-            if (this.updateVersionDisplayCallback) {
-                this.updateVersionDisplayCallback();
-            }
+            console.warn("Update timed out");
+            this.updateNotificationActive = false;
         }, 30000); // 30 second timeout
-        
+
         if (navigator.serviceWorker.controller) {
             // Request the update via service worker
             navigator.serviceWorker.controller.postMessage({ type: 'PERFORM_UPDATE' });
         } else {
-            // No service worker controller, try to force reload
-            console.log("No service worker controller, forcing page reload");
+            // No service worker controller: the page was already loaded from the network
+            console.log("No service worker controller, skipping update");
+            clearTimeout(this.updateTimeout);
+            this.updateTimeout = null;
             this.updateNotificationActive = false;
-            window.location.reload(true);
         }
     }
 
@@ -500,21 +430,9 @@ export default class ServiceWorkerManager {
         // Reset notification tracking state
         this.updateNotificationActive = false;
         this.lastCheckedVersionPair = null;
-        
-        // Remove any existing update notifications
-        const existingNotifications = document.querySelectorAll('.update-notification');
-        existingNotifications.forEach(notification => notification.remove());
-        
+
         if (data.success === false) {
-            // Show error notification
-            const errorNotification = document.createElement('div');
-            errorNotification.className = 'update-notification error';
-            errorNotification.innerHTML = `
-                <p>Update failed: ${data.error || 'Unknown error'}</p>
-                <button onclick="this.parentElement.remove()">Dismiss</button>
-            `;
-            document.body.appendChild(errorNotification);
-            setTimeout(() => errorNotification.remove(), 5000);
+            console.error(`Update failed: ${data.error || 'Unknown error'}`);
         } else {
             // Store cacheName if available for future use
             if (data.cacheName) {
@@ -549,10 +467,8 @@ export default class ServiceWorkerManager {
             return false;
         }
         
-        // Clear any existing notification first
+        // Reset any pending update state first
         if (this.updateNotificationActive) {
-            const existingNotifications = document.querySelectorAll('.update-notification');
-            existingNotifications.forEach(notification => notification.remove());
             this.updateNotificationActive = false;
             this.lastCheckedVersionPair = null;
         }

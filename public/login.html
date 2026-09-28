@@ -1,58 +1,67 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="pt-BR" data-theme="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title id="pageTitle">DumbTerm</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#121212">
+    <meta name="color-scheme" content="dark light">
+    <title id="pageTitle">MeuTerminal</title>
     <script src="config.js"></script>
-    <link rel="stylesheet" href="styles.css">
-    <link rel="icon" type="image/svg+xml" href="assets/terminal.svg">
     <script>
-        (function() { // Sempre dark - aplica o tema antes do render para evitar flicker
+        // Same theme preference as the app (saved by the settings dialog)
+        (function () {
             var theme = 'dark';
-            localStorage.setItem('theme', theme);
+            try {
+                var saved = JSON.parse(localStorage.getItem('dumbterm-settings') || '{}').theme;
+                if (saved === 'light' || saved === 'dark') theme = saved;
+                else if (saved === 'system') {
+                    theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+                }
+            } catch (e) { /* keep dark */ }
             document.documentElement.setAttribute('data-theme', theme);
         })();
     </script>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/svg+xml" href="assets/terminal.svg">
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.json">
 </head>
-<body>
-    <main>
-        <div class="header-top">
-            <div id="demo-banner" style="display: none;" class="demo-banner">
-                <span>🧪 DEMO MODE - Terminal is simulated</span>
-            </div>
+<body class="page-login">
+    <main class="login">
+        <div class="login-card">
+            <div id="demo-banner" class="demo-banner demo-banner-login" hidden>Modo demonstração — o terminal é simulado</div>
+            <span class="brand-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor"
+                    stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 8l4 4-4 4"/><path d="M13 16h5"/>
+                </svg>
+            </span>
+            <h1 class="login-title" id="siteTitle">MeuTerminal</h1>
+            <p class="login-subtitle" id="loginSubtitle">Entre para acessar suas sessões</p>
+
+            <!-- Email + password (AUTH_EMAIL / AUTH_PASSWORD) -->
+            <form id="emailForm" class="login-form" novalidate hidden>
+                <label class="field">
+                    <span class="field-label">Email</span>
+                    <input type="email" name="email" autocomplete="username" inputmode="email"
+                        autocapitalize="off" spellcheck="false" required>
+                </label>
+                <label class="field">
+                    <span class="field-label">Senha</span>
+                    <input type="password" name="password" autocomplete="current-password" required>
+                </label>
+                <p class="login-error" id="loginError" role="alert"></p>
+                <button type="submit" class="btn btn-primary">Entrar</button>
+            </form>
+
+            <!-- Legacy PIN (only when email login is not configured) -->
+            <form id="pinForm" action="verify-pin" method="POST" hidden>
+                <div class="pin-input-container"></div>
+                <div class="pin-error" role="alert" aria-hidden="true">PIN incorreto. Tente novamente.</div>
+            </form>
         </div>
-        <form id="pinForm" action="verify-pin" method="POST">
-            <div class="header-right">
-                <button id="themeToggle" aria-label="Toggle theme" type="button">
-                    <svg class="moon" viewBox="0 0 24 24">
-                        <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                        <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
-                    </svg>
-                    <svg class="sun" viewBox="0 0 24 24">
-                        <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                        <path d="M14.828 14.828a4 4 0 1 0 -5.656 -5.656a4 4 0 0 0 5.656 5.656z" />
-                        <path d="M6.343 17.657l-1.414 1.414" />
-                        <path d="M6.343 6.343l-1.414 -1.414" />
-                        <path d="M17.657 6.343l1.414 -1.414" />
-                        <path d="M17.657 17.657l1.414 1.414" />
-                        <path d="M4 12h-2" />
-                        <path d="M12 4v-2" />
-                        <path d="M20 12h2" />
-                        <path d="M12 20v2" />
-                    </svg>
-                </button>
-            </div>
-            <img src="assets/terminal-mark.svg" alt="" class="brand-mark" width="56" height="56">
-            <h1 id="siteTitle">DumbTerm</h1>
-            <h2>Enter PIN</h2>
-            <div class="pin-input-container"></div>
-            <div class="pin-error" role="alert" aria-hidden="true">Incorrect PIN. Please try again.</div>
-        </form>
     </main>
-    <div class="dumbware-credit">
-        Built by <a href="https://dumbware.io" target="_blank" rel="noopener noreferrer">DumbWare</a>
-    </div>
     <script type="module" src="login.js"></script>
 </body>
-</html> 
+</html>
