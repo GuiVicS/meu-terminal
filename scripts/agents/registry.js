@@ -40,14 +40,23 @@ const AGENTS = {
 };
 
 /**
- * Merges optional overrides, e.g. from env MT_AGENT_CLAUDE_COMMAND="/opt/bin/claude-agent-acp".
+ * Merges optional overrides from the environment, e.g.
+ *   MT_AGENT_CLAUDE_COMMAND=/opt/bin/claude-agent-acp
+ *   MT_AGENT_CLAUDE_ARGS='["--flag"]'   (JSON array; with a custom command it replaces the args)
  * @param {object} [env]
  */
 function loadAgents(env = process.env) {
     const agents = {};
     for (const [id, def] of Object.entries(AGENTS)) {
-        const key = `MT_AGENT_${id.toUpperCase()}_COMMAND`;
-        agents[id] = env[key] ? { ...def, command: env[key], args: [] } : { ...def };
+        const command = env[`MT_AGENT_${id.toUpperCase()}_COMMAND`];
+        let args = null;
+        try {
+            const parsed = JSON.parse(env[`MT_AGENT_${id.toUpperCase()}_ARGS`] || 'null');
+            if (Array.isArray(parsed)) args = parsed.map(String);
+        } catch { /* invalid JSON: ignored */ }
+        agents[id] = { ...def };
+        if (command) Object.assign(agents[id], { command, args: args || [] });
+        else if (args) agents[id].args = args;
     }
     return agents;
 }

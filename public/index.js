@@ -18,6 +18,7 @@ import { createSettingsDialog, createShortcutsDialog } from './ui/dialogs.js';
 import { showMenu } from './ui/contextMenu.js';
 import { icon } from './ui/icons.js';
 import VibeForm from './ui/vibeForm.js';
+import AgentLaunch from './ui/agentLaunch.js';
 import { toast } from './ui/toast.js';
 
 const STATE_LABELS = {
@@ -240,6 +241,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ---------- dialogs ----------
     settingsDialog = createSettingsDialog(settings, () => workspace?.active, commands);
     const vibeForm = new VibeForm();
+    const agentLaunch = new AgentLaunch();
 
     // ---------- workspace ----------
     workspace = new TerminalManager({
@@ -290,6 +292,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             onVibeForm: m => {
                 if (m.type === 'vibe-form') vibeForm.open({ defaults: m.defaults, requestId: m.requestId });
                 else vibeForm.closeRequest(m.requestId);
+            },
+            // "Deseja usar o modo Claude Code UI?" (an agent was typed in a terminal)
+            onAgentLaunch: m => {
+                if (m.type === 'agent-launch') agentLaunch.open(m);
+                else agentLaunch.closeRequest(m.requestId);
             },
             onAction: action => {
                 if (action === 'fullscreen') toggleFullscreen();

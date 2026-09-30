@@ -8,6 +8,7 @@ import StorageManager from './storage.js';
 import TerminalSession, { STATE } from './session.js';
 import BrowserSession from './browserSession.js';
 import FilesSession from './filesSession.js';
+import AgentSession from './agentSession.js';
 import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
@@ -133,7 +134,8 @@ export default class TerminalManager {
     /** Creates a tab view for a server session (no request). Idempotent. */
     addSession(row, { index, activate = false } = {}) {
         if (this.sessions.has(row.id)) return this.sessions.get(row.id);
-        const Kind = row.kind === 'browser' ? BrowserSession : row.kind === 'files' ? FilesSession : TerminalSession;
+        const Kind = row.kind === 'browser' ? BrowserSession : row.kind === 'files' ? FilesSession
+            : row.kind === 'agent' ? AgentSession : TerminalSession;
         const session = new Kind({ row, settings: this.settings, hooks: this.hooks });
 
         const at = index ?? this.sessions.size;
@@ -448,6 +450,11 @@ export default class TerminalManager {
             this.create({ kind: 'files', name: s.name, url: s.source, cwd: s.path, afterId: id });
             return;
         }
+        // An agent conversation cannot be cloned: open a terminal in its folder instead
+        if (s.kind === 'agent') {
+            this.create({ cwd: s.cwd || undefined, afterId: id });
+            return;
+        }
         // A duplicate is a new shell in the same directory - processes can't be cloned
         this.create({ name: s.name, cwd: s.cwd || s.startCwd, afterId: id });
     }
@@ -643,7 +650,7 @@ export default class TerminalManager {
             const s = this.sessions.get(id);
             return {
                 label: s.name,
-                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : 'terminal',
+                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : s.kind === 'agent' ? 'bot' : 'terminal',
                 hint: s.displayCwd(),
                 checked: id === this.activeId,
                 run: () => this.activate(id),
@@ -794,6 +801,8 @@ export default class TerminalManager {
             else this.clearSplit({ keep: m.a });
         } else if (m.type === 'vibe-form' || m.type === 'vibe-form-close') {
             this.events.onVibeForm?.(m);
+        } else if (m.type === 'agent-launch' || m.type === 'agent-launch-close') {
+            this.events.onAgentLaunch?.(m);
         }
     }
 

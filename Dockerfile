@@ -50,6 +50,10 @@ RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes
 # the home volume, so every deploy brings the current version.
 RUN npm install -g --prefix /usr/local @anthropic-ai/claude-code && npm cache clean --force
 
+# Agent UI ("Deseja usar o modo Claude Code UI?"): Claude Code over ACP (scripts/agents/).
+# OpenCode speaks ACP natively; Codex needs @agentclientprotocol/codex-acp (installed by the user).
+RUN npm install -g --prefix /usr/local @agentclientprotocol/claude-agent-acp && npm cache clean --force
+
 WORKDIR /app
 
 # Copy package files first for better layer caching

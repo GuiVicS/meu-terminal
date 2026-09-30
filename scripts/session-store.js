@@ -114,6 +114,17 @@ class SessionStore {
         return next;
     }
 
+    /** Small app settings kept with the sessions (e.g. agent UI preferences). */
+    getMeta(key) {
+        const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key);
+        return row ? row.value : null;
+    }
+
+    setMeta(key, value) {
+        this.db.prepare(`INSERT INTO meta (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, String(value));
+    }
+
     transaction(fn) {
         this.db.exec('BEGIN');
         try {

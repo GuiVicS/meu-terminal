@@ -21,6 +21,10 @@ const { FileManager, FileError } = require('./scripts/file-manager');
 const { LiveServers } = require('./scripts/live-server');
 const { Vibe } = require('./scripts/vibe');
 const { PushNotifier } = require('./scripts/push');
+const AgentStore = require('./scripts/agents/agent-store');
+const { AgentGateway, GatewayError } = require('./scripts/agents/gateway');
+const { AgentLauncher } = require('./scripts/agents/launch');
+const { writeShims } = require('./scripts/agents/shims');
 
 const app = express();
 const server = http.createServer(app);
@@ -40,6 +44,9 @@ const ASSETS_DIR = path.join(PUBLIC_DIR, 'assets');
 const CACHE_NAME = `MEUTERMINAL_CACHE_V${APP_VERSION}`;
 // SQLite file with the sessions (tabs). Mount its folder as a volume to keep it across deploys.
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'meuterminal.db');
+// Agent UI: "claude", "codex", "opencode" shims put first on the shells' PATH (bash only)
+const AGENT_UI_ENABLED = !DEMO_MODE && process.platform !== 'win32' && process.env.AGENT_UI !== 'off';
+const AGENT_SHIM_DIR = path.join(path.dirname(DB_PATH), 'agent-bin');
 const SHELL = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash');
 const HOME_DIR = DEMO_MODE ? '/home/demo' : (process.env.HOME || os.homedir());
 
@@ -279,6 +286,11 @@ app.use(BASE_PATH, (req, res, next) => {
 
     // Check if the current path matches any of the public paths
     if (publicPaths.some(path => req.path.startsWith(path))) {
+        return next();
+    }
+    // Agent shims (terminal "usar o modo UI?"): own check like /mcp (local + bearer token).
+    // Exact match only: /api/agent-launch/answer comes from the app and needs the login.
+    if (req.path === '/api/agent-launch') {
         return next();
     }
 
@@ -657,6 +669,171 @@ app.get(BASE_PATH + '/api/mcp-info', (req, res) => {
     });
 });
 
+// ---------- Agent UI (scripts/agents/) ----------
+
+/** Is `command` an executable on the server's PATH (or an absolute path)? */
+function commandExists(command) {
+    if (!command) return false;
+    const candidates = path.isAbsolute(command)
+        ? [command]
+        : (process.env.PATH || '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, command));
+    return candidates.some(file => {
+        try {
+            fs.accessSync(file, fs.constants.X_OK);
+            return fs.statSync(file).isFile();
+        } catch {
+            return false;
+        }
+    });
+}
+
+const agentGateway = new AgentGateway({
+    store: new AgentStore(DB_PATH),
+    // Agents never get the popup themselves (their shells are not TTYs anyway)
+    env: { ...process.env, MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN },
+    // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
+    mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
+    log: debugLog,
+});
+const agentLauncher = new AgentLauncher({
+    gateway: agentGateway,
+    sessions,
+    prefs: { get: key => sessionStore.getMeta(key), set: (key, value) => sessionStore.setMeta(key, value) },
+    commandExists,
+    log: debugLog,
+});
+if (AGENT_UI_ENABLED) {
+    try {
+        writeShims(AGENT_SHIM_DIR, agentGateway.listAgents().filter(a => !a.terminalOnly).map(a => a.id));
+    } catch (e) {
+        console.error('Could not write agent shims:', e.message);
+    }
+}
+
+/** Runs an agent route: GatewayError -> its status; anything else -> 500. */
+function agentRoute(handler) {
+    return async (req, res) => {
+        try {
+            await handler(req, res);
+        } catch (e) {
+            const status = e instanceof GatewayError ? e.status : 500;
+            if (status >= 500) console.error('Agent route error:', e);
+            res.status(status).json({ error: e.message });
+        }
+    };
+}
+
+// The shim in a terminal asks "open this agent in the UI?" (loopback + token, like the MCP).
+// The request stays open until someone answers the popup (or it times out -> terminal).
+app.post(BASE_PATH + '/api/agent-launch', mcpAuth, agentRoute(async (req, res) => {
+    const { agent, cwd, tabId, prompt } = req.body || {};
+    res.json(await agentLauncher.launch({
+        agent: String(agent || ''),
+        cwd: typeof cwd === 'string' ? cwd : '',
+        tabId: typeof tabId === 'string' ? tabId : null,
+        prompt: typeof prompt === 'string' && prompt.trim() ? prompt.slice(0, 20000) : null,
+    }));
+}));
+
+// Popup answered in a window ([Sim] / [Não], optionally "lembrar minha escolha")
+app.post(BASE_PATH + '/api/agent-launch/answer', (req, res) => {
+    const { requestId, choice, remember } = req.body || {};
+    if (!agentLauncher.answer(String(requestId || ''), { choice, remember: !!remember })) {
+        return res.status(410).json({ error: 'Essa pergunta já foi respondida ou expirou.' });
+    }
+    res.json({ success: true });
+});
+
+app.get(BASE_PATH + '/api/agent-prefs', (req, res) => res.json(agentLauncher.getPrefs()));
+app.put(BASE_PATH + '/api/agent-prefs', (req, res) => res.json(agentLauncher.setPrefs(req.body || {})));
+
+app.get(BASE_PATH + '/api/agents', (req, res) => {
+    res.json({
+        enabled: AGENT_UI_ENABLED,
+        agents: agentGateway.listAgents().map(a => ({
+            ...a,
+            installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].command),
+        })),
+    });
+});
+
+app.get(BASE_PATH + '/api/agent-sessions/:id', agentRoute(async (req, res) => {
+    const session = agentGateway.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
+    res.json(session);
+}));
+
+app.get(BASE_PATH + '/api/agent-sessions/:id/history', agentRoute(async (req, res) => {
+    const session = agentGateway.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
+    res.json({ sessions: await agentGateway.listHistory({ agent: session.agent, cwd: session.cwd }) });
+}));
+
+// The turn runs in the background: its progress arrives as events on the tab's socket
+app.post(BASE_PATH + '/api/agent-sessions/:id/prompt', agentRoute(async (req, res) => {
+    const text = String((req.body || {}).text || '');
+    agentGateway.requireRuntime(req.params.id);
+    agentGateway.prompt(req.params.id, text).catch(e => debugLog('Agent prompt:', e.message));
+    res.status(202).json({ success: true });
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/cancel', agentRoute(async (req, res) => {
+    agentGateway.cancel(req.params.id);
+    res.json({ success: true });
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/mode', agentRoute(async (req, res) => {
+    await agentGateway.setMode(req.params.id, String((req.body || {}).modeId || ''));
+    res.json(agentGateway.get(req.params.id));
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/config', agentRoute(async (req, res) => {
+    const { configId, value } = req.body || {};
+    await agentGateway.setConfigOption(req.params.id, String(configId || ''), value);
+    res.json(agentGateway.get(req.params.id));
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/permission', agentRoute(async (req, res) => {
+    const { permissionId, optionId } = req.body || {};
+    const ok = agentGateway.respondPermission(req.params.id, String(permissionId || ''), {
+        optionId: optionId ? String(optionId) : null,
+        answeredBy: req.ip || null,
+    });
+    if (!ok) return res.status(410).json({ error: 'Essa permissão já foi respondida.' });
+    res.json({ success: true });
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/resume', agentRoute(async (req, res) => {
+    res.json(await agentGateway.resumeSession(req.params.id));
+}));
+
+/**
+ * Agent tab socket: replays the session's events after ?since=<seq>, then streams new ones.
+ * Actions (prompt, permission...) go through the REST routes above.
+ */
+function attachAgentTab(ws, row, since) {
+    sessions.sockets.add(ws);
+    const send = message => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+    };
+    const onEvent = event => {
+        if (event.sessionId === row.url) send({ type: 'agent-event', event });
+    };
+    agentGateway.on('event', onEvent);
+    ws.on('close', () => {
+        sessions.sockets.delete(ws);
+        agentGateway.off('event', onEvent);
+    });
+    const session = agentGateway.get(row.url);
+    if (!session) {
+        send({ type: 'agent-missing' });
+        return;
+    }
+    send({ type: 'agent-session', session });
+    for (const event of agentGateway.events(row.url, since)) send({ type: 'agent-event', event });
+    send({ type: 'ready' });
+}
+
 // Declared before "/:id" so "order" isn't taken for an id
 app.put(BASE_PATH + '/api/sessions/order', (req, res) => {
     sessions.setOrder((req.body || {}).ids);
@@ -676,6 +853,9 @@ app.delete(BASE_PATH + '/api/sessions/:id', (req, res) => {
         browsers.closePage(row.id);
         liveWatches.get(row.id)?.();
         liveWatches.delete(row.id);
+    }
+    if (row && row.kind === 'agent' && row.url) {
+        agentGateway.stopAgent(row.url).catch(e => debugLog('Stopping agent:', e.message));
     }
     if (!sessions.close(req.params.id)) return res.status(404).json({ error: 'Session not found' });
     res.json({ success: true });
@@ -969,6 +1149,8 @@ wss.on('connection', (ws, req) => {
                 quality: params.get('quality'),
                 visible: params.get('visible') !== '0',
             });
+        } else if (row && row.status === 'open' && row.kind === 'agent') {
+            attachAgentTab(ws, row, Math.max(0, Number(params.get('since')) || 0));
         } else if (row && row.status === 'open' && row.kind === 'files') {
             // File tabs use HTTP; the socket only carries workspace notices (MCP open-tab...)
             sessions.sockets.add(ws);
@@ -1039,7 +1221,12 @@ function spawnShell({ id, cwd, cols = 80, rows = 24 }) {
             MEUTERMINAL_MCP_URL: MCP_URL,
             MEUTERMINAL_MCP_TOKEN: MCP_TOKEN,
             // Which tab this shell is (agents pass it to the MCP to open things beside it)
-            ...(id ? { MEUTERMINAL_TAB_ID: id } : {})
+            ...(id ? { MEUTERMINAL_TAB_ID: id } : {}),
+            // Agent UI: shims first on PATH + where they ask "usar o modo UI?" (scripts/agents/)
+            ...(AGENT_UI_ENABLED ? {
+                PATH: `${AGENT_SHIM_DIR}${path.delimiter}${process.env.PATH || ''}`,
+                MEUTERMINAL_API_URL: `http://127.0.0.1:${PORT}${BASE_PATH}/api`,
+            } : {})
         }
     });
 }
@@ -1157,7 +1344,9 @@ function shutdown() {
     browsers.shutdown();
     live.shutdown();
     wss.close();
-    process.exit(0);
+    // Give agent processes a moment to exit cleanly (they are resumable after the restart)
+    Promise.race([agentGateway.shutdown(), new Promise(resolve => setTimeout(resolve, 2000))])
+        .finally(() => process.exit(0));
 }
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
