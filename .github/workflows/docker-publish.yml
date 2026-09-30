@@ -6,7 +6,8 @@ on:
       - main # Trigger the workflow on pushes to the main branch
 
 env:
-  DOCKER_IMAGE: dumbwareio/dumbterm
+  # Docker Hub image: <your Docker Hub user>/meuterminal (secrets DOCKER_USERNAME / DOCKER_PASSWORD)
+  DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/meuterminal
   PLATFORMS: linux/amd64,linux/arm64
 
 jobs:

@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Guia do MeuTerminal</title>
+<meta name="description" content="Como usar o MeuTerminal: abas, terminal, navegador, arquivos, Google Drive, agentes (MCP), login em duas etapas e como não perder dados no deploy.">
+<link rel="icon" type="image/svg+xml" href="assets/terminal.svg">
+<style>
+@font-face { font-family: 'Inter'; src: url('assets/fonts/Inter-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url('assets/fonts/Inter-SemiBold.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url('assets/fonts/Inter-Bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('assets/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+
+:root {
+    color-scheme: light;
+    --bg: #F7F5EE; --surface: #FFFFFF; --surface-2: #EFECE2; --border: #1A1A1A; --hairline: #DDD8C8;
+    --text: #1A1A1A; --text-2: #5C5A52; --accent: #8B2FE0; --accent-soft: rgba(139, 47, 224, 0.10); --accent-fg: #FFFFFF;
+    --success: #13803F; --success-soft: rgba(19, 128, 63, 0.10); --warn: #A45A00; --warn-soft: rgba(164, 90, 0, 0.10);
+    --danger: #C0262D; --danger-soft: rgba(192, 38, 45, 0.08); --code-bg: #1F1F1F; --code-text: #F2F0E3;
+    --shadow: 4px 4px 0 0 var(--border); --shadow-sm: 2px 2px 0 0 var(--border);
+    --radius: 20px; --radius-sm: 12px;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #121212; --surface: #1F1F1F; --surface-2: #2A2A2A; --border: #000000; --hairline: #333333;
+        --text: #F2F0E3; --text-2: #A0A0A0; --accent: #A855F7; --accent-soft: rgba(168, 85, 247, 0.16);
+        --success: #5CEB91; --success-soft: rgba(92, 235, 145, 0.12); --warn: #F5B84A; --warn-soft: rgba(245, 184, 74, 0.12);
+        --danger: #FF6B6B; --danger-soft: rgba(255, 107, 107, 0.10); --code-bg: #0A0A0A;
+    }
+}
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121212; --surface: #1F1F1F; --surface-2: #2A2A2A; --border: #000000; --hairline: #333333;
+    --text: #F2F0E3; --text-2: #A0A0A0; --accent: #A855F7; --accent-soft: rgba(168, 85, 247, 0.16);
+    --success: #5CEB91; --success-soft: rgba(92, 235, 145, 0.12); --warn: #F5B84A; --warn-soft: rgba(245, 184, 74, 0.12);
+    --danger: #FF6B6B; --danger-soft: rgba(255, 107, 107, 0.10); --code-bg: #0A0A0A;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+h1, h2, h3, p, li, td, th { overflow-wrap: anywhere; }
+a { color: var(--accent); }
+code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.875em; }
+p code, li code, td code, h3 code { background: var(--surface-2); padding: 1px 6px; border-radius: 6px; }
+kbd {
+    font: 600 0.8125rem/1 "JetBrains Mono", ui-monospace, monospace; padding: 3px 7px; border-radius: 7px;
+    background: var(--surface); border: 1.5px solid var(--border); box-shadow: 0 2px 0 0 var(--border); white-space: nowrap;
+}
+
+.topbar {
+    position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--hairline);
+}
+.topbar .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; color: var(--text); margin-right: auto; }
+.logo { width: 34px; height: 34px; border-radius: 10px; background: var(--accent); color: #fff; display: grid; place-items: center; border: 2px solid var(--border); box-shadow: var(--shadow-sm); }
+.ghost {
+    font: 500 0.8125rem/1 Inter, sans-serif; color: var(--text-2); background: transparent;
+    border: 1px solid var(--hairline); border-radius: 99px; padding: 8px 12px; min-height: 36px; cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center;
+}
+
+.layout { max-width: 1180px; margin: 0 auto; padding: 24px 16px 80px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; }
+@media (min-width: 980px) { .layout { grid-template-columns: 240px minmax(0, 1fr); } }
+
+.toc { font-size: 0.9rem; }
+.toc details { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
+.toc summary { cursor: pointer; padding: 12px 16px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; }
+.toc summary::-webkit-details-marker { display: none; }
+.toc summary::after { content: "+"; color: var(--accent); font-weight: 700; }
+.toc details[open] summary::after { content: "−"; }
+.toc ol { list-style: none; margin: 0; padding: 0 8px 10px; }
+.toc a { display: block; padding: 7px 10px; border-radius: 10px; color: var(--text-2); text-decoration: none; }
+.toc a:hover, .toc a.current { background: var(--accent-soft); color: var(--accent); }
+@media (min-width: 980px) {
+    .toc { position: sticky; top: 76px; align-self: start; max-height: calc(100vh - 96px); overflow-y: auto; }
+    .toc details { border: 0; box-shadow: none; background: transparent; }
+    .toc summary { display: none; }
+    .toc ol { padding: 0; }
+}
+
+main { min-width: 0; }
+.hero h1 { font-size: clamp(1.7rem, 5vw, 2.4rem); line-height: 1.15; letter-spacing: -0.02em; margin: 8px 0 12px; }
+.lead { color: var(--text-2); font-size: 1.05rem; max-width: 720px; }
+
+section.doc { scroll-margin-top: 72px; margin-top: 44px; }
+section.doc > h2 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 12px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
+section.doc > h2 .n { font: 700 0.85rem/1 "JetBrains Mono", monospace; color: var(--accent); background: var(--accent-soft); border: 2px solid var(--accent); border-radius: 99px; padding: 5px 9px; }
+h3 { font-size: 1.1rem; margin: 26px 0 8px; }
+p { margin: 10px 0; }
+ul, ol { padding-left: 1.3rem; margin: 10px 0; }
+li { margin: 5px 0; }
+
+.card { background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; margin: 18px 0; }
+.grid-cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 16px 0; }
+.grid-cards .card { margin: 0; padding: 16px 18px; }
+.grid-cards h4 { margin: 0 0 6px; font-size: 1rem; }
+.grid-cards p { margin: 0; color: var(--text-2); font-size: 0.93rem; }
+
+.note { border-radius: var(--radius-sm); padding: 12px 16px; margin: 14px 0; border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.note.warn { border-color: var(--warn); background: var(--warn-soft); }
+.note.ok { border-color: var(--success); background: var(--success-soft); }
+.note.danger { border-color: var(--danger); background: var(--danger-soft); }
+.note > :first-child { margin-top: 0; }
+.note > :last-child { margin-bottom: 0; }
+
+.table-wrap { overflow-x: auto; margin: 14px 0; border: 2px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { white-space: nowrap; }
+.yes { color: var(--success); font-weight: 600; }
+.no { color: var(--danger); font-weight: 600; }
+
+.cmd { position: relative; margin: 12px 0; background: var(--code-bg); color: var(--code-text); border-radius: var(--radius-sm); border: 2px solid var(--border); }
+.cmd pre { margin: 0; padding: 14px 16px; padding-right: 92px; overflow-x: auto; font: 0.875rem/1.6 "JetBrains Mono", ui-monospace, monospace; }
+.cmd .label { display: block; padding: 10px 16px 0; font: 600 0.72rem/1 Inter, sans-serif; color: #A0A0A0; text-transform: uppercase; letter-spacing: 0.06em; }
+.copy {
+    position: absolute; right: 8px; bottom: 8px; font: 600 0.8125rem/1 Inter, sans-serif; background: var(--accent); color: #fff;
+    border: 2px solid #000; border-radius: 10px; padding: 8px 12px; min-height: 36px; cursor: pointer; box-shadow: 2px 2px 0 0 #000;
+}
+.copy:active { transform: translate(2px, 2px); box-shadow: none; }
+.copy.ok { background: #13803F; }
+
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps > li { counter-increment: step; position: relative; padding: 2px 0 12px 46px; margin: 0; }
+.steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0; width: 32px; height: 32px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700; font-size: 0.9rem; color: var(--accent); background: var(--accent-soft); border: 2px solid var(--accent);
+}
+
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 4px; }
+.tabs button {
+    font: 600 0.875rem/1 Inter, sans-serif; color: var(--text); background: var(--surface-2); border: 2px solid var(--border);
+    border-radius: 99px; padding: 9px 14px; min-height: 40px; cursor: pointer;
+}
+.tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-fg); box-shadow: var(--shadow-sm); }
+.panel[hidden] { display: none; }
+
+.faq details { border-top: 1px solid var(--hairline); padding: 12px 0; }
+.faq details:first-of-type { border-top: 0; }
+.faq summary { cursor: pointer; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; color: var(--accent); font-weight: 700; }
+.faq details[open] summary::after { content: "−"; }
+
+footer { color: var(--text-2); font-size: 0.85rem; margin-top: 56px; text-align: center; }
+
+@media (max-width: 560px) {
+    .topbar { gap: 8px; padding: 8px 12px; }
+    .topbar .brand { font-size: 0.95rem; line-height: 1.2; }
+    .ghost { white-space: nowrap; padding: 8px 10px; }
+    .card { padding: 16px; }
+    .cmd pre { padding-right: 16px; }
+    .cmd:has(.copy) pre { padding-bottom: 56px; }
+    th, td { padding: 9px 10px; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+    <a class="brand" href="./">
+        <span class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4-4 4"/><path d="M13 16h5"/></svg></span>
+        <span>Guia do MeuTerminal</span>
+    </a>
+    <button class="ghost" id="themeBtn" type="button">Tema</button>
+    <a class="ghost" href="./">Abrir o app</a>
+</header>
+
+<div class="layout">
+    <nav class="toc" aria-label="Conteúdo">
+        <details id="tocDetails">
+            <summary>Conteúdo</summary>
+            <ol>
+                <li><a href="#inicio">Começando</a></li>
+                <li><a href="#abas">Abas</a></li>
+                <li><a href="#terminal">Terminal</a></li>
+                <li><a href="#navegador">Navegador</a></li>
+                <li><a href="#arquivos">Arquivos</a></li>
+                <li><a href="#drive">Google Drive (rclone)</a></li>
+                <li><a href="#agentes">Agentes e MCP</a></li>
+                <li><a href="#login">Login e 2 etapas</a></li>
+                <li><a href="#dados">Não perder dados</a></li>
+                <li><a href="#variaveis">Variáveis de ambiente</a></li>
+                <li><a href="#atalhos">Atalhos de teclado</a></li>
+                <li><a href="#problemas">Problemas comuns</a></li>
+            </ol>
+        </details>
+    </nav>
+
+    <main>
+        <div class="hero">
+            <h1>Como usar o MeuTerminal</h1>
+            <p class="lead">O MeuTerminal é um navegador de sessões para o seu servidor: terminais, páginas e arquivos em abas, iguais no celular e no computador. Os terminais continuam rodando no servidor quando você fecha o app.</p>
+        </div>
+
+        <!-- 1 -->
+        <section class="doc" id="inicio">
+            <h2><span class="n">01</span> Começando</h2>
+            <ul>
+                <li><strong>Entrar:</strong> email e senha, os definidos no servidor em <code>AUTH_EMAIL</code> e <code>AUTH_PASSWORD</code>. Se a verificação em duas etapas estiver ligada, o app também pede o código de 6 dígitos (veja <a href="#login">Login e 2 etapas</a>).</li>
+                <li><strong>Instalar como app no celular:</strong> abra o endereço no Chrome (Android) ou Safari (iPhone) e use "Adicionar à tela inicial". Ele abre em tela cheia, como um app.</li>
+                <li><strong>Menu ⋮</strong> no canto superior direito: novas abas, comandos rápidos, tema, configurações, este guia e sair.</li>
+                <li><strong>Barra de status</strong> (embaixo): conexão, pasta atual, programa rodando, branch do git e hora. No celular, o botão de lista à direita troca de aba.</li>
+            </ul>
+            <div class="grid-cards">
+                <div class="card"><h4>Terminal</h4><p>Shell real no servidor. Continua rodando mesmo com o app fechado.</p></div>
+                <div class="card"><h4>Navegador</h4><p>Veja o projeto que está rodando no servidor (<code>localhost:5173</code>) sem expor portas.</p></div>
+                <div class="card"><h4>Arquivos</h4><p>Gerenciador de arquivos do servidor e do Google Drive: ver, editar, enviar, baixar.</p></div>
+            </div>
+        </section>
+
+        <!-- 2 -->
+        <section class="doc" id="abas">
+            <h2><span class="n">02</span> Abas</h2>
+            <p>As abas ficam salvas <strong>no servidor</strong>: abrindo o app em outro aparelho, você vê as mesmas abas, na mesma ordem.</p>
+            <h3>Criar</h3>
+            <ul>
+                <li><strong>+</strong> na barra de abas abre a página "Nova sessão". Nela você escolhe o tipo (Terminal, Navegador ou Arquivos), o nome e a pasta ou o endereço, e pode reabrir abas fechadas recentemente.</li>
+                <li>Pelo menu ⋮ ou pelos atalhos: <kbd>Ctrl+Alt+T</kbd> terminal, <kbd>Ctrl+Alt+B</kbd> navegador, <kbd>Ctrl+Alt+E</kbd> arquivos.</li>
+            </ul>
+            <h3>Organizar</h3>
+            <ul>
+                <li><strong>Menu da aba:</strong> botão direito no computador ou toque longo no celular. Tem: duplicar, renomear, fixar, mover e fechar outras ou à direita. Numa aba de terminal, "Abrir pasta atual nos Arquivos" abre um gerenciador na pasta onde o shell está.</li>
+                <li><strong>Arrastar</strong> uma aba muda a ordem. Abas <strong>fixadas</strong> ficam sempre à esquerda e não fecham com "Fechar outras".</li>
+                <li><strong>Duplo clique</strong> no nome (ou <kbd>Ctrl+Alt+R</kbd>) renomeia.</li>
+            </ul>
+            <h3>Fechar e reabrir</h3>
+            <div class="note warn">
+                <p><strong>Fechar a aba (✕) encerra o processo dela</strong>: o shell e o que estiver rodando nele. Fechar o app, o navegador ou o celular <strong>não</strong> encerra nada.</p>
+            </div>
+            <p>Logo depois de fechar aparece "Reabrir" no aviso. Também dá para usar <kbd>Ctrl+Alt+Shift+T</kbd> ou a lista "Sessões recentes" da página de nova sessão. A aba reaberta começa um shell novo na mesma pasta.</p>
+        </section>
+
+        <!-- 3 -->
+        <section class="doc" id="terminal">
+            <h2><span class="n">03</span> Terminal</h2>
+            <p>É um terminal de verdade (bash no servidor, com Starship). Programas como <code>vim</code>, <code>htop</code>, <code>claude</code> e <code>npm run dev</code> funcionam normalmente. Ao voltar para uma aba, a tela aparece como estava.</p>
+            <h3>Barra de atalhos (celular)</h3>
+            <p>Aparece acima do teclado quando você digita no terminal:</p>
+            <ul>
+                <li><kbd>ESC</kbd> <kbd>TAB</kbd> <kbd>CTRL</kbd> <kbd>ALT</kbd> e as setas. <kbd>CTRL</kbd>/<kbd>ALT</kbd> valem para a próxima tecla (ex.: CTRL e depois <kbd>c</kbd> = Ctrl+C).</li>
+                <li><kbd>…</kbd> mostra mais teclas: HOME, END, PGUP, PGDN, <code>| / ~ - $ &amp; &gt;</code>.</li>
+                <li><strong>⚡ Comandos rápidos:</strong> lista de comandos salvos. Cadastre em Configurações → Comandos rápidos; ficam no servidor, iguais em todo aparelho. Cada um pode só digitar ou já apertar Enter.</li>
+                <li><strong>📋 Colar:</strong> um toque cola o que está copiado no celular. <strong>Segure</strong> para ver "Copiados recentemente", o histórico, que fica só neste aparelho.</li>
+                <li><strong>🎤 Microfone:</strong> dita o texto por voz e digita no terminal.</li>
+            </ul>
+            <p>Em Configurações → "Barra de atalhos" dá para deixar a barra sempre visível.</p>
+            <h3>Gestos</h3>
+            <ul>
+                <li><strong>Arrastar com 1 dedo</strong> rola o histórico. Dentro de programas de tela cheia (vim, htop, Claude Code), rola o próprio programa, no ponto onde está o dedo.</li>
+                <li><strong>Toque com 2 dedos</strong> é o botão direito: abre o menu com colar, copiar tudo, comandos e copiados recentes.</li>
+            </ul>
+            <h3>Outros</h3>
+            <ul>
+                <li><kbd>Ctrl+F</kbd> busca no terminal.</li>
+                <li>Botão de tela cheia (ou <kbd>Ctrl+Alt+F</kbd>): no iPhone vira "modo foco", que esconde a interface.</li>
+                <li>Configurações: fonte, altura da linha, cursor, histórico de rolagem, tema e pasta inicial dos terminais. Essas preferências ficam salvas por aparelho.</li>
+            </ul>
+        </section>
+
+        <!-- 4 -->
+        <section class="doc" id="navegador">
+            <h2><span class="n">04</span> Navegador</h2>
+            <p>Um navegador (Chromium) roda <strong>no servidor</strong> e aparece na aba como imagem. Serve para ver o projeto que você está rodando lá: <code>localhost</code> é o próprio servidor, sem abrir portas para a internet.</p>
+            <ul>
+                <li>Digite <code>5173</code>, <code>localhost:3000</code> ou um site na barra de endereço.</li>
+                <li>O botão de atividade lista as <strong>portas abertas</strong> no servidor (projetos rodando). A página de nova aba também mostra essas portas.</li>
+                <li>Toque é clique, arrastar rola e 2 dedos é o botão direito. O botão de teclado abre o teclado do celular para digitar na página.</li>
+                <li>O botão de engrenagem troca o tamanho (da aba, celular 390×844 ou desktop 1280×800) e a qualidade da imagem. Use "Leve (4G)" em conexões ruins.</li>
+                <li>Logins e cookies das páginas ficam salvos no servidor.</li>
+            </ul>
+        </section>
+
+        <!-- 5 -->
+        <section class="doc" id="arquivos">
+            <h2><span class="n">05</span> Arquivos</h2>
+            <p>Gerenciador de arquivos do servidor e das nuvens configuradas no rclone (Google Drive etc.). Abra pelo ⋮ → "Gerenciador de arquivos" ou com <kbd>Ctrl+Alt+E</kbd>.</p>
+            <h3>Navegar</h3>
+            <ul>
+                <li><strong>Painel lateral</strong> (botão à esquerda da barra): Início (sua home), Raiz do servidor, Nuvem (remotes do rclone) e Favoritos.</li>
+                <li>O <strong>caminho</strong> no topo é clicável. A seta ↑ sobe uma pasta; no computador também há voltar e avançar.</li>
+                <li>A aba lembra a pasta em que está, em todos os aparelhos.</li>
+            </ul>
+            <h3>No celular</h3>
+            <ul>
+                <li><strong>Toque</strong> abre pasta ou arquivo.</li>
+                <li><strong>Toque longo</strong> seleciona. Depois disso, cada toque adiciona ou tira da seleção. A barra embaixo tem copiar, recortar, baixar, excluir e mais.</li>
+                <li><strong>⋮ em cada item</strong> abre todas as ações daquele item.</li>
+                <li>O botão <strong>+</strong> cria pasta ou arquivo e envia arquivos do celular.</li>
+            </ul>
+            <h3>No computador</h3>
+            <ul>
+                <li>Clique seleciona, duplo clique abre, botão direito abre o menu. <kbd>Ctrl</kbd>/<kbd>Shift</kbd> + clique seleciona vários.</li>
+                <li><strong>Arraste arquivos do computador</strong> para a janela para enviar (ou para cima de uma pasta, para enviar para dentro dela).</li>
+                <li><strong>Arraste itens</strong> para uma pasta ou para o caminho do topo para mover. Com <kbd>Ctrl</kbd> ou <kbd>Alt</kbd>, copia.</li>
+                <li>Clique nos títulos das colunas (Nome, Tamanho, Modificado) para ordenar.</li>
+            </ul>
+            <h3>Ações</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Ação</th><th>Como</th></tr>
+                <tr><td>Ver / editar</td><td>Abrir um arquivo mostra imagens, vídeos, áudios e PDFs. Textos e código abrem num editor: <kbd>Ctrl+S</kbd> ou o botão Salvar. Se o arquivo mudar em outro lugar enquanto está aberto, o app avisa antes de sobrescrever.</td></tr>
+                <tr><td>Copiar / mover</td><td>Copiar ou Recortar, abrir a pasta de destino e tocar em "Colar aqui" / "Mover para cá". Funciona entre o servidor e o Drive, nos dois sentidos.</td></tr>
+                <tr><td>Enviar</td><td>Botão de enviar (↑), o <strong>+</strong> no celular, ou arrastar. Se já existir um arquivo com o mesmo nome, o novo vira "nome (1)".</td></tr>
+                <tr><td>Baixar</td><td>Arquivo: baixa direto. Pasta ou vários itens do servidor: um <code>.tar.gz</code>.</td></tr>
+                <tr><td>Buscar</td><td>Lupa: digitar filtra a pasta atual; "Buscar em subpastas" (ou Enter) procura em tudo abaixo. <code>node_modules</code> e <code>.git</code> ficam de fora.</td></tr>
+                <tr><td>Outros</td><td>Renomear, duplicar, excluir, propriedades (tamanho da pasta, permissões), copiar caminho, adicionar aos favoritos, <strong>abrir terminal aqui</strong>, mostrar ocultos, lista ou grade.</td></tr>
+            </table></div>
+            <div class="note danger">
+                <p><strong>Excluir no servidor é definitivo</strong>: não existe lixeira. No Google Drive, os arquivos excluídos vão para a lixeira do Drive.</p>
+            </div>
+        </section>
+
+        <!-- 6 -->
+        <section class="doc" id="drive">
+            <h2><span class="n">06</span> Google Drive (rclone)</h2>
+            <p>O gerenciador de arquivos mostra qualquer nuvem configurada no <a href="https://rclone.org" target="_blank" rel="noopener">rclone</a>: Google Drive, OneDrive, Dropbox, S3 e outras. O rclone já vem instalado no Docker. A configuração fica em <code>/root/.config/rclone</code>, que sobrevive aos deploys.</p>
+            <h3>Configurar o Google Drive</h3>
+            <p>Abra um terminal no app e rode:</p>
+            <div class="cmd"><pre><code>rclone config</code></pre><button class="copy" type="button">Copiar</button></div>
+            <ol class="steps">
+                <li><code>n</code> (novo remote) e dê um nome, por exemplo <code>gdrive</code>.</li>
+                <li>Em "Storage", digite <code>drive</code>.</li>
+                <li><code>client_id</code> e <code>client_secret</code>: aperte Enter (vazio).</li>
+                <li><code>scope</code>: <code>1</code> (acesso completo). Nas perguntas seguintes, Enter; em "Edit advanced config", <code>n</code>.</li>
+                <li>"Use web browser to automatically authenticate?": responda <code>n</code>, porque o servidor não tem tela. O rclone mostra um comando <code>rclone authorize "drive" "..."</code>.</li>
+                <li>Num computador com o rclone instalado, rode esse comando. O navegador abre: faça login no Google e copie o código que aparecer no terminal do computador.</li>
+                <li>Cole o código no MeuTerminal (<code>config_token&gt;</code>). Em "Shared Drive", <code>n</code>. Depois <code>y</code> para confirmar e <code>q</code> para sair.</li>
+            </ol>
+            <p>Pronto: abra (ou atualize) uma aba Arquivos. O <code>gdrive</code> aparece em "Nuvem" no painel lateral.</p>
+            <div class="note">
+                <p><strong>Sem computador?</strong> No passo 5, responda <code>y</code>. O rclone mostra um link <code>http://127.0.0.1:53682/auth…</code>: abra esse link numa <strong>aba de navegador do MeuTerminal</strong>, que roda no próprio servidor, e faça o login lá. O Google às vezes bloqueia login nesse tipo de navegador; se bloquear, use o método com o computador.</p>
+            </div>
+        </section>
+
+        <!-- 7 -->
+        <section class="doc" id="agentes">
+            <h2><span class="n">07</span> Agentes e MCP</h2>
+            <p>O MeuTerminal tem um servidor <strong>MCP</strong> próprio. Com ele, agentes que rodam nos terminais do app (Claude Code, Codex…) conseguem controlar o app: abrir uma página para você ver o resultado, tirar print, abrir pastas, avisar quando terminar.</p>
+            <h3>Ligar no Claude Code</h3>
+            <ol class="steps">
+                <li>Abra ⋮ → Configurações → "Agentes (MCP)" e copie o comando.</li>
+                <li>Cole e rode num terminal do MeuTerminal (é uma vez só; vale para todos os terminais).</li>
+                <li>Abra o <code>claude</code> e peça, por exemplo: "roda o projeto e abre no navegador pra eu ver" ou "abre a pasta ~/projetos/loja".</li>
+            </ol>
+            <h3>O que o agente consegue fazer</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Ferramenta</th><th>Para quê</th></tr>
+                <tr><td><code>open_url</code></td><td>Abre uma página numa aba de navegador (ex.: <code>localhost:5173</code>).</td></tr>
+                <tr><td><code>screenshot</code> / <code>read_page</code></td><td>O agente vê a página (print ou texto) para conferir o resultado.</td></tr>
+                <tr><td><code>navigate</code> / <code>close_tab</code></td><td>Muda o endereço ou fecha abas de navegador e de arquivos. Abas de terminal só você fecha.</td></tr>
+                <tr><td><code>open_folder</code></td><td>Abre uma pasta no gerenciador de arquivos (ou num terminal, com <code>view: "terminal"</code>). Aceita o Drive: <code>gdrive:Documentos</code>.</td></tr>
+                <tr><td><code>list_drives</code></td><td>Mostra o servidor e as nuvens do rclone.</td></tr>
+                <tr><td><code>list_tabs</code> / <code>list_ports</code></td><td>Lista as abas abertas e os projetos rodando.</td></tr>
+                <tr><td><code>notify</code></td><td>Mostra um aviso na sua tela ("Build pronto").</td></tr>
+            </table></div>
+            <p>O MCP só aceita conexões do próprio servidor e com o token do app: nada disso fica exposto na internet.</p>
+        </section>
+
+        <!-- 8 -->
+        <section class="doc" id="login">
+            <h2><span class="n">08</span> Login e verificação em 2 etapas</h2>
+            <ul>
+                <li><strong>Email e senha</strong> (<code>AUTH_EMAIL</code> + <code>AUTH_PASSWORD</code>): o modo recomendado. Trocar a senha desconecta todos os aparelhos.</li>
+                <li><strong>PIN</strong> (<code>MEUTERMINAL_PIN</code>): só vale quando email e senha estão vazios.</li>
+                <li>Depois de 5 tentativas erradas, o login fica bloqueado por 15 minutos (<code>LOCKOUT_TIME</code>).</li>
+            </ul>
+            <h3>Ligar o app autenticador (2 etapas)</h3>
+            <p>Com a verificação ligada, o login pede também um código de 6 dígitos do celular, que muda a cada 30 segundos. Funciona com Google Authenticator, Microsoft Authenticator, Authy, 2FAS, Aegis, Bitwarden, 1Password e outros.</p>
+            <ol class="steps">
+                <li>
+                    <strong>Gere a chave.</strong> Rode em um destes lugares:
+                    <div class="tabs" role="tablist" aria-label="Onde rodar o gerador">
+                        <button role="tab" aria-selected="true" aria-controls="p-app" id="t-app" type="button">No MeuTerminal</button>
+                        <button role="tab" aria-selected="false" aria-controls="p-ssh" id="t-ssh" type="button">No servidor (SSH)</button>
+                        <button role="tab" aria-selected="false" aria-controls="p-local" id="t-local" type="button">Sem Docker</button>
+                    </div>
+                    <div class="panel" role="tabpanel" id="p-app" aria-labelledby="t-app">
+                        <div class="cmd"><pre><code>cd /app &amp;&amp; node scripts/totp-setup.js</code></pre><button class="copy" type="button">Copiar</button></div>
+                    </div>
+                    <div class="panel" role="tabpanel" id="p-ssh" aria-labelledby="t-ssh" hidden>
+                        <div class="cmd"><pre><code>docker compose exec meuterminal node scripts/totp-setup.js</code></pre><button class="copy" type="button">Copiar</button></div>
+                    </div>
+                    <div class="panel" role="tabpanel" id="p-local" aria-labelledby="t-local" hidden>
+                        <div class="cmd"><pre><code>npm run 2fa</code></pre><button class="copy" type="button">Copiar</button></div>
+                    </div>
+                    Ele mostra a <strong>chave</strong>, o código atual e a linha para o <code>.env</code>.
+                </li>
+                <li><strong>Cadastre no celular:</strong> no app autenticador, "Adicionar conta" → "Inserir chave de configuração", digite a chave (os espaços não importam) e escolha "Baseado em tempo". O código mostrado tem que ser igual ao que o gerador mostrou.</li>
+                <li><strong>Coloque no servidor:</strong> <code>AUTH_TOTP_SECRET=SUA_CHAVE</code>, no <code>.env</code> ou nas variáveis do painel (Coolify etc.).</li>
+                <li><strong>Reinicie:</strong> <code>docker compose up -d</code> (o <code>restart</code> não lê o <code>.env</code> de novo) ou faça um novo deploy no painel.</li>
+                <li><strong>Teste:</strong> todo mundo é deslogado. Entre com email e senha, digite os 6 dígitos (o login é enviado sozinho no sexto).</li>
+            </ol>
+            <div class="note warn">
+                <p><strong>A chave é uma senha.</strong> Guarde num gerenciador de senhas e não compartilhe. Perdeu o celular? Apague <code>AUTH_TOTP_SECRET</code> do servidor e reinicie: o login volta a ser só email e senha.</p>
+            </div>
+        </section>
+
+        <!-- 9 -->
+        <section class="doc" id="dados">
+            <h2><span class="n">09</span> Não perder dados no deploy</h2>
+            <p>No Docker, cada deploy <strong>recria o contêiner</strong> a partir da imagem: só sobrevive o que está num volume. O <code>docker-compose.yml</code> do repositório já guarda o que importa:</p>
+            <div class="table-wrap"><table>
+                <tr><th>O quê</th><th>Onde fica</th><th>Sobrevive ao deploy?</th></tr>
+                <tr><td>Seus projetos e arquivos na home</td><td><code>/root</code> (volume <code>meuterminal-home</code>)</td><td class="yes">Sim</td></tr>
+                <tr><td>Login do Claude Code, chaves SSH, histórico do bash, <code>~/.local</code></td><td><code>/root</code></td><td class="yes">Sim</td></tr>
+                <tr><td>Programas instalados com <code>npm i -g</code></td><td><code>/root/.npm-global</code></td><td class="yes">Sim</td></tr>
+                <tr><td>Configurações (rclone/Drive, starship, gh…)</td><td><code>/root/.config</code> → <code>./config</code></td><td class="yes">Sim</td></tr>
+                <tr><td>Abas, telas, comandos rápidos, favoritos, logins do navegador</td><td><code>/app/data</code> → <code>./db</code></td><td class="yes">Sim</td></tr>
+                <tr><td>Programas instalados com <code>apt install</code></td><td><code>/usr</code></td><td class="no">Não</td></tr>
+                <tr><td>Processos rodando (ex.: <code>npm run dev</code>)</td><td>memória</td><td class="no">Não: reinicie depois do deploy</td></tr>
+            </table></div>
+            <h3>Regras de ouro</h3>
+            <ul>
+                <li><strong>Guarde projetos dentro de <code>/root</code></strong> (a home, <code>~</code>). Fora dela, nada é salvo.</li>
+                <li>Para ter um programa do <code>apt</code> sempre, adicione-o no <code>Dockerfile</code> do repositório. O Claude Code já vem instalado.</li>
+                <li>Mudanças no <code>docker-compose.yml</code> têm que ir para o <strong>GitHub</strong>. O painel (Coolify etc.) usa o arquivo do repositório a cada deploy, então uma mudança feita só no painel se perde.</li>
+                <li><strong>Nunca</strong> rode <code>docker compose down -v</code> nem apague os volumes no painel: o <code>-v</code> apaga o volume da home.</li>
+                <li>Fechar o app não para nada. O que para os processos é fechar a aba (✕) ou um novo deploy/reinício do servidor. Depois de um deploy, as abas voltam com a tela de antes e um shell novo na mesma pasta.</li>
+            </ul>
+            <h3>Backup da home</h3>
+            <p>No servidor (SSH), gera <code>home-backup.tar.gz</code> na pasta atual:</p>
+            <div class="cmd"><pre><code>docker run --rm -v "$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/root"}}{{.Name}}{{end}}{{end}}' meuterminal)":/root -v "$PWD":/backup alpine tar czf /backup/home-backup.tar.gz -C /root .</code></pre><button class="copy" type="button">Copiar</button></div>
+            <div class="note warn">
+                <p><strong>Coolify:</strong> o serviço se chama <code>meuterminal</code> a partir da versão 2.4. Depois do primeiro deploy com esse nome, confira em Configuration se o <strong>domínio</strong> está ligado ao serviço <code>meuterminal</code>. Confira também se as variáveis do painel usam os nomes da tabela abaixo.</p>
+            </div>
+        </section>
+
+        <!-- 10 -->
+        <section class="doc" id="variaveis">
+            <h2><span class="n">10</span> Variáveis de ambiente</h2>
+            <div class="table-wrap"><table>
+                <tr><th>Variável</th><th>Para quê</th><th>Padrão</th></tr>
+                <tr><td><code>AUTH_EMAIL</code> / <code>AUTH_PASSWORD</code></td><td>Login por email e senha</td><td>vazio</td></tr>
+                <tr><td><code>AUTH_TOTP_SECRET</code></td><td>Chave do app autenticador (2 etapas)</td><td>desligada</td></tr>
+                <tr><td><code>MEUTERMINAL_PIN</code></td><td>PIN, se não houver email e senha</td><td><code>1234</code> no Docker</td></tr>
+                <tr><td><code>BASE_URL</code></td><td>Endereço onde você abre o app</td><td><code>http://localhost:3000</code></td></tr>
+                <tr><td><code>SITE_TITLE</code></td><td>Nome mostrado no app</td><td>MeuTerminal</td></tr>
+                <tr><td><code>LOCKOUT_TIME</code></td><td>Minutos de bloqueio após 5 erros de login</td><td>15</td></tr>
+                <tr><td><code>MAX_SESSION_AGE</code></td><td>Horas que um login dura</td><td>24</td></tr>
+                <tr><td><code>ALLOWED_ORIGINS</code></td><td>Origens permitidas (separadas por vírgula)</td><td>todas</td></tr>
+                <tr><td><code>FILES_HOME</code></td><td>Pasta onde o gerenciador de arquivos abre</td><td>a home (<code>/root</code>)</td></tr>
+                <tr><td><code>TZ</code></td><td>Fuso horário</td><td>America/Sao_Paulo</td></tr>
+                <tr><td><code>ENABLE_STARSHIP</code></td><td>Prompt Starship nos terminais</td><td>true</td></tr>
+                <tr><td><code>MEUTERMINAL_PORT</code></td><td>Porta no servidor (compose)</td><td>3000</td></tr>
+                <tr><td><code>MEUTERMINAL_CONFIG_DIR</code> / <code>MEUTERMINAL_DATA_DIR</code> / <code>MEUTERMINAL_DB_DIR</code></td><td>Pastas do servidor ligadas a <code>/root/.config</code>, <code>/root/data</code> e <code>/app/data</code> (compose)</td><td><code>./config</code>, <code>./data</code>, <code>./db</code></td></tr>
+            </table></div>
+        </section>
+
+        <!-- 11 -->
+        <section class="doc" id="atalhos">
+            <h2><span class="n">11</span> Atalhos de teclado</h2>
+            <p>No Mac, troque <kbd>Ctrl+Alt</kbd> por <kbd>Ctrl+⌘</kbd>. Os atalhos do app usam <kbd>Ctrl+Alt</kbd> para não brigar com os do terminal (<kbd>Ctrl+W</kbd>, <kbd>Ctrl+R</kbd>…).</p>
+            <div class="table-wrap"><table>
+                <tr><th>Atalho</th><th>Ação</th></tr>
+                <tr><td><kbd>Ctrl+Alt+T</kbd></td><td>Novo terminal</td></tr>
+                <tr><td><kbd>Ctrl+Alt+B</kbd></td><td>Nova aba de navegador</td></tr>
+                <tr><td><kbd>Ctrl+Alt+E</kbd></td><td>Novo gerenciador de arquivos</td></tr>
+                <tr><td><kbd>Ctrl+Alt+N</kbd></td><td>Nova sessão com opções</td></tr>
+                <tr><td><kbd>Ctrl+Alt+Shift+T</kbd></td><td>Reabrir aba fechada</td></tr>
+                <tr><td><kbd>Ctrl+Alt+W</kbd></td><td>Fechar aba (encerra o processo)</td></tr>
+                <tr><td><kbd>Ctrl+Alt+R</kbd></td><td>Renomear aba</td></tr>
+                <tr><td><kbd>Ctrl+Tab</kbd> / <kbd>Ctrl+Shift+Tab</kbd></td><td>Próxima / anterior</td></tr>
+                <tr><td><kbd>Ctrl+Alt+1…9</kbd></td><td>Ir para a aba (9 = última)</td></tr>
+                <tr><td><kbd>Ctrl+F</kbd></td><td>Buscar (no terminal ou nos arquivos)</td></tr>
+                <tr><td><kbd>Ctrl+Alt+F</kbd></td><td>Tela cheia</td></tr>
+                <tr><td><kbd>Ctrl+,</kbd></td><td>Configurações</td></tr>
+            </table></div>
+            <h3>Nos Arquivos</h3>
+            <div class="table-wrap"><table>
+                <tr><th>Atalho</th><th>Ação</th></tr>
+                <tr><td><kbd>Enter</kbd></td><td>Abrir</td></tr>
+                <tr><td><kbd>Backspace</kbd> / <kbd>Alt+↑</kbd></td><td>Pasta acima</td></tr>
+                <tr><td><kbd>Alt+←</kbd> / <kbd>Alt+→</kbd></td><td>Voltar / avançar</td></tr>
+                <tr><td><kbd>↑</kbd> <kbd>↓</kbd> (+ <kbd>Shift</kbd>)</td><td>Mover (e selecionar)</td></tr>
+                <tr><td><kbd>Espaço</kbd> / <kbd>Ctrl+A</kbd></td><td>Marcar / selecionar tudo</td></tr>
+                <tr><td><kbd>Ctrl+C</kbd> <kbd>Ctrl+X</kbd> <kbd>Ctrl+V</kbd></td><td>Copiar, recortar, colar</td></tr>
+                <tr><td><kbd>F2</kbd> / <kbd>Delete</kbd></td><td>Renomear / excluir</td></tr>
+                <tr><td><kbd>Ctrl+Shift+N</kbd></td><td>Nova pasta</td></tr>
+                <tr><td><kbd>F5</kbd></td><td>Atualizar</td></tr>
+                <tr><td><kbd>Ctrl+S</kbd> / <kbd>Esc</kbd></td><td>Salvar / fechar o editor</td></tr>
+            </table></div>
+        </section>
+
+        <!-- 12 -->
+        <section class="doc faq" id="problemas">
+            <h2><span class="n">12</span> Problemas comuns</h2>
+            <details>
+                <summary>"claude: command not found"</summary>
+                <p>O Claude Code vem na imagem a partir da versão 2.4: faça o deploy da versão nova. Para instalar na mão, use <code>npm install -g @anthropic-ai/claude-code</code>. O comando <code>npm install claude</code> (sem <code>-g</code> e sem o <code>@anthropic-ai/</code>) instala outro pacote que não tem nada a ver.</p>
+            </details>
+            <details>
+                <summary>"Cannot find module /app/scripts/totp-setup.js"</summary>
+                <p>O servidor está com uma versão antiga. Faça o merge do PR no GitHub e o deploy.</p>
+            </details>
+            <details>
+                <summary>O app não mudou depois do deploy</summary>
+                <p>O app instalado guarda arquivos para abrir rápido. Feche e abra o app de novo (ou recarregue a página). A versão nova é baixada sozinha em segundo plano.</p>
+            </details>
+            <details>
+                <summary>Perdi o que estava na home depois do deploy</summary>
+                <p>Veja <a href="#dados">Não perder dados</a>: a home só é salva a partir da versão 2.4, com o volume <code>meuterminal-home</code> no <code>docker-compose.yml</code> do GitHub. O que foi perdido antes não volta; daqui para frente fica salvo.</p>
+            </details>
+            <details>
+                <summary>O código de 6 dígitos diz "inválido"</summary>
+                <p>Deixe a data e a hora do celular no automático. No servidor, <code>date -u</code> tem que mostrar a hora certa. Cada código só vale uma vez: espere o próximo.</p>
+            </details>
+            <details>
+                <summary>Fui bloqueado no login</summary>
+                <p>Depois de 5 erros, espere 15 minutos ou reinicie o contêiner.</p>
+            </details>
+            <details>
+                <summary>O Drive não aparece nos Arquivos</summary>
+                <p>Rode <code>rclone listremotes</code> num terminal: o remote tem que aparecer ali. Se aparecer, atualize a aba Arquivos (⋮ → Atualizar) ou abra uma nova.</p>
+            </details>
+            <details>
+                <summary>A aba de navegador fica em branco</summary>
+                <p>Confira se o projeto está rodando (botão de portas) e se o endereço está certo. Em conexão lenta, use qualidade "Leve (4G)".</p>
+            </details>
+        </section>
+
+        <footer>MeuTerminal · este guia fica em <code>/guia</code></footer>
+    </main>
+</div>
+
+<script>
+(function () {
+    const KEY = 'meuterminal-guide';
+    const store = {
+        get() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } },
+        set(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch { /* unavailable */ } },
+    };
+    const state = store.get();
+    const root = document.documentElement;
+
+    // Theme: this page's own choice, else the app's theme setting, else the system
+    let appTheme = null;
+    try { appTheme = JSON.parse(localStorage.getItem('meuterminal-settings') || '{}').theme; } catch { /* ignore */ }
+    const initial = state.theme || (appTheme === 'dark' || appTheme === 'light' ? appTheme : null);
+    if (initial) root.dataset.theme = initial;
+    document.getElementById('themeBtn').addEventListener('click', () => {
+        const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+        state.theme = dark ? 'light' : 'dark';
+        root.dataset.theme = state.theme;
+        store.set(state);
+    });
+
+    // Table of contents: open on desktop, collapsed on phones; highlights the current section
+    const toc = document.getElementById('tocDetails');
+    const wide = matchMedia('(min-width: 980px)');
+    const syncToc = () => { toc.open = wide.matches; };
+    syncToc();
+    wide.addEventListener('change', syncToc);
+    toc.querySelectorAll('a').forEach(a => a.addEventListener('click', () => { if (!wide.matches) toc.open = false; }));
+    const links = new Map([...toc.querySelectorAll('a')].map(a => [a.getAttribute('href').slice(1), a]));
+    const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            links.forEach(a => a.classList.remove('current'));
+            links.get(entry.target.id)?.classList.add('current');
+        });
+    }, { rootMargin: '-80px 0px -70% 0px' });
+    document.querySelectorAll('section.doc').forEach(s => observer.observe(s));
+
+    // Tabs (where to run the 2FA generator)
+    const tabs = [...document.querySelectorAll('[role=tab]')];
+    function selectTab(tab) {
+        tabs.forEach(t => {
+            const on = t === tab;
+            t.setAttribute('aria-selected', on);
+            t.tabIndex = on ? 0 : -1;
+            document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+        });
+    }
+    tabs.forEach((t, i) => {
+        t.addEventListener('click', () => selectTab(t));
+        t.addEventListener('keydown', e => {
+            const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+            if (!dir) return;
+            const next = tabs[(i + dir + tabs.length) % tabs.length];
+            next.focus();
+            selectTab(next);
+        });
+    });
+
+    // Copy buttons
+    document.querySelectorAll('.copy').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const text = btn.parentElement.querySelector('code').textContent;
+            try {
+                await navigator.clipboard.writeText(text);
+            } catch {
+                const ta = document.createElement('textarea');
+                ta.value = text; document.body.appendChild(ta); ta.select();
+                try { document.execCommand('copy'); } catch { /* ignore */ }
+                ta.remove();
+            }
+            btn.textContent = 'Copiado';
+            btn.classList.add('ok');
+            setTimeout(() => { btn.textContent = 'Copiar'; btn.classList.remove('ok'); }, 1500);
+        });
+    });
+})();
+</script>
+</body>
+</html>

@@ -64,6 +64,7 @@ export default class TerminalSession {
      * @param {object} opts.hooks - callbacks into the workspace
      */
     constructor({ row, settings, hooks }) {
+        this.kind = 'terminal';
         this.id = row.id;         // server session id (UUID)
         this.name = row.name;
         this.pinned = !!row.pinned;

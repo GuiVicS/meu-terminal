@@ -37,12 +37,13 @@ export default class NewSessionPage {
                     <div class="kind-toggle" role="radiogroup" aria-label="Tipo de aba">
                         <button type="button" role="radio" data-kind="terminal" aria-checked="true">${icon('terminal', 16)} Terminal</button>
                         <button type="button" role="radio" data-kind="browser" aria-checked="false">${icon('globe', 16)} Navegador</button>
+                        <button type="button" role="radio" data-kind="files" aria-checked="false">${icon('folder', 16)} Arquivos</button>
                     </div>
                     <label class="field">
                         <span class="field-label">Nome</span>
                         <input name="name" type="text" maxlength="60" autocapitalize="off" spellcheck="false">
                     </label>
-                    <label class="field" data-for="terminal">
+                    <label class="field" data-for="terminal files">
                         <span class="field-label">Diretório inicial</span>
                         <input name="cwd" type="text" class="mono" autocapitalize="off" autocorrect="off" spellcheck="false">
                         <span class="field-help">Se o caminho não existir, o shell abre no diretório padrão do servidor.</span>
@@ -109,7 +110,10 @@ export default class NewSessionPage {
         this.cwdInput.placeholder = defaultCwd || '~  (padrão do servidor)';
         this.urlInput.value = '';
         // No Chromium on the server: browser tabs can't be created
-        this.el.querySelector('.kind-toggle').hidden = !window.appConfig?.browserAvailable;
+        const toggle = this.el.querySelector('.kind-toggle');
+        toggle.querySelector('[data-kind="browser"]').hidden = !window.appConfig?.browserAvailable;
+        toggle.querySelector('[data-kind="files"]').hidden = !window.appConfig?.filesAvailable;
+        toggle.hidden = !window.appConfig?.browserAvailable && !window.appConfig?.filesAvailable;
         this.setKind('terminal');
         this.renderRecents(recents);
         this.el.hidden = false;
@@ -129,9 +133,16 @@ export default class NewSessionPage {
         this.el.querySelectorAll('.kind-toggle [data-kind]').forEach(b => {
             b.setAttribute('aria-checked', String(b.dataset.kind === kind));
         });
-        this.el.querySelectorAll('[data-for]').forEach(f => { f.hidden = f.dataset.for !== kind; });
-        this.el.querySelector('.new-session-title').textContent = kind === 'browser' ? 'Nova aba de navegador' : 'Nova sessão';
-        this.form.querySelector('[type="submit"]').textContent = kind === 'browser' ? 'Abrir navegador' : 'Criar sessão';
+        this.el.querySelectorAll('[data-for]').forEach(f => { f.hidden = !f.dataset.for.split(' ').includes(kind); });
+        const texts = {
+            terminal: ['Nova sessão', 'Criar sessão', 'Se o caminho não existir, o shell abre no diretório padrão do servidor.'],
+            browser: ['Nova aba de navegador', 'Abrir navegador', ''],
+            files: ['Novo gerenciador de arquivos', 'Abrir arquivos', 'Vazio = pasta inicial do servidor. O Google Drive (rclone) aparece no painel lateral.'],
+        }[kind];
+        this.el.querySelector('.new-session-title').textContent = texts[0];
+        this.form.querySelector('[type="submit"]').textContent = texts[1];
+        const help = this.el.querySelector('[data-for~="terminal"] .field-help');
+        if (help && texts[2]) help.textContent = texts[2];
         if (kind === 'browser') this.loadPorts();
     }
 

@@ -21,6 +21,15 @@ function cleanName(name) {
     return typeof name === 'string' ? name.trim().slice(0, 60) : '';
 }
 
+function defaultName(type, n, cwd) {
+    if (type === 'browser') return `Navegador ${n}`;
+    if (type === 'files') {
+        const folder = cwd && cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+        return folder ? folder.slice(0, 60) : 'Arquivos';
+    }
+    return `Term ${n}`;
+}
+
 class SessionManager {
     /**
      * @param {object} deps
@@ -78,7 +87,8 @@ class SessionManager {
 
     /**
      * Creates a tab. kind 'terminal' (default) gets a shell; kind 'browser' gets a page
-     * in the server's Chromium (see browser-manager.js).
+     * in the server's Chromium (see browser-manager.js); kind 'files' is a file manager
+     * (url = source: 'local' or an rclone remote, cwd = folder).
      */
     create({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
         // Reopening a closed session = new shell/page with the same name/dir/URL/color
@@ -90,12 +100,13 @@ class SessionManager {
                 this.store.forget(reopenId);
             }
         }
-        const type = (kind || base.kind) === 'browser' ? 'browser' : 'terminal';
+        const wanted = kind || base.kind;
+        const type = wanted === 'browser' || wanted === 'files' ? wanted : 'terminal';
         const n = this.store.nextCounter();
-        const startCwd = type === 'terminal'
+        const startCwd = type !== 'browser'
             ? (typeof cwd === 'string' && cwd.trim().slice(0, 4096)) || base.cwd || null
             : null;
-        const startUrl = type === 'browser'
+        const startUrl = type !== 'terminal'
             ? (typeof url === 'string' && url.trim().slice(0, 4096)) || base.url || null
             : null;
         const pick = color || base.color;
@@ -103,7 +114,7 @@ class SessionManager {
             id: crypto.randomUUID(),
             kind: type,
             url: startUrl,
-            name: cleanName(name) || base.name || (type === 'browser' ? `Navegador ${n}` : `Term ${n}`),
+            name: cleanName(name) || base.name || defaultName(type, n, startCwd),
             color: COLORS.includes(pick) ? pick : COLORS[(n - 1) % COLORS.length],
             pinned: false,
             position: this.store.positionAfter(afterId),
@@ -114,13 +125,18 @@ class SessionManager {
         return this.toPublic(row);
     }
 
-    update(id, { name, pinned, color } = {}) {
+    update(id, { name, pinned, color, location } = {}) {
         const row = this.store.get(id);
         if (!row || row.status !== 'open') return null;
         const fields = {};
         if (cleanName(name)) fields.name = cleanName(name);
         if (typeof pinned === 'boolean') fields.pinned = pinned;
         if (COLORS.includes(color)) fields.color = color;
+        // File tabs remember where they are (same folder on every device)
+        if (row.kind === 'files' && location && typeof location.path === 'string' && location.path.length <= 4096) {
+            fields.cwd = location.path;
+            if (typeof location.source === 'string' && location.source.length <= 200) fields.url = location.source;
+        }
         const updated = this.store.update(id, fields);
         this.changed();
         return this.toPublic(updated);
@@ -182,8 +198,8 @@ class SessionManager {
         let rt = this.runtimes.get(id);
         if (rt) return rt;
         const row = this.store.get(id);
-        // Browser tabs have no shell (server.js routes them to the BrowserManager)
-        if (!row || row.status !== 'open' || row.kind === 'browser') return null;
+        // Browser and file tabs have no shell (server.js routes their sockets elsewhere)
+        if (!row || row.status !== 'open' || (row.kind && row.kind !== 'terminal')) return null;
 
         // convertEol matches the browser terminal so both render output identically
         const headless = new Terminal({

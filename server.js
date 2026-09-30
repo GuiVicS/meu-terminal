@@ -17,6 +17,7 @@ const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
 const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
+const { FileManager, FileError } = require('./scripts/file-manager');
 
 const app = express();
 const server = http.createServer(app);
@@ -33,7 +34,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // runs on machines without a C++ toolchain
 const ptyModule = DEMO_MODE ? require('./scripts/demo/terminal') : require('node-pty');
 const ASSETS_DIR = path.join(PUBLIC_DIR, 'assets');
-const CACHE_NAME = `DUMBTERM_CACHE_V${APP_VERSION}`;
+const CACHE_NAME = `MEUTERMINAL_CACHE_V${APP_VERSION}`;
 // SQLite file with the sessions (tabs). Mount its folder as a volume to keep it across deploys.
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'meuterminal.db');
 const SHELL = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash');
@@ -179,7 +180,7 @@ function recordAttempt(ip) {
 // Security middleware
 app.set('trust proxy', 1);
 app.use(cors(getCorsOptions(BASE_URL)));
-app.use(express.json());
+app.use(express.json({ limit: '5mb' })); // file editor saves text through JSON
 app.use(cookieParser());
 
 // Session configuration with secure settings
@@ -289,6 +290,11 @@ app.get(BASE_PATH + '/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Step-by-step guide: turning on the authenticator app (2FA)
+app.get(BASE_PATH + '/guia', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'guia.html'));
+});
+
 // Serve config.js for frontend
 app.get(BASE_PATH + '/config.js', (req, res) => {
     debugLog('Serving config.js with basePath:', BASE_PATH);
@@ -300,6 +306,7 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         authMode: AUTH_MODE,
         isDemoMode: DEMO_MODE,
         browserAvailable: browsers.available, // Chromium installed: browser tabs enabled
+        filesAvailable: FILES_ENABLED, // file manager tabs
         version: APP_VERSION,
         cacheName: CACHE_NAME
     }
@@ -519,6 +526,12 @@ const browsers = new BrowserManager({
     log: (...args) => console.log('[navegador]', ...args),
 });
 
+// File manager tabs: this server's folders + rclone remotes (Google Drive...) when installed.
+// Off in the public demo (it would expose the host); DEMO_FILES=true turns it on for tests.
+const FILES_ENABLED = !DEMO_MODE || process.env.DEMO_FILES === 'true';
+// FILES_HOME: the folder the file manager opens at (default: the shell's home)
+const files = new FileManager({ home: process.env.FILES_HOME || (DEMO_MODE ? os.homedir() : HOME_DIR), log: debugLog });
+
 app.get(BASE_PATH + '/api/sessions', (req, res) => {
     res.json(sessions.list());
 });
@@ -527,6 +540,9 @@ app.post(BASE_PATH + '/api/sessions', (req, res) => {
     const { name, cwd, color, afterId, reopenId, kind, url } = req.body || {};
     if (kind === 'browser' && !browsers.available) {
         return res.status(503).json({ error: 'Chromium não está instalado no servidor.' });
+    }
+    if (kind === 'files' && !FILES_ENABLED) {
+        return res.status(503).json({ error: 'Gerenciador de arquivos desligado.' });
     }
     // "localhost:5173" -> "http://localhost:5173" (same rules as the address bar)
     const pageUrl = kind === 'browser' && url ? normalizeUrl(url) : url;
@@ -543,7 +559,8 @@ app.get(BASE_PATH + '/api/ports', async (req, res) => {
 const MCP_TOKEN = mcpToken(sessionStore);
 const MCP_URL = `http://127.0.0.1:${PORT}${BASE_PATH}/mcp`;
 const mcpHandler = createMcpHandler({
-    sessions, store: sessionStore, browsers, listPorts, normalizeUrl, port: Number(PORT),
+    sessions, store: sessionStore, browsers, files: FILES_ENABLED ? files : null,
+    listPorts, normalizeUrl, port: Number(PORT),
 });
 
 /**
@@ -604,6 +621,110 @@ app.delete(BASE_PATH + '/api/recent/:id', (req, res) => {
     sessions.forget(req.params.id);
     res.json({ success: true });
 });
+
+// ---------- Files (the "Arquivos" tabs) ----------
+const one = value => (Array.isArray(value) ? value[0] : value);
+const many = value => (value === undefined ? [] : Array.isArray(value) ? value : [value]);
+
+/** Wraps a files route: disabled check + errors as { error } with the right status. */
+function filesRoute(handler) {
+    return async (req, res) => {
+        if (!FILES_ENABLED) return res.status(404).json({ error: 'Gerenciador de arquivos desligado.' });
+        try {
+            await handler(req, res);
+        } catch (e) {
+            const status = e instanceof FileError ? e.status : 500;
+            if (status >= 500) console.error('Files error:', e);
+            if (!res.headersSent) res.status(status).json({ error: e.message || 'Erro' });
+            else res.destroy();
+        }
+    };
+}
+
+app.get(BASE_PATH + '/api/files/sources', filesRoute(async (req, res) => {
+    res.json(await files.sources());
+}));
+
+app.get(BASE_PATH + '/api/files/list', filesRoute(async (req, res) => {
+    res.json(await files.list(one(req.query.source), one(req.query.path)));
+}));
+
+app.get(BASE_PATH + '/api/files/stat', filesRoute(async (req, res) => {
+    res.json(await files.stat(one(req.query.source), one(req.query.path)));
+}));
+
+app.get(BASE_PATH + '/api/files/size', filesRoute(async (req, res) => {
+    res.json(await files.folderSize(one(req.query.source), one(req.query.path)));
+}));
+
+app.get(BASE_PATH + '/api/files/search', filesRoute(async (req, res) => {
+    res.json(await files.search(one(req.query.source), one(req.query.path), one(req.query.q)));
+}));
+
+// Raw file (preview, <img>/<video> sources, download with ?download=1)
+app.get(BASE_PATH + '/api/files/raw', filesRoute(async (req, res) => {
+    await files.send(req, res, one(req.query.source), one(req.query.path), { download: one(req.query.download) === '1' });
+}));
+
+// Folder or several items as .tar.gz (?path=<folder>&names=a&names=b)
+app.get(BASE_PATH + '/api/files/archive', filesRoute(async (req, res) => {
+    await files.sendArchive(res, one(req.query.source), one(req.query.path), many(req.query.names));
+}));
+
+app.get(BASE_PATH + '/api/files/text', filesRoute(async (req, res) => {
+    res.json(await files.readText(one(req.query.source), one(req.query.path)));
+}));
+
+app.put(BASE_PATH + '/api/files/text', filesRoute(async (req, res) => {
+    const { source, path: filePath, text, expectMtime, force } = req.body || {};
+    res.json(await files.writeText(source, filePath, text, { expectMtime, force: !!force }));
+}));
+
+// Upload: the request body is the file itself (no multipart), streamed to disk/rclone
+app.post(BASE_PATH + '/api/files/upload', filesRoute(async (req, res) => {
+    const result = await files.upload(req, one(req.query.source), one(req.query.path), one(req.query.name), {
+        overwrite: one(req.query.overwrite) === '1',
+    });
+    res.status(201).json(result);
+}));
+
+app.post(BASE_PATH + '/api/files/op', filesRoute(async (req, res) => {
+    const b = req.body || {};
+    switch (b.op) {
+        case 'mkdir': return res.json(await files.mkdir(b.source, b.path, b.name));
+        case 'touch': return res.json(await files.touch(b.source, b.path, b.name));
+        case 'rename': return res.json(await files.rename(b.source, b.path, b.name));
+        case 'delete': return res.json(await files.remove(b.source, many(b.paths)));
+        case 'copy':
+        case 'move':
+            return res.json(await files.transfer(many(b.items), b.dest || {}, { move: b.op === 'move' }));
+        default:
+            return res.status(400).json({ error: 'Operação desconhecida.' });
+    }
+}));
+
+// Favorite folders (sidebar), shared by every device
+app.get(BASE_PATH + '/api/files/favorites', filesRoute(async (req, res) => {
+    const row = sessionStore.db.prepare(`SELECT value FROM meta WHERE key = 'files_favorites'`).get();
+    let list = [];
+    try {
+        list = row ? JSON.parse(row.value) : [];
+    } catch { /* reset */ }
+    res.json(Array.isArray(list) ? list : []);
+}));
+
+app.put(BASE_PATH + '/api/files/favorites', filesRoute(async (req, res) => {
+    const list = (Array.isArray(req.body) ? req.body : []).slice(0, 100)
+        .filter(f => f && typeof f.path === 'string' && f.path.length <= 4096)
+        .map(f => ({
+            source: typeof f.source === 'string' ? f.source.slice(0, 200) : 'local',
+            path: f.path,
+            name: typeof f.name === 'string' ? f.name.slice(0, 100) : '',
+        }));
+    sessionStore.db.prepare(`INSERT INTO meta (key, value) VALUES ('files_favorites', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(list));
+    res.json(list);
+}));
 
 // ---------- Quick commands (managed in Settings, used from the shortcut bar) ----------
 const commands = new CommandStore(sessionStore.db);
@@ -715,6 +836,11 @@ wss.on('connection', (ws, req) => {
                 quality: params.get('quality'),
                 visible: params.get('visible') !== '0',
             });
+        } else if (row && row.status === 'open' && row.kind === 'files') {
+            // File tabs use HTTP; the socket only carries workspace notices (MCP open-tab...)
+            sessions.sockets.add(ws);
+            ws.on('close', () => sessions.sockets.delete(ws));
+            ws.send(JSON.stringify({ type: 'ready' }));
         } else if (sessionId) {
             debugLog('Attaching to session', sessionId);
             sessions.attach(ws, sessionId, { cols: params.get('cols'), rows: params.get('rows') });

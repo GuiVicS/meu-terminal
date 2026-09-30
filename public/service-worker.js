@@ -1,6 +1,6 @@
 // Core service worker configuration
-let CACHE_VERSION = "2.3.0"; // Default fallback version
-let CACHE_NAME = `DUMBTERM_CACHE_V${CACHE_VERSION}`; // Default format, will be overridden
+let CACHE_VERSION = "2.4.0"; // Default fallback version
+let CACHE_NAME = `MEUTERMINAL_CACHE_V${CACHE_VERSION}`; // Default format, will be overridden
 const ASSETS_TO_CACHE = [];
 const BASE_PATH = self.registration.scope;
 
@@ -44,7 +44,7 @@ async function initializeVersion() {
         if (currentCacheExists && existingVersion) {
             console.log(`Using existing cache version: ${existingVersion}`);
             CACHE_VERSION = existingVersion;
-            CACHE_NAME = `DUMBTERM_CACHE_V${CACHE_VERSION}`; // Fallback format
+            CACHE_NAME = `MEUTERMINAL_CACHE_V${CACHE_VERSION}`; // Fallback format
             
             // Send a notification to let clients know about this existing version
             setTimeout(() => notifyClients(), 1000);
@@ -82,7 +82,7 @@ async function initializeVersion() {
             } else if (appConfig.version) {
                 console.log(`Found version in config.js: ${appConfig.version}`);
                 CACHE_VERSION = appConfig.version;
-                CACHE_NAME = appConfig.cacheName || `DUMBTERM_CACHE_V${CACHE_VERSION}`; // Fallback format
+                CACHE_NAME = appConfig.cacheName || `MEUTERMINAL_CACHE_V${CACHE_VERSION}`; // Fallback format
                 
                 // If we have an existing version that's different from what we just loaded,
                 // we should notify clients about an available update
@@ -123,10 +123,9 @@ async function checkCacheVersion() {
     const keys = await caches.keys();
     console.log("All cache keys:", keys);
     
-    // Find any existing DumbTerm cache - support both formats: DUMBTERM_PWA_CACHE_V* and DUMBTERM_CACHE_V*
-    const existingCache = keys.find(key => key === CACHE_NAME) || 
-                          keys.find(key => key.startsWith('DUMBTERM_CACHE_V')) ||
-                          keys.find(key => key.startsWith('DUMBTERM_PWA_CACHE_V'));
+    // Existing cache of this app (current version first)
+    const existingCache = keys.find(key => key === CACHE_NAME) ||
+                          keys.find(key => key.startsWith('MEUTERMINAL_CACHE_V'));
     
     console.log(`Found existing cache: ${existingCache || 'none'}`);
     
@@ -134,7 +133,7 @@ async function checkCacheVersion() {
     let existingVersion = null;
     if (existingCache) {
         // Try to extract version from different cache name formats
-        const versionMatch = existingCache.match(/.*_V(.+)$/) || existingCache.match(/DUMBTERM_CACHE_(.+)$/);
+        const versionMatch = existingCache.match(/.*_V(.+)$/) || existingCache.match(/MEUTERMINAL_CACHE_(.+)$/);
         existingVersion = versionMatch && versionMatch[1] ? versionMatch[1] : null;
         console.log(`Extracted version from cache name: ${existingVersion || 'none'}`);
     }
@@ -142,11 +141,8 @@ async function checkCacheVersion() {
     // Check if current version cache exists
     const currentCacheExists = keys.includes(CACHE_NAME);
     
-    // Check for old versions - be flexible with the cache naming format
-    const oldCaches = keys.filter(key => 
-        key !== CACHE_NAME && (key.startsWith('DUMBTERM_') && 
-        ((key.includes('_CACHE_') || key.includes('PWA_CACHE')) && key.includes('V'))) 
-    );
+    // Every other cache on this origin is an older version of the app (any name)
+    const oldCaches = keys.filter(key => key !== CACHE_NAME);
     
     console.log(
         `Cache check: existingVersion=${existingVersion}, ` +
@@ -378,7 +374,7 @@ self.addEventListener("activate", event => {
                             const appConfig = await getAppConfig();
                             if (appConfig && appConfig.version) {
                                 CACHE_VERSION = appConfig.version;
-                                CACHE_NAME = appConfig.cacheName || `DUMBTERM_CACHE_V${CACHE_VERSION}`;
+                                CACHE_NAME = appConfig.cacheName || `MEUTERMINAL_CACHE_V${CACHE_VERSION}`;
                                 console.log(`Updated version from config: ${CACHE_VERSION}`);
                             }
                         } catch (error) {
@@ -533,10 +529,10 @@ async function handleSetVersion(version, cacheName) {
             // Try to get cache name from config as fallback
             try {
                 const appConfig = await getAppConfig();
-                CACHE_NAME = appConfig?.cacheName || `DUMBTERM_CACHE_V${CACHE_VERSION}`;
+                CACHE_NAME = appConfig?.cacheName || `MEUTERMINAL_CACHE_V${CACHE_VERSION}`;
             } catch (error) {
                 // Fall back to constructed cache name on error
-                CACHE_NAME = `DUMBTERM_CACHE_V${CACHE_VERSION}`;
+                CACHE_NAME = `MEUTERMINAL_CACHE_V${CACHE_VERSION}`;
                 console.log(`Error getting config, using constructed cache name: ${CACHE_NAME}`);
             }
         }
@@ -582,7 +578,7 @@ async function handleGetVersion(event) {
                     CACHE_NAME = appConfig.cacheName;
                     
                     // Try to extract version from cacheName
-                    const versionMatch = CACHE_NAME.match(/.*_V(.+)$/) || CACHE_NAME.match(/DUMBTERM_CACHE_(.+)$/);
+                    const versionMatch = CACHE_NAME.match(/.*_V(.+)$/) || CACHE_NAME.match(/MEUTERMINAL_CACHE_(.+)$/);
                     if (versionMatch && versionMatch[1]) {
                         CACHE_VERSION = versionMatch[1];
                         console.log(`Extracted version from cacheName: ${CACHE_VERSION}`);
@@ -592,7 +588,7 @@ async function handleGetVersion(event) {
                 if (appConfig.version && (CACHE_VERSION === "1.0.0" || !appConfig.cacheName)) {
                     CACHE_VERSION = appConfig.version;
                     if (!appConfig.cacheName) {
-                        CACHE_NAME = `DUMBTERM_CACHE_V${CACHE_VERSION}`;
+                        CACHE_NAME = `MEUTERMINAL_CACHE_V${CACHE_VERSION}`;
                     }
                     console.log(`Using version from config: ${CACHE_VERSION}`);
                 }

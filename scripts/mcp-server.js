@@ -31,17 +31,30 @@ const TOOLS = [
     },
     {
         name: 'open_folder',
-        description: 'Abre uma pasta do servidor numa nova aba de terminal do MeuTerminal (o shell já começa '
-            + 'nessa pasta). Use quando o usuário pedir para abrir/ir para uma pasta ou projeto.',
+        description: 'Abre uma pasta para o usuário ver: por padrão no gerenciador de arquivos do MeuTerminal '
+            + '(nova aba "Arquivos", com prévia, download, upload etc.); com view="terminal", numa nova aba de '
+            + 'terminal já nessa pasta. Também abre pastas de remotes do rclone (ex.: Google Drive) com source. '
+            + 'Use quando o usuário pedir para abrir/mostrar/ver uma pasta ou projeto.',
         inputSchema: {
             type: 'object',
             properties: {
-                path: { type: 'string', description: 'Caminho absoluto; "~" = home. Relativo = a partir da home.' },
+                path: {
+                    type: 'string',
+                    description: 'Caminho da pasta. Local: absoluto, "~" = home, relativo = a partir da home. '
+                        + 'Remote: caminho dentro dele ("/" = raiz); também aceita "gdrive:pasta/sub".',
+                },
+                source: { type: 'string', description: 'Opcional: nome do remote do rclone (ex.: "gdrive"). Padrão = pastas deste servidor.' },
+                view: { type: 'string', enum: ['files', 'terminal'], description: 'files (padrão) = gerenciador de arquivos; terminal = shell na pasta.' },
                 name: { type: 'string', description: 'Nome da aba (opcional; padrão = nome da pasta).' },
                 background: { type: 'boolean', description: 'true = abre sem trocar a aba que o usuário está vendo.' },
             },
             required: ['path'],
         },
+    },
+    {
+        name: 'list_drives',
+        description: 'Lista onde dá para abrir pastas: este servidor e os remotes do rclone (Google Drive etc.), se o rclone estiver instalado.',
+        inputSchema: { type: 'object', properties: {} },
     },
     {
         name: 'list_tabs',
@@ -81,7 +94,7 @@ const TOOLS = [
     },
     {
         name: 'close_tab',
-        description: 'Fecha uma aba de navegador (abas de terminal não podem ser fechadas por aqui).',
+        description: 'Fecha uma aba de navegador ou de arquivos (abas de terminal não podem ser fechadas por aqui).',
         inputSchema: {
             type: 'object',
             properties: { tab_id: { type: 'string' } },
@@ -115,7 +128,7 @@ class ToolError extends Error {}
  * @param {Function} deps.normalizeUrl
  * @param {number} deps.port - the app's own port (hidden from list_ports)
  */
-function createMcpTools({ sessions, store, browsers, listPorts, normalizeUrl, port }) {
+function createMcpTools({ sessions, store, browsers, files, listPorts, normalizeUrl, port }) {
     let lastBrowserTab = null;
 
     /** Resolves tab_id (or the last/first browser tab when omitted). */
@@ -149,25 +162,65 @@ function createMcpTools({ sessions, store, browsers, listPorts, normalizeUrl, po
             } catch { /* the tab exists; the page may still be loading */ }
             return text({ tab_id: tab.id, url: state.url, title: state.title });
         },
-        open_folder({ path: folder, name, background }) {
-            const raw = String(folder || '').trim();
+        async open_folder({ path: folder, source, view, name, background }) {
+            let raw = String(folder || '').trim();
             if (!raw || raw.length > 4096) throw new ToolError('Caminho inválido.');
-            const home = os.homedir();
-            const resolved = path.resolve(home, raw.replace(/^~(?=$|[\\/])/, home));
-            let stat = null;
-            try { stat = fs.statSync(resolved); } catch { /* reported below */ }
-            if (!stat) throw new ToolError(`Pasta não encontrada: ${resolved}`);
-            if (!stat.isDirectory()) throw new ToolError(`Não é uma pasta: ${resolved}`);
-            const tab = sessions.create({ kind: 'terminal', cwd: resolved, name: name || path.basename(resolved) || resolved });
+            let src = source && source !== 'local' ? String(source) : 'local';
+            // "gdrive:pasta" form, when it names a real rclone remote
+            const prefixed = /^([^:/\\]{2,}):(.*)$/.exec(raw);
+            if (src === 'local' && prefixed && files) {
+                const remotes = await files.remotes();
+                if (remotes.some(r => r.name === prefixed[1])) {
+                    src = prefixed[1];
+                    raw = prefixed[2] || '/';
+                }
+            }
+            const wantsTerminal = view === 'terminal';
+            if (!wantsTerminal && !files) throw new ToolError('O gerenciador de arquivos está desligado; use view="terminal".');
+            if (wantsTerminal && src !== 'local') throw new ToolError('Pastas do rclone só abrem no gerenciador de arquivos.');
+
+            let resolved;
+            if (files) {
+                let info;
+                try {
+                    info = await files.stat(src, raw);
+                } catch (e) {
+                    throw new ToolError(e.message);
+                }
+                if (info.type !== 'dir') throw new ToolError(`Não é uma pasta: ${info.path}`);
+                resolved = info.path;
+            } else {
+                const home = os.homedir();
+                resolved = path.resolve(home, raw.replace(/^~(?=$|[\\/])/, home));
+                let stat = null;
+                try { stat = fs.statSync(resolved); } catch { /* reported below */ }
+                if (!stat) throw new ToolError(`Pasta não encontrada: ${resolved}`);
+                if (!stat.isDirectory()) throw new ToolError(`Não é uma pasta: ${resolved}`);
+            }
+            const folderName = resolved.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || (src === 'local' ? resolved : src);
+            const tab = wantsTerminal
+                ? sessions.create({ kind: 'terminal', cwd: resolved, name: name || folderName })
+                : sessions.create({ kind: 'files', url: src, cwd: resolved, name: name || folderName });
             if (!background) sessions.broadcast({ type: 'open-tab', id: tab.id });
-            return text({ tab_id: tab.id, cwd: resolved, name: tab.name });
+            return text({ tab_id: tab.id, view: wantsTerminal ? 'terminal' : 'files', source: src, path: resolved, name: tab.name });
+        },
+        async list_drives() {
+            if (!files) throw new ToolError('O gerenciador de arquivos está desligado.');
+            const info = await files.sources();
+            return text({
+                home: info.home,
+                rclone_installed: info.rclone,
+                drives: info.sources.map(s => ({ source: s.id, name: s.name, type: s.type })),
+            });
         },
         list_tabs() {
             return text(store.listOpen().map(r => ({
                 tab_id: r.id,
                 kind: r.kind || 'terminal',
                 name: r.name,
-                ...(r.kind === 'browser' ? { url: r.url } : { cwd: r.cwd || r.start_cwd || null }),
+                ...(r.kind === 'browser' ? { url: r.url }
+                    : r.kind === 'files' ? { source: r.url || 'local', path: r.cwd || null }
+                    : { cwd: r.cwd || r.start_cwd || null }),
                 pinned: !!r.pinned,
             })));
         },
@@ -193,8 +246,10 @@ function createMcpTools({ sessions, store, browsers, listPorts, normalizeUrl, po
         async close_tab({ tab_id }) {
             const row = store.get(tab_id);
             if (!row || row.status !== 'open') throw new ToolError('Aba não encontrada.');
-            if (row.kind !== 'browser') throw new ToolError('Por segurança, abas de terminal só podem ser fechadas pelo usuário.');
-            await browsers.closePage(row.id);
+            if (row.kind !== 'browser' && row.kind !== 'files') {
+                throw new ToolError('Por segurança, abas de terminal só podem ser fechadas pelo usuário.');
+            }
+            if (row.kind === 'browser') await browsers.closePage(row.id);
             sessions.close(row.id);
             if (lastBrowserTab === row.id) lastBrowserTab = null;
             return text(`Aba ${row.name} fechada.`);
@@ -232,7 +287,7 @@ function createMcpHandler(deps) {
                     capabilities: { tools: { listChanged: false } },
                     serverInfo: SERVER_INFO,
                     instructions: 'Ferramentas do MeuTerminal: abra páginas (open_url) para o usuário ver o '
-                        + 'resultado, abra pastas em novas abas de terminal (open_folder), confira com screenshot/read_page e avise com notify.',
+                        + 'resultado, mostre pastas no gerenciador de arquivos (open_folder; list_drives mostra o Google Drive/rclone), confira com screenshot/read_page e avise com notify.',
                 });
             }
             case 'ping':

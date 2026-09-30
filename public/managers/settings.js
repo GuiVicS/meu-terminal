@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS = {
 
 export default class SettingsManager {
     constructor() {
-        this.storage = new StorageManager('dumbterm-');
+        this.storage = new StorageManager('meuterminal-');
         this.listeners = new Set();
         this.values = { ...DEFAULT_SETTINGS, ...(this.storage.get('settings') || {}) };
         this.systemDark = window.matchMedia('(prefers-color-scheme: dark)');

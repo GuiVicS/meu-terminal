@@ -1,35 +1,43 @@
 services:
-  dumbterm:
-    # image: dumbwareio/dumbterm:latest
+  meuterminal:
     build: .
-    container_name: dumbterm
+    container_name: meuterminal
     restart: unless-stopped
     ports:
-      - ${DUMBTERM_PORT:-3000}:3000
+      - ${MEUTERMINAL_PORT:-3000}:3000
     volumes:
-      - ${DUMBTERM_CONFIG:-./config}:/root/.config
-      - ${DUMBTERM_DATA_DIR:-./data}:/root/data # Map the data directory to a local folder
-      # Sessions database (tabs, order, screen snapshots). Keep it to survive redeploys.
+      # The whole home folder (projects, ~/.claude, ~/.ssh, ~/.local, npm -g, history)
+      # survives redeploys. Named volume: panels like Coolify keep it between deploys.
+      - meuterminal-home:/root
+      # Settings of the tools (starship, rclone remotes/Google Drive login, gh...)
+      - ${MEUTERMINAL_CONFIG_DIR:-./config}:/root/.config
+      - ${MEUTERMINAL_DATA_DIR:-./data}:/root/data
+      # App database: tabs, order, screen snapshots, quick commands, favorites
       - ${MEUTERMINAL_DB_DIR:-./db}:/app/data
     environment:
       # Container timezone
-      TZ: ${DUMBTERM_TZ:-America/Los_Angeles}
+      TZ: ${TZ:-America/Sao_Paulo}
       # The title shown in the web interface
-      SITE_TITLE: ${DUMBTERM_SITE_TITLE:-MeuTerminal}
+      SITE_TITLE: ${SITE_TITLE:-MeuTerminal}
       # Email + password login (when both are set they replace the PIN)
       AUTH_EMAIL: ${AUTH_EMAIL:-}
       AUTH_PASSWORD: ${AUTH_PASSWORD:-}
       # Optional two-factor login (authenticator app code). Generate with:
-      #   docker compose exec dumbterm node scripts/totp-setup.js
+      #   docker compose exec meuterminal node scripts/totp-setup.js
       AUTH_TOTP_SECRET: ${AUTH_TOTP_SECRET:-}
-      # Optional PIN protection (leave empty to disable; ignored when email login is set)
-      DUMBTERM_PIN: ${DUMBTERM_PIN:-1234}
-      # The base URL for the application
-      BASE_URL: ${DUMBTERM_BASE_URL:-http://localhost:3000} # Use ALLOWED_ORIGINS below to restrict cors to specific origins
-      ENABLE_STARSHIP: ${ENABLE_STARSHIP:-true} # Enable starship prompt
-      LOCKOUT_TIME: ${DUMBTERM_LOCKOUT_TIME:-15} # Minutes
-      MAX_SESSION_AGE: ${DUMBTERM_MAX_SESSION_AGE:-24} # Hours
+      # PIN login, only used when AUTH_EMAIL/AUTH_PASSWORD are empty
+      MEUTERMINAL_PIN: ${MEUTERMINAL_PIN:-1234}
+      # The address you open the app at (used for CORS / cookies)
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+      ENABLE_STARSHIP: ${ENABLE_STARSHIP:-true} # Starship prompt in the terminals
+      LOCKOUT_TIME: ${LOCKOUT_TIME:-15} # Minutes locked after 5 wrong logins
+      MAX_SESSION_AGE: ${MAX_SESSION_AGE:-24} # Hours a login lasts
+      # Folder the file manager opens at (default: /root)
+      FILES_HOME: ${FILES_HOME:-}
 
-      # (OPTIONAL)
-      # Usage: Comma-separated list of urls: http://localhost:port,http://internalip:port,https://base.proxy.tld,https://authprovider.domain.tld
-      # ALLOWED_ORIGINS: ${DUMBTERM_ALLOWED_ORIGINS:-http://localhost:3000} # Comment out to allow all origins (*)
+      # (OPTIONAL) Comma-separated list of allowed origins, e.g.
+      # https://terminal.example.com,http://192.168.0.10:3000 (unset = allow all)
+      # ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+
+volumes:
+  meuterminal-home:

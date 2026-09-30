@@ -3,7 +3,7 @@
  * totp-setup.js
  * Generates a secret for two-factor login and prints what to do with it:
  *   npm run 2fa            (local)
- *   docker compose exec dumbterm node scripts/totp-setup.js   (Docker)
+ *   docker compose exec meuterminal node scripts/totp-setup.js   (Docker)
  */
 require('dotenv').config({ quiet: true });
 const { generateSecret, codeAt, currentStep, base32Decode } = require('./totp');

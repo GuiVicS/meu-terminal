@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const config = window.appConfig || {};
     const isMacOS = /Macintosh|Mac OS X/i.test(navigator.userAgent);
     const root = document.documentElement;
-    const uiStorage = new StorageManager('dumbterm-');
+    const uiStorage = new StorageManager('meuterminal-');
 
     const settings = new SettingsManager();
     const viewport = new ViewportManager();
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const session = workspace?.active;
         if (!session || !text) return;
         // Browser tab: typed into the page. Terminal: xterm's paste() applies paste rules.
-        if (session.kind === 'browser') session.sendText(text);
+        if (session.kind !== 'terminal') session.sendText(text);
         else session.terminal.paste(text);
     };
 
@@ -168,8 +168,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     let blurTimer;
     const updateShortcutBar = () => {
         const mode = settings.get('shortcutBar');
-        const visible = mode === 'always'
-            || (mode === 'auto' && viewport.keyboardOpen && terminalFocused);
+        // File tabs have their own buttons: the terminal keys bar isn't useful there
+        const visible = workspace?.active?.kind !== 'files' && (mode === 'always'
+            || (mode === 'auto' && viewport.keyboardOpen && terminalFocused));
         shortcutBar.setVisible(visible);
     };
     viewport.onKeyboardChange(updateShortcutBar);
@@ -180,6 +181,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     const renderActive = session => {
         statusBar.render(session);
+        if (typeof updateShortcutBar === 'function') updateShortcutBar();
         brandConn.dataset.state = session.state;
         brandConn.setAttribute('aria-label', STATE_LABELS[session.state] || session.state);
     };
@@ -319,6 +321,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const items = [
             { label: 'Nova sessão', icon: 'plus', hint: k.newTab, run: () => workspace.create() },
             { label: 'Nova aba de navegador', icon: 'globe', hint: `${k.mod}+B`, run: () => workspace.createBrowser() },
+            ...(config.filesAvailable ? [{ label: 'Gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`,
+                run: () => workspace.createFiles() }] : []),
             { label: 'Nova sessão com opções…', icon: 'terminal', run: () => workspace.openNewSessionPage() },
             { label: 'Reabrir sessão fechada', icon: 'restore', disabled: workspace.recents.length === 0,
                 run: () => workspace.restoreLastClosed() },
@@ -331,6 +335,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 run: () => settings.set('theme', dark ? 'light' : 'dark') },
             'separator',
             { label: 'Configurações', icon: 'settings', hint: `${c}+,`, run: () => settingsDialog.open() },
+            { label: 'Guia do app', icon: 'info', run: () => window.open(joinPath('guia'), '_blank', 'noopener') },
         ];
         if (!window.matchMedia('(pointer: coarse)').matches) {
             items.push({ label: 'Atalhos de teclado', icon: 'keyboard', run: () => shortcutsDialog.open() });

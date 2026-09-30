@@ -9,7 +9,7 @@ class DemoTerminal extends EventEmitter {
         this.commandBuffer = '';
         this.pid = Math.floor(Math.random() * 10000); // Fake PID
         this.username = 'demo';
-        this.hostname = 'dumbterm';
+        this.hostname = 'meuterminal';
         this.osInfo = {
             sysname: 'Linux',
             release: '5.10.0',
@@ -24,7 +24,7 @@ class DemoTerminal extends EventEmitter {
             '/home/demo': { type: 'dir', contents: ['Documents', 'Downloads', '.bashrc'] },
             '/home/demo/Documents': { type: 'dir', contents: ['readme.txt'] },
             '/home/demo/Downloads': { type: 'dir', contents: [] },
-            '/home/demo/Documents/readme.txt': { type: 'file', contents: 'Welcome to DumbTerm Demo Mode!\nThis is a simulated terminal environment.\n' },
+            '/home/demo/Documents/readme.txt': { type: 'file', contents: 'Welcome to MeuTerminal Demo Mode!\nThis is a simulated terminal environment.\n' },
             '/usr': { type: 'dir', contents: ['bin', 'local'] },
             '/usr/bin': { type: 'dir', contents: ['ls', 'cd', 'pwd', 'cat', 'echo', 'whoami', 'hostname', 'uname', 'date'] },
             '/etc': { type: 'dir', contents: ['passwd', 'hosts'] }
@@ -32,7 +32,7 @@ class DemoTerminal extends EventEmitter {
 
         // Emit initial prompt
         setImmediate(() => {
-            this.emit('data', 'demo@dumbterm:' + this.currentDirectory + '$ ');
+            this.emit('data', 'demo@meuterminal:' + this.currentDirectory + '$ ');
         });
     }
 
@@ -66,7 +66,7 @@ class DemoTerminal extends EventEmitter {
         this.emit('data', '\r\n'); // New line after command
 
         if (!command) {
-            this.emit('data', 'demo@dumbterm:' + this.currentDirectory + '$ ');
+            this.emit('data', 'demo@meuterminal:' + this.currentDirectory + '$ ');
             return;
         }
 
@@ -116,7 +116,7 @@ class DemoTerminal extends EventEmitter {
                 }
         }
 
-        this.emit('data', 'demo@dumbterm:' + this.currentDirectory + '$ ');
+        this.emit('data', 'demo@meuterminal:' + this.currentDirectory + '$ ');
     }
 
     handleLs(args) {
