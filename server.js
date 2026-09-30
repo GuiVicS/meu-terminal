@@ -311,18 +311,26 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         cacheName: CACHE_NAME
     }
 
+    // Never cached by proxies/CDNs (Cloudflare): it says which version and features are on
+    res.set('Cache-Control', 'no-store');
     res.type('application/javascript').send(`
         window.appConfig = ${JSON.stringify(appConfig)};
     `);
 });
 
+// App code (html/js/css/json) must be revalidated on every load, or a CDN in front of the
+// app keeps serving the previous version after a deploy. Fonts and images can be cached.
+const revalidateAppCode = res => {
+    if (/\.(html|js|mjs|css|json|webmanifest)$/i.test(res.req.path)) res.set('Cache-Control', 'no-cache');
+};
+
 // Serve static files for public assets
-app.use(BASE_PATH + '/', express.static(path.join(PUBLIC_DIR)));
+app.use(BASE_PATH + '/', express.static(path.join(PUBLIC_DIR), { setHeaders: revalidateAppCode }));
 app.get(BASE_PATH + "/manifest.json", (req, res) => {
-    res.sendFile(path.join(ASSETS_DIR, "manifest.json"));
+    res.sendFile(path.join(ASSETS_DIR, "manifest.json"), { headers: { "Cache-Control": "no-cache" } });
 });
 app.get(BASE_PATH + "/asset-manifest.json", (req, res) => {
-    res.sendFile(path.join(ASSETS_DIR, "asset-manifest.json"));
+    res.sendFile(path.join(ASSETS_DIR, "asset-manifest.json"), { headers: { "Cache-Control": "no-cache" } });
 });
 // Serve font files
 app.use('/fonts', express.static(path.join(PUBLIC_DIR, 'fonts')));
