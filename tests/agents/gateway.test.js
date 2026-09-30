@@ -64,7 +64,9 @@ test('full turn with an allowed permission produces a valid event sequence', asy
     assert.equal(result.data.status, 'completed');
     const permission = events.find(e => e.type === 'permission.request');
     assert.equal(permission.data.diffs[0].newText, 'oi');
-    assert.equal(gateway.get(session.id).title, 'crie ola.txt');
+    // Our title (first message) is set first, then replaced by the agent's own session_info_update
+    assert.ok(events.some(e => e.type === 'session.info'));
+    assert.equal(gateway.get(session.id).title, 'Criar ola.txt');
     assert.equal(gateway.get(session.id).capabilities.usage, true);
 });
 

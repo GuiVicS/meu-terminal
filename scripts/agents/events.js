@@ -28,10 +28,15 @@ const EVENT_FIELDS = {
     'plan.update': ['steps'],
     'todo.update': ['items'],
     'subagent.start': ['subagentId'],
+    'subagent.update': ['subagentId'],   // type/description/prompt as they arrive
     'subagent.event': ['subagentId', 'event'],
     'subagent.end': ['subagentId'],
     'usage.update': [],
     'mode.update': ['modeId'],
+    // Model, mode, reasoning effort... as the agent exposes them (selects in the composer bar)
+    'config.update': ['options'],
+    // Title/updatedAt reported by the agent itself
+    'session.info': [],
     'commands.update': ['commands'],
     'error': ['message'],
     // Anything an adapter cannot map. The UI shows it as a generic card: nothing disappears.
@@ -50,7 +55,7 @@ const TOOL_STATUSES = ['completed', 'failed', 'cancelled'];
 
 /** Capabilities an adapter can declare; the UI only shows panels for active ones. */
 const CAPABILITIES = ['modes', 'plan', 'todos', 'subagents', 'slashCommands', 'mcp', 'images',
-    'resume', 'usage', 'permissions', 'cancel'];
+    'resume', 'history', 'config', 'usage', 'permissions', 'cancel'];
 
 /**
  * Checks an event envelope. Returns a list of problems (empty = valid).

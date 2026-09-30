@@ -47,6 +47,10 @@ for (const [id, agent] of Object.entries(liveAgents())) {
         });
 
         const session = await gateway.startSession({ agent: id, cwd });
+        // e.g. MT_LIVE_MODEL_OPENCODE=opencode/big-pickle when the agent's default model is down
+        const model = process.env[`MT_LIVE_MODEL_${id.toUpperCase()}`];
+        const modelOption = (session.capabilities.configOptions || []).find(o => o.category === 'model');
+        if (model && modelOption) await gateway.setConfigOption(session.id, modelOption.id, model);
         const stopReason = await gateway.prompt(session.id, PROMPT);
         assert.equal(stopReason, 'end_turn');
 

@@ -6,7 +6,7 @@
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { AcpClient } = require('./acp-client');
-const { AcpMapper } = require('./acp-mapping');
+const { AcpMapper, normalizeConfigOptions } = require('./acp-mapping');
 const { validateEvent } = require('./events');
 const { loadAgents } = require('./registry');
 
@@ -20,26 +20,61 @@ class GatewayError extends Error {
     }
 }
 
+/**
+ * Modes come either as ACP `modes` (Claude) or only as a config option of category 'mode'
+ * (OpenCode: build/plan). Returns { modeList, modeSource, modeConfigId, currentMode }.
+ */
+function deriveModes(session, configOptions) {
+    const modes = session && session.modes;
+    if (modes && Array.isArray(modes.availableModes) && modes.availableModes.length) {
+        return {
+            modeList: modes.availableModes.map(m => ({ id: m.id, name: m.name || m.id, description: m.description || '' })),
+            modeSource: 'modes',
+            modeConfigId: null,
+            currentMode: modes.currentModeId || null,
+        };
+    }
+    const option = configOptions.find(o => o.category === 'mode' && o.type === 'select');
+    if (option) {
+        return {
+            modeList: option.options.map(o => ({ id: o.value, name: o.name, description: o.description })),
+            modeSource: 'config',
+            modeConfigId: option.id,
+            currentMode: option.currentValue,
+        };
+    }
+    return { modeList: [], modeSource: null, modeConfigId: null, currentMode: null };
+}
+
+function currentModel(configOptions) {
+    const option = configOptions.find(o => o.category === 'model' && o.type === 'select');
+    return option ? option.currentValue : null;
+}
+
 /** Initialize + session/new results -> the capability flags the UI uses (events.js CAPABILITIES). */
 function deriveCapabilities(init, session) {
     const agentCaps = (init && init.agentCapabilities) || {};
     const sessionCaps = agentCaps.sessionCapabilities || {};
     const prompt = agentCaps.promptCapabilities || {};
     const mcp = agentCaps.mcpCapabilities || {};
-    const modes = (session && session.modes && session.modes.availableModes) || [];
+    const configOptions = normalizeConfigOptions(session && session.configOptions);
+    const modes = deriveModes(session, configOptions);
     return {
-        modes: modes.length > 0,
-        plan: modes.some(m => m.id === 'plan'),
+        modes: modes.modeList.length > 0,
+        plan: modes.modeList.some(m => m.id === 'plan'),
         todos: false,           // ACP reports todo lists as plan updates
         subagents: sessionCaps.subagents != null,
         slashCommands: false,   // turned on by the first commands.update
         mcp: !!(mcp.http || mcp.sse),
         images: !!prompt.image,
         resume: !!(agentCaps.loadSession || sessionCaps.resume),
+        history: sessionCaps.list != null,
+        config: configOptions.length > 0,
         usage: false,           // turned on by the first usage.update
         permissions: true,
         cancel: true,
-        modeList: modes.map(m => ({ id: m.id, name: m.name, description: m.description || '' })),
+        ...modes,
+        configOptions,
         agentInfo: (init && init.agentInfo) || null,
     };
 }
@@ -54,12 +89,13 @@ class AgentGateway extends EventEmitter {
      * @param {number} [deps.startTimeoutMs] - initialize / session/new timeout
      * @param {number} [deps.maxText] - max chars per tool output / diff side
      * @param {boolean} [deps.validate] - check every event against events.js (dev/tests)
+     * @param {object[]} [deps.mcpServers] - ACP MCP servers given to every session (e.g. MeuTerminal's own)
      * @param {Function} [deps.log]
      *
      * Emits 'event' with every normalized event envelope ({ sessionId, seq, type, at, data }).
      */
     constructor({ store, agents = loadAgents(), env = process.env, maxSessions = 4, startTimeoutMs = 60000,
-        maxText, validate = false, log = () => {} }) {
+        maxText, validate = false, mcpServers = [], log = () => {} }) {
         super();
         this.store = store;
         this.agents = agents;
@@ -68,6 +104,7 @@ class AgentGateway extends EventEmitter {
         this.startTimeoutMs = startTimeoutMs;
         this.maxText = maxText;
         this.validate = validate;
+        this.mcpServers = mcpServers;
         this.log = log;
         this.runtimes = new Map(); // sessionId -> running agent state
         // Agent processes never survive a server restart
@@ -131,8 +168,12 @@ class AgentGateway extends EventEmitter {
 
     // ---------- lifecycle ----------
 
-    /** Starts a new agent session. Resolves once the agent is ready for a prompt. */
-    async startSession({ agent, cwd, title = null }) {
+    /**
+     * Starts a new agent session. Resolves once the agent is ready for a prompt.
+     * resumeAcpSessionId continues a conversation the agent already has (listHistory), e.g. one
+     * started in the terminal; if the agent cannot resume it, a new conversation starts.
+     */
+    async startSession({ agent, cwd, title = null, resumeAcpSessionId = null }) {
         const def = this.agents[agent];
         if (!def) throw new GatewayError(`Agente desconhecido: ${agent}`);
         if (def.terminalOnly) throw new GatewayError(`${def.label} só funciona no terminal.`);
@@ -140,7 +181,8 @@ class AgentGateway extends EventEmitter {
         this.checkCapacity();
         const id = crypto.randomUUID();
         this.store.insertSession({ id, agent, cwd, title });
-        await this.spawnAgent(id, { resume: false });
+        if (resumeAcpSessionId) this.store.updateSession(id, { acp_session_id: String(resumeAcpSessionId) });
+        await this.spawnAgent(id, { resume: !!resumeAcpSessionId });
         return this.get(id);
     }
 
@@ -152,6 +194,41 @@ class AgentGateway extends EventEmitter {
         this.checkCapacity();
         await this.spawnAgent(sessionId, { resume: true });
         return this.get(sessionId);
+    }
+
+    /**
+     * Past conversations the agent itself knows for a folder (ACP session/list), including ones
+     * started in the terminal. Starts a short-lived agent process just to ask.
+     */
+    async listHistory({ agent, cwd, maxPages = 5 }) {
+        const def = this.agents[agent];
+        if (!def || def.terminalOnly) throw new GatewayError(`Agente sem histórico: ${agent}`);
+        const client = new AcpClient({ command: def.command, args: def.args, cwd, env: this.env, log: this.log });
+        try {
+            await client.start();
+            const init = await client.request('initialize', {
+                protocolVersion: ACP_PROTOCOL_VERSION,
+                clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+            }, { timeoutMs: this.startTimeoutMs });
+            const caps = (init && init.agentCapabilities && init.agentCapabilities.sessionCapabilities) || {};
+            if (caps.list == null) return [];
+            const sessions = [];
+            let cursor = null;
+            for (let page = 0; page < maxPages; page++) {
+                const result = await client.request('session/list', { cwd, ...(cursor ? { cursor } : {}) }, { timeoutMs: this.startTimeoutMs });
+                for (const s of (result && result.sessions) || []) {
+                    sessions.push({ sessionId: s.sessionId, cwd: s.cwd, title: s.title || null, updatedAt: s.updatedAt || null });
+                }
+                cursor = result && result.nextCursor;
+                if (!cursor) break;
+            }
+            return sessions;
+        } catch (error) {
+            if (/Could not start/.test(error.message)) throw new GatewayError(`Não encontrei "${def.command}". Instale com: ${def.install}`, 424);
+            throw new GatewayError(`Não foi possível listar o histórico: ${error.message}`, 502);
+        } finally {
+            await client.kill();
+        }
     }
 
     checkCapacity() {
@@ -196,15 +273,17 @@ class AgentGateway extends EventEmitter {
             const session = await this.openAcpSession(runtime, row, init, resume);
             runtime.acpSessionId = session.sessionId;
             runtime.capabilities = { ...deriveCapabilities(init, session.result), resumed: session.resumed };
-            runtime.mode = (session.result && session.result.modes && session.result.modes.currentModeId) || runtime.mode;
+            runtime.mode = runtime.capabilities.currentMode || runtime.mode;
             runtime.ready = true;
+            const model = currentModel(runtime.capabilities.configOptions);
             this.store.updateSession(sessionId, {
                 acp_session_id: session.sessionId,
                 capabilities: runtime.capabilities,
                 mode: runtime.mode,
+                model,
             });
             this.emitEvent(sessionId, 'session.start', {
-                agent: row.agent, cwd: row.cwd, capabilities: runtime.capabilities, mode: runtime.mode, resumed: session.resumed,
+                agent: row.agent, cwd: row.cwd, capabilities: runtime.capabilities, mode: runtime.mode, model, resumed: session.resumed,
             });
             this.setState(sessionId, 'idle');
         } catch (error) {
@@ -227,7 +306,7 @@ class AgentGateway extends EventEmitter {
      * supported, else session/load (the agent replays history, which we already have: ignored).
      */
     async openAcpSession(runtime, row, init, resume) {
-        const params = { cwd: row.cwd, mcpServers: [] };
+        const params = { cwd: row.cwd, mcpServers: this.mcpServers };
         const caps = (init && init.agentCapabilities) || {};
         const timeout = { timeoutMs: this.startTimeoutMs };
         if (resume && row.acp_session_id) {
@@ -336,8 +415,45 @@ class AgentGateway extends EventEmitter {
         const runtime = this.requireRuntime(sessionId);
         const modes = runtime.capabilities.modeList || [];
         if (!modes.some(m => m.id === modeId)) throw new GatewayError(`Modo desconhecido: ${modeId}`);
+        // OpenCode-style agents expose the mode only as a config option
+        if (runtime.capabilities.modeSource === 'config') {
+            await this.setConfigOption(sessionId, runtime.capabilities.modeConfigId, modeId);
+            return;
+        }
         await runtime.client.request('session/set_mode', { sessionId: runtime.acpSessionId, modeId });
         this.applyMode(sessionId, runtime, modeId);
+    }
+
+    /** Changes a session config option (model, reasoning effort, mode...). */
+    async setConfigOption(sessionId, configId, value) {
+        const runtime = this.requireRuntime(sessionId);
+        const option = (runtime.capabilities.configOptions || []).find(o => o.id === configId);
+        if (!option) throw new GatewayError(`Opção desconhecida: ${configId}`);
+        const params = { sessionId: runtime.acpSessionId, configId };
+        if (option.type === 'boolean') {
+            if (typeof value !== 'boolean') throw new GatewayError(`${option.name}: valor inválido.`);
+            Object.assign(params, { type: 'boolean', value });
+        } else {
+            if (!option.options.some(o => o.value === value)) throw new GatewayError(`${option.name}: valor inválido.`);
+            params.value = value;
+        }
+        const result = await runtime.client.request('session/set_config_option', params);
+        // The agent answers with the full, possibly changed, list (a new model may change efforts)
+        const options = result && Array.isArray(result.configOptions)
+            ? normalizeConfigOptions(result.configOptions)
+            : runtime.capabilities.configOptions.map(o => (o.id === configId ? { ...o, currentValue: value } : o));
+        this.applyConfigOptions(sessionId, runtime, options);
+    }
+
+    /** New config options from the agent: persist, notify, and keep mode/model in sync. */
+    applyConfigOptions(sessionId, runtime, options) {
+        runtime.capabilities = { ...runtime.capabilities, configOptions: options, config: options.length > 0 };
+        this.store.updateSession(sessionId, { capabilities: runtime.capabilities, model: currentModel(options) });
+        this.emitEvent(sessionId, 'config.update', { options });
+        if (runtime.capabilities.modeSource === 'config') {
+            const modeOption = options.find(o => o.id === runtime.capabilities.modeConfigId);
+            if (modeOption) this.applyMode(sessionId, runtime, modeOption.currentValue);
+        }
     }
 
     applyMode(sessionId, runtime, modeId) {
@@ -404,6 +520,11 @@ class AgentGateway extends EventEmitter {
                 this.applyMode(sessionId, runtime, data.modeId);
                 continue;
             }
+            if (type === 'config.update') {
+                this.applyConfigOptions(sessionId, runtime, data.options);
+                continue;
+            }
+            if (type === 'session.info' && data.title) this.store.updateSession(sessionId, { title: String(data.title).slice(0, 120) });
             if (type === 'commands.update') this.enableCapability(sessionId, runtime, 'slashCommands');
             if (type === 'usage.update') this.enableCapability(sessionId, runtime, 'usage');
             this.emitEvent(sessionId, type, data);
@@ -437,4 +558,4 @@ class AgentGateway extends EventEmitter {
     }
 }
 
-module.exports = { AgentGateway, GatewayError, deriveCapabilities };
+module.exports = { AgentGateway, GatewayError, deriveCapabilities, deriveModes };
