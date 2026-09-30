@@ -7,6 +7,7 @@
 import { STATE, SESSION_COLORS } from './session.js';
 import { icon } from '../ui/icons.js';
 import { showMenu } from '../ui/contextMenu.js';
+import { askText } from '../ui/prompt.js';
 import StorageManager from './storage.js';
 
 const MAX_RECONNECT_ATTEMPTS = 6;
@@ -99,6 +100,7 @@ export default class BrowserSession {
                 <button type="button" class="icon-btn" data-act="back" aria-label="Voltar" disabled>${icon('chevronLeft', 18)}</button>
                 <button type="button" class="icon-btn" data-act="forward" aria-label="Avançar" disabled>${icon('chevronRight', 18)}</button>
                 <button type="button" class="icon-btn" data-act="reload" aria-label="Recarregar">${icon('refresh', 17)}</button>
+                <button type="button" class="browser-live" data-act="live" hidden><span>ao vivo</span></button>
                 <form class="browser-address" autocomplete="off">
                     <input type="text" inputmode="url" enterkeyhint="go" spellcheck="false" autocapitalize="off"
                         autocorrect="off" placeholder="localhost:5173 ou endereço" aria-label="Endereço">
@@ -123,6 +125,7 @@ export default class BrowserSession {
             back: q('[data-act="back"]'),
             forward: q('[data-act="forward"]'),
             reload: q('[data-act="reload"]'),
+            live: q('[data-act="live"]'),
             progress: q('.browser-progress'),
             viewer: q('.browser-viewer'),
             surface: q('.browser-surface'),
@@ -239,7 +242,7 @@ export default class BrowserSession {
             else if (m.type === 'ports') this.showPorts(m.ports);
             else if (m.type === 'editable' && m.value && coarse()) this.openKeyboard();
             else if (m.type === 'workspace') this.hooks.onWorkspaceChanged();
-            else if (m.type === 'open-tab' || m.type === 'notify') this.hooks.onServerMessage(m);
+            else if (m.nonce) this.hooks.onServerMessage(m); // app-wide notices (open-tab, notify, split...)
         };
         ws.onerror = () => ws.close();
         ws.onclose = event => {
@@ -307,6 +310,9 @@ export default class BrowserSession {
         this.el.reload.innerHTML = s.loading ? icon('x', 17) : icon('refresh', 17);
         this.el.reload.setAttribute('aria-label', s.loading ? 'Parar' : 'Recarregar');
         this.el.progress.hidden = !s.loading;
+        this.live = s.live || null;
+        this.el.live.hidden = !this.live;
+        if (this.live) this.el.live.title = `Recarrega quando um arquivo muda em ${this.live}`;
         this.hooks.onInfo(this);
     }
 
@@ -393,6 +399,7 @@ export default class BrowserSession {
                 else this.send({ type: this.nav.loading ? 'stop' : 'reload' });
             } else if (act === 'ports') this.send({ type: 'ports' }) || this.showStatus('Sem conexão');
             else if (act === 'view') this.openViewMenu(btn);
+            else if (act === 'live') this.openLiveMenu(btn);
             else if (act === 'keyboard') {
                 if (document.activeElement === this.el.kbd) this.el.kbd.blur();
                 else this.openKeyboard();
@@ -411,7 +418,31 @@ export default class BrowserSession {
             'separator',
             ...Object.entries(QUALITY).map(([key, q]) => item(`Qualidade: ${q.label}`, this.quality === key,
                 () => this.setPref('quality', key))),
+            'separator',
+            this.live
+                ? { label: 'Parar de recarregar ao salvar', icon: 'eyeOff', run: () => this.send({ type: 'live', path: null }) }
+                : { label: 'Recarregar ao salvar arquivos…', icon: 'refresh', run: () => this.askLiveFolder() },
         ], { anchor, label: 'Tamanho e qualidade' });
+    }
+
+    /** Live reload: the page reloads when a file of a folder is saved (like VS Code's Live Server). */
+    openLiveMenu(anchor) {
+        showMenu(this.live ? [
+            { label: `Observando ${this.live}`, icon: 'folder', disabled: true },
+            { label: 'Parar de recarregar ao salvar', icon: 'eyeOff', run: () => this.send({ type: 'live', path: null }) },
+        ] : [
+            { label: 'Recarregar ao salvar arquivos…', icon: 'refresh', run: () => this.askLiveFolder() },
+        ], { anchor, label: 'Recarregar ao salvar' });
+    }
+
+    async askLiveFolder() {
+        const folder = await askText({
+            title: 'Recarregar ao salvar',
+            label: 'Pasta do projeto (a página recarrega quando um arquivo dela muda)',
+            value: this.hooks.suggestFolder?.(this) || '~',
+            confirm: 'Ativar',
+        });
+        if (folder) this.send({ type: 'live', path: folder }) || this.showStatus('Sem conexão');
     }
 
     setPref(key, value) {

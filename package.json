@@ -1,6 +1,6 @@
 {
   "name": "meuterminal",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "A stupidly simple web-based terminal emulator, with common tools and Starship enabled (via Docker)! 🚀",
   "main": "server.js",
   "engines": {
@@ -33,6 +33,7 @@
     "express": "^5.1.0",
     "express-session": "^1.18.2",
     "node-pty": "^1.0.0",
+    "web-push": "^3.6.7",
     "ws": "^8.18.3"
   },
   "devDependencies": {

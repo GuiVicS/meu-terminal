@@ -243,7 +243,8 @@ class BrowserManager {
                 lastFrame: null,
                 quality: 85,
                 viewport: { width: 1280, height: 800, dpr: 1, mobile: false },
-                state: { url: row.url || DEFAULT_URL, title: '', loading: false, canGoBack: false, canGoForward: false },
+                state: { url: row.url || DEFAULT_URL, title: '', loading: false, canGoBack: false, canGoForward: false,
+                    live: row.cwd || null },
             };
             this.pages.set(row.id, page);
         }
@@ -483,7 +484,12 @@ class BrowserManager {
             return this.updateScreencast(page);
         }
         if (m.type === 'ports') {
-            return ws.send(JSON.stringify({ type: 'ports', ports: await listPorts(this.hiddenPorts) }));
+            return ws.send(JSON.stringify({ type: 'ports', ports: await listPorts(this.allHiddenPorts()) }));
+        }
+        // Live reload on/off (folder to watch, or null): handled by server.js
+        if (m.type === 'live') {
+            if (this.onLive) await this.onLive(page.id, typeof m.path === 'string' && m.path ? m.path : null);
+            return undefined;
         }
         if (!page.sessionId) return;
         // Clicks and typing often change the title (SPAs, forms)
@@ -573,6 +579,25 @@ class BrowserManager {
                 type: 'keyUp', key: name, code, windowsVirtualKeyCode: upper.charCodeAt(0), modifiers,
             });
         }
+    }
+
+    /** Ports never offered as "projects" (the app, live servers). */
+    allHiddenPorts() {
+        return [...this.hiddenPorts, ...(this.extraHiddenPorts ? this.extraHiddenPorts() : [])];
+    }
+
+    /** Live reload: a watched file changed. */
+    async reloadTab(id, file = '') {
+        const page = this.pages.get(id);
+        if (!page || !page.sessionId) return;
+        await this.call(page, 'Page.reload', { ignoreCache: true }).catch(() => {});
+        this.broadcast(page, { type: 'status', message: file ? `Recarregado: ${file}` : 'Recarregado' });
+    }
+
+    /** Shows the live reload folder (or null) on the tab's toolbar. */
+    setLive(id, folder) {
+        const page = this.pages.get(id);
+        if (page) this.setState(page, { live: folder || null });
     }
 
     // ---------- used by the MCP server (agents), no viewer needed ----------

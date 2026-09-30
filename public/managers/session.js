@@ -276,7 +276,7 @@ export default class TerminalSession {
                 this.setState(STATE.EXITED);
             } else if (message.type === 'workspace') {
                 this.hooks.onWorkspaceChanged();
-            } else if (message.type === 'open-tab' || message.type === 'notify') {
+            } else if (message.nonce) { // app-wide notices from the server (open-tab, notify, split, vibe-form...)
                 this.hooks.onServerMessage(message); // from the MCP (agents)
             } else if (message.type === 'info') {
                 this.shell = message.shell;

@@ -18,6 +18,9 @@ const CommandStore = require('./scripts/command-store');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
 const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
 const { FileManager, FileError } = require('./scripts/file-manager');
+const { LiveServers } = require('./scripts/live-server');
+const { Vibe } = require('./scripts/vibe');
+const { PushNotifier } = require('./scripts/push');
 
 const app = express();
 const server = http.createServer(app);
@@ -540,6 +543,55 @@ const FILES_ENABLED = !DEMO_MODE || process.env.DEMO_FILES === 'true';
 // FILES_HOME: the folder the file manager opens at (default: the shell's home)
 const files = new FileManager({ home: process.env.FILES_HOME || (DEMO_MODE ? os.homedir() : HOME_DIR), log: debugLog });
 
+// ---------- Live preview (like VS Code's Live Server) ----------
+// Project folders served on 127.0.0.1 for the server's Chromium; browser tabs with a
+// watched folder (stored in the row's cwd) reload when a file is saved.
+const live = new LiveServers({ store: sessionStore, log: debugLog });
+browsers.extraHiddenPorts = () => live.ports;
+const liveWatches = new Map(); // browser tab id -> unwatch()
+
+async function setLiveReload(id, folder) {
+    const row = sessionStore.get(id);
+    if (!row || row.kind !== 'browser') return null;
+    liveWatches.get(id)?.();
+    liveWatches.delete(id);
+    let resolved = null;
+    if (folder) {
+        resolved = path.resolve(files.home, String(folder).replace(/^~(?=$|[\\/])/, files.home));
+        const st = await fs.promises.stat(resolved).catch(() => null);
+        if (!st || !st.isDirectory()) throw new Error(`Pasta não encontrada: ${resolved}`);
+        liveWatches.set(id, live.watch(resolved, file => browsers.reloadTab(id, file).catch(() => {})));
+    }
+    sessionStore.update(id, { cwd: resolved });
+    browsers.setLive(id, resolved);
+    return resolved;
+}
+browsers.onLive = (id, folder) => setLiveReload(id, folder).catch(e => debugLog('Live reload:', e.message));
+
+// After a restart: live servers of saved preview tabs come back, and so do their watchers
+(async () => {
+    for (const row of sessionStore.listOpen().filter(r => r.kind === 'browser')) {
+        const port = /^http:\/\/127\.0\.0\.1:(\d+)\//.exec(row.url || '')?.[1];
+        const folder = port && live.folderForPort(port);
+        if (folder) await live.serve(folder).catch(e => debugLog('Live server restore:', e.message));
+        if (row.cwd) await setLiveReload(row.id, row.cwd).catch(() => {});
+    }
+})();
+
+// Vibecoding: project form -> agent terminal | live preview (split) + files tab
+const vibe = new Vibe({ sessions, store: sessionStore, live, setLiveReload, home: files.home, log: debugLog });
+
+/** The terminal tab an agent runs in: given id, else the last terminal the user focused. */
+let lastFocusedTerminal = null;
+function agentTerminal(tabId) {
+    const valid = id => {
+        const row = id && sessionStore.get(id);
+        return row && row.status === 'open' && (!row.kind || row.kind === 'terminal') ? row.id : null;
+    };
+    return valid(tabId) || valid(lastFocusedTerminal)
+        || sessionStore.listOpen().find(r => !r.kind || r.kind === 'terminal')?.id || null;
+}
+
 app.get(BASE_PATH + '/api/sessions', (req, res) => {
     res.json(sessions.list());
 });
@@ -559,7 +611,7 @@ app.post(BASE_PATH + '/api/sessions', (req, res) => {
 
 // Ports listening on the server ("localhost:5173 detectado" in the new tab page)
 app.get(BASE_PATH + '/api/ports', async (req, res) => {
-    res.json(await listPorts([Number(PORT)]));
+    res.json(await listPorts([Number(PORT), ...live.ports]));
 });
 
 // ---------- MCP server for agents running inside the terminals ----------
@@ -568,7 +620,8 @@ const MCP_TOKEN = mcpToken(sessionStore);
 const MCP_URL = `http://127.0.0.1:${PORT}${BASE_PATH}/mcp`;
 const mcpHandler = createMcpHandler({
     sessions, store: sessionStore, browsers, files: FILES_ENABLED ? files : null,
-    listPorts, normalizeUrl, port: Number(PORT),
+    listPorts: exclude => listPorts([...exclude, ...live.ports]), normalizeUrl, port: Number(PORT),
+    live, vibe, setLiveReload, agentTerminal, notifier: () => notifier,
 });
 
 /**
@@ -619,7 +672,11 @@ app.patch(BASE_PATH + '/api/sessions/:id', (req, res) => {
 // Closing a tab: the only action that kills its shell (or closes its browser page)
 app.delete(BASE_PATH + '/api/sessions/:id', (req, res) => {
     const row = sessionStore.get(req.params.id);
-    if (row && row.kind === 'browser') browsers.closePage(row.id);
+    if (row && row.kind === 'browser') {
+        browsers.closePage(row.id);
+        liveWatches.get(row.id)?.();
+        liveWatches.delete(row.id);
+    }
     if (!sessions.close(req.params.id)) return res.status(404).json({ error: 'Session not found' });
     res.json({ success: true });
 });
@@ -733,6 +790,74 @@ app.put(BASE_PATH + '/api/files/favorites', filesRoute(async (req, res) => {
         ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(list));
     res.json(list);
 }));
+
+// ---------- Vibecoding (project form -> split terminal | preview + files tab) ----------
+app.get(BASE_PATH + '/api/vibe/kinds', (req, res) => {
+    res.json({ kinds: vibe.kinds(), defaults: vibe.defaults() });
+});
+
+// Started from the app menu: a new terminal runs the agent chosen in the form
+app.post(BASE_PATH + '/api/vibe', async (req, res) => {
+    try {
+        res.status(201).json(await vibe.setup(req.body || {}));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// The form an agent asked for (MCP start_vibecoding) was answered or cancelled
+app.post(BASE_PATH + '/api/vibe/answer', (req, res) => {
+    const { requestId, cancelled, answers } = req.body || {};
+    if (!cancelled) {
+        try {
+            vibe.clean(answers || {});
+        } catch (e) {
+            return res.status(400).json({ error: e.message });
+        }
+    }
+    if (!vibe.answer(String(requestId || ''), cancelled ? { cancelled: true } : { answers })) {
+        return res.status(404).json({ error: 'Este formulário já foi respondido ou expirou.' });
+    }
+    res.json({ success: true });
+});
+
+// Which terminal the user is looking at (agents without MEUTERMINAL_TAB_ID open things beside it)
+app.post(BASE_PATH + '/api/focus', (req, res) => {
+    const row = sessionStore.get(String((req.body || {}).id || ''));
+    if (row && row.status === 'open' && (!row.kind || row.kind === 'terminal')) lastFocusedTerminal = row.id;
+    res.json({ success: true });
+});
+
+// ---------- Push notifications (with sound) ----------
+const notifier = new PushNotifier({
+    store: sessionStore,
+    // VAPID contact: the app's HTTPS address (push services only accept https: or mailto:)
+    subject: /^https:\/\//.test(BASE_URL) ? BASE_URL : 'mailto:noreply@meuterminal.app',
+    log: (...args) => console.warn('[push]', ...args),
+});
+
+app.get(BASE_PATH + '/api/push', (req, res) => {
+    res.json({ publicKey: notifier.publicKey, devices: notifier.subscriptions().length });
+});
+
+app.post(BASE_PATH + '/api/push/subscribe', (req, res) => {
+    try {
+        const devices = notifier.subscribe((req.body || {}).subscription, req.get('user-agent'));
+        res.json({ success: true, devices });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.post(BASE_PATH + '/api/push/unsubscribe', (req, res) => {
+    notifier.unsubscribe(String((req.body || {}).endpoint || ''));
+    res.json({ success: true, devices: notifier.subscriptions().length });
+});
+
+app.post(BASE_PATH + '/api/push/test', async (req, res) => {
+    const result = await notifier.send({ title: 'MeuTerminal', body: 'Notificações funcionando neste aparelho.', url: BASE_PATH + '/' });
+    res.json(result);
+});
 
 // ---------- Quick commands (managed in Settings, used from the shortcut bar) ----------
 const commands = new CommandStore(sessionStore.db);
@@ -895,7 +1020,7 @@ wss.on('connection', (ws, req) => {
 });
 
 /** Spawns a shell process (real PTY, or the simulated one in demo mode). */
-function spawnShell({ cwd, cols = 80, rows = 24 }) {
+function spawnShell({ id, cwd, cols = 80, rows = 24 }) {
     return ptyModule.spawn(SHELL, [], {
         name: 'xterm-256color',
         cols,
@@ -912,7 +1037,9 @@ function spawnShell({ cwd, cols = 80, rows = 24 }) {
             TERM_PROGRAM: 'xterm-256color',
             // Agents in this shell can call MeuTerminal's MCP (open_url, screenshot...)
             MEUTERMINAL_MCP_URL: MCP_URL,
-            MEUTERMINAL_MCP_TOKEN: MCP_TOKEN
+            MEUTERMINAL_MCP_TOKEN: MCP_TOKEN,
+            // Which tab this shell is (agents pass it to the MCP to open things beside it)
+            ...(id ? { MEUTERMINAL_TAB_ID: id } : {})
         }
     });
 }
@@ -1028,6 +1155,7 @@ function shutdown() {
         console.error('Failed to save sessions on shutdown:', e);
     }
     browsers.shutdown();
+    live.shutdown();
     wss.close();
     process.exit(0);
 }

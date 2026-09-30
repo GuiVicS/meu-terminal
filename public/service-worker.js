@@ -1,5 +1,5 @@
 // Core service worker configuration
-let CACHE_VERSION = "2.4.0"; // Default fallback version
+let CACHE_VERSION = "2.5.0"; // Default fallback version
 let CACHE_NAME = `MEUTERMINAL_CACHE_V${CACHE_VERSION}`; // Default format, will be overridden
 const ASSETS_TO_CACHE = [];
 const BASE_PATH = self.registration.scope;
@@ -650,3 +650,41 @@ async function handlePerformUpdate() {
     console.log("User confirmed update, installing cache");
     await installCache(false);
 }
+
+// ---------- Push notifications (agents' MCP notify, with sound) ----------
+self.addEventListener('push', event => {
+    let data = {};
+    try {
+        data = event.data ? event.data.json() : {};
+    } catch {
+        data = { body: event.data ? event.data.text() : '' };
+    }
+    const title = data.title || 'MeuTerminal';
+    const scope = self.registration.scope;
+    event.waitUntil((async () => {
+        // App open and visible: it already shows the notice with its own chime
+        const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        if (windows.some(w => w.visibilityState === 'visible')) return;
+        await self.registration.showNotification(title, {
+            body: data.body || '',
+            icon: new URL('assets/icon-192.png', scope).href,
+            badge: new URL('assets/icon-192.png', scope).href,
+            tag: data.tag || undefined,
+            renotify: true,
+            silent: data.sound === false,
+            vibrate: data.sound === false ? undefined : [200, 100, 200],
+            data: { url: data.url || scope },
+        });
+    })());
+});
+
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    const target = (event.notification.data && event.notification.data.url) || self.registration.scope;
+    event.waitUntil((async () => {
+        const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        const open = windows.find(w => w.url.startsWith(self.registration.scope));
+        if (open) return open.focus();
+        return self.clients.openWindow(target);
+    })());
+});

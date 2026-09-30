@@ -25,6 +25,18 @@ const TOOLS = [
                 url: { type: 'string', description: 'Endereço. "localhost:5173", "5173" ou "site.com" também valem.' },
                 name: { type: 'string', description: 'Nome da aba (opcional).' },
                 background: { type: 'boolean', description: 'true = abre sem trocar a aba que o usuário está vendo.' },
+                beside: {
+                    type: 'boolean',
+                    description: 'true = tela dividida: o seu terminal de um lado e a página do outro (como o Live Server do VS Code).',
+                },
+                live_folder: {
+                    type: 'string',
+                    description: 'Opcional: pasta a observar; a página recarrega sozinha quando um arquivo dela for salvo.',
+                },
+                terminal_tab_id: {
+                    type: 'string',
+                    description: 'Id da SUA aba de terminal: o valor da variável de ambiente MEUTERMINAL_TAB_ID (rode echo $MEUTERMINAL_TAB_ID). Usado com beside.',
+                },
             },
             required: ['url'],
         },
@@ -108,11 +120,76 @@ const TOOLS = [
     },
     {
         name: 'notify',
-        description: 'Mostra um aviso rápido na tela do MeuTerminal (ex.: "Build pronto").',
+        description: 'Avisa o usuário: mostra o aviso na tela do MeuTerminal (com som) e envia uma notificação push '
+            + 'para os aparelhos dele (celular/computador), mesmo com o app fechado. Use quando terminar uma tarefa '
+            + 'longa, quando precisar de uma decisão ou se algo der errado (ex.: "Build pronto", "Preciso da sua aprovação").',
         inputSchema: {
             type: 'object',
-            properties: { message: { type: 'string' } },
+            properties: {
+                message: { type: 'string', description: 'Texto do aviso (até 300 caracteres).' },
+                title: { type: 'string', description: 'Título da notificação (padrão: nome do projeto ou "MeuTerminal").' },
+                sound: { type: 'boolean', description: 'Tocar som (padrão: true).' },
+                push: { type: 'boolean', description: 'Enviar push para os aparelhos (padrão: true). false = só na tela do app.' },
+            },
             required: ['message'],
+        },
+    },
+    {
+        name: 'live_preview',
+        description: 'Live Server: serve uma pasta de site (index.html) só para o navegador do MeuTerminal e abre a prévia '
+            + 'ao lado do seu terminal, recarregando a cada arquivo salvo. Use para sites HTML/CSS/JS sem servidor de desenvolvimento.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                path: { type: 'string', description: 'Pasta do site (absoluta, "~" = home, relativa = a partir da home).' },
+                beside: { type: 'boolean', description: 'Tela dividida com o seu terminal (padrão: true).' },
+                terminal_tab_id: { type: 'string', description: 'Valor de $MEUTERMINAL_TAB_ID (a sua aba de terminal).' },
+            },
+            required: ['path'],
+        },
+    },
+    {
+        name: 'split_tabs',
+        description: 'Mostra duas abas lado a lado (tela dividida), por exemplo o seu terminal e uma aba de navegador. '
+            + 'Com only_first=true desfaz a divisão.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                left_tab_id: { type: 'string', description: 'Aba da esquerda (padrão: a sua aba de terminal, $MEUTERMINAL_TAB_ID).' },
+                right_tab_id: { type: 'string', description: 'Aba da direita.' },
+                only_first: { type: 'boolean', description: 'true = desfaz a divisão e mostra só a primeira aba.' },
+            },
+        },
+    },
+    {
+        name: 'start_vibecoding',
+        description: 'Modo vibecoding: abre um formulário na tela do usuário (nome do projeto, tipo, o que quer construir, pasta) '
+            + 'e, quando ele responde, cria a pasta e prepara o ambiente: tela dividida com o SEU terminal e uma prévia ao vivo, '
+            + 'mais uma aba de Arquivos do projeto. Retorna as respostas e as instruções para você construir o projeto. '
+            + 'Use quando o usuário quiser começar um projeto novo / "vibecodar". Espera até wait_seconds pela resposta; '
+            + 'se voltar status "waiting", chame vibecoding_result com o request_id.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                project_name: { type: 'string', description: 'Sugestão de nome (o usuário pode mudar).' },
+                description: { type: 'string', description: 'Sugestão do que construir (o usuário pode mudar).' },
+                kind: { type: 'string', enum: ['static', 'vite', 'next', 'api', 'other'], description: 'Sugestão de tipo.' },
+                path: { type: 'string', description: 'Sugestão de pasta (padrão ~/projetos/<nome>).' },
+                terminal_tab_id: { type: 'string', description: 'Valor de $MEUTERMINAL_TAB_ID (a sua aba de terminal).' },
+                wait_seconds: { type: 'number', description: 'Quanto esperar pela resposta (padrão 600, máximo 900).' },
+            },
+        },
+    },
+    {
+        name: 'vibecoding_result',
+        description: 'Continua esperando a resposta de um formulário do start_vibecoding que voltou com status "waiting".',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                request_id: { type: 'string' },
+                wait_seconds: { type: 'number', description: 'Padrão 600, máximo 900.' },
+            },
+            required: ['request_id'],
         },
     },
 ];
@@ -128,8 +205,47 @@ class ToolError extends Error {}
  * @param {Function} deps.normalizeUrl
  * @param {number} deps.port - the app's own port (hidden from list_ports)
  */
-function createMcpTools({ sessions, store, browsers, files, listPorts, normalizeUrl, port }) {
+function createMcpTools({
+    sessions, store, browsers, files, listPorts, normalizeUrl, port,
+    live, vibe, setLiveReload, agentTerminal, notifier,
+}) {
     let lastBrowserTab = null;
+    const vibeRequests = new Map(); // request_id -> { promise, terminalTabId, settled }
+
+    /** Shows two tabs side by side on every open app window. */
+    function split(a, b) {
+        sessions.broadcast({ type: 'split', a, b, focus: a });
+    }
+
+    /** Waits for a vibecoding form up to wait_seconds; then sets the project up. */
+    async function awaitVibe(requestId, waitSeconds) {
+        const entry = vibeRequests.get(requestId);
+        if (!entry) throw new ToolError('request_id desconhecido (o formulário já foi respondido ou expirou).');
+        const wait = Math.min(900, Math.max(5, Number(waitSeconds) || 600)) * 1000;
+        const outcome = await Promise.race([
+            entry.promise.then(v => ({ v }), e => ({ e })),
+            new Promise(resolve => setTimeout(() => resolve(null), wait)),
+        ]);
+        if (!outcome) {
+            return text({ status: 'waiting', request_id: requestId,
+                message: 'O usuário ainda não respondeu. Chame vibecoding_result com este request_id para continuar esperando.' });
+        }
+        vibeRequests.delete(requestId);
+        if (outcome.e) throw new ToolError(outcome.e.message);
+        if (outcome.v.cancelled) return text({ status: 'cancelled', message: 'O usuário cancelou o formulário.' });
+        let result;
+        try {
+            result = await vibe.setup(outcome.v.answers, { agentTabId: entry.terminalTabId });
+        } catch (e) {
+            throw new ToolError(e.message);
+        }
+        return text({
+            status: 'ready',
+            ...result,
+            next_steps: `Entre na pasta (cd ${JSON.stringify(result.path)}) e construa o projeto. ${result.instructions} `
+                + 'Confira com screenshot/read_page na aba de prévia (browser_tab_id) e use notify ao terminar etapas.',
+        });
+    }
 
     /** Resolves tab_id (or the last/first browser tab when omitted). */
     function browserRow(tabId) {
@@ -145,14 +261,23 @@ function createMcpTools({ sessions, store, browsers, files, listPorts, normalize
     const text = value => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
 
     return {
-        async open_url({ url, name, background }) {
+        async open_url({ url, name, background, beside, live_folder, terminal_tab_id }) {
             if (!browsers.available) throw new ToolError('Chromium não está instalado no servidor.');
             const target = normalizeUrl(url);
             if (!target) throw new ToolError('URL inválida.');
-            const tab = sessions.create({ kind: 'browser', url: target, name });
+            const terminal = beside ? agentTerminal(terminal_tab_id) : null;
+            const tab = sessions.create({ kind: 'browser', url: target, name, afterId: terminal || undefined });
             lastBrowserTab = tab.id;
+            if (live_folder) {
+                try {
+                    await setLiveReload(tab.id, live_folder);
+                } catch (e) {
+                    throw new ToolError(e.message);
+                }
+            }
             // Tell the open app windows to show it (unless the agent asked for background)
-            if (!background) sessions.broadcast({ type: 'open-tab', id: tab.id });
+            if (terminal) split(terminal, tab.id);
+            else if (!background) sessions.broadcast({ type: 'open-tab', id: tab.id });
             // The page opens at the tab's URL; wait for it so the agent gets the real title
             let state = { url: target, title: '' };
             try {
@@ -257,11 +382,80 @@ function createMcpTools({ sessions, store, browsers, files, listPorts, normalize
         async list_ports() {
             return text(await listPorts([port]));
         },
-        notify({ message }) {
+        async notify({ message, title, sound, push }) {
             const msg = String(message || '').slice(0, 300);
             if (!msg) throw new ToolError('Mensagem vazia.');
-            sessions.broadcast({ type: 'notify', message: msg });
-            return text('Aviso mostrado.');
+            const heading = String(title || 'MeuTerminal').slice(0, 80);
+            const withSound = sound !== false;
+            // On screen (open windows), with a chime
+            sessions.broadcast({ type: 'notify', message: msg, title: heading, sound: withSound });
+            // Push to the user's devices (works with the app closed)
+            let pushed = null;
+            const pusher = notifier && notifier();
+            if (push !== false && pusher) {
+                try {
+                    pushed = await pusher.send({ title: heading, body: msg, sound: withSound });
+                } catch (e) {
+                    pushed = { error: e.message };
+                }
+            }
+            const screens = sessions.sockets.size ? 'na tela do app' : 'nenhum app aberto';
+            if (!pushed) return text(`Aviso mostrado (${screens}).`);
+            if (pushed.error) return text(`Aviso mostrado (${screens}); push falhou: ${pushed.error}`);
+            if (!pushed.devices) {
+                return text(`Aviso mostrado (${screens}). Nenhum aparelho com notificações ativadas: `
+                    + 'o usuário ativa em Configurações → Notificações.');
+            }
+            return text(`Aviso mostrado (${screens}) e enviado para ${pushed.sent} de ${pushed.devices} aparelho(s).`);
+        },
+        async live_preview({ path: folder, beside, terminal_tab_id }) {
+            if (!browsers.available) throw new ToolError('Chromium não está instalado no servidor.');
+            const raw = String(folder || '').trim();
+            if (!raw) throw new ToolError('Informe a pasta.');
+            const home = files ? files.home : os.homedir();
+            const resolved = path.resolve(home, raw.replace(/^~(?=$|[\\/])/, home));
+            let url;
+            try {
+                url = await live.serve(resolved);
+            } catch (e) {
+                throw new ToolError(e.message);
+            }
+            const terminal = beside === false ? null : agentTerminal(terminal_tab_id);
+            const tab = sessions.create({ kind: 'browser', url, name: `${path.basename(resolved)} · prévia`, afterId: terminal || undefined });
+            lastBrowserTab = tab.id;
+            await setLiveReload(tab.id, resolved);
+            if (terminal) split(terminal, tab.id);
+            else sessions.broadcast({ type: 'open-tab', id: tab.id });
+            return text({ tab_id: tab.id, url, folder: resolved, live_reload: true,
+                note: 'A página recarrega sozinha quando um arquivo da pasta é salvo.' });
+        },
+        split_tabs({ left_tab_id, right_tab_id, only_first }) {
+            const left = left_tab_id && store.get(left_tab_id)?.status === 'open' ? left_tab_id : agentTerminal(null);
+            if (!left) throw new ToolError('Aba da esquerda não encontrada.');
+            if (only_first) {
+                sessions.broadcast({ type: 'split', a: left, b: null, focus: left });
+                return text('Divisão desfeita.');
+            }
+            const right = store.get(String(right_tab_id || ''));
+            if (!right || right.status !== 'open' || right.id === left) throw new ToolError('Aba da direita não encontrada.');
+            split(left, right.id);
+            return text(`Tela dividida: ${store.get(left).name} | ${right.name}`);
+        },
+        async start_vibecoding({ project_name, description, kind, path: folder, terminal_tab_id, wait_seconds }) {
+            const terminalTabId = agentTerminal(terminal_tab_id);
+            const requestId = crypto.randomUUID();
+            let promise;
+            try {
+                promise = vibe.ask({ name: project_name, description, kind, path: folder });
+            } catch (e) {
+                throw new ToolError(e.message);
+            }
+            promise.catch(() => {}); // handled in awaitVibe
+            vibeRequests.set(requestId, { promise, terminalTabId });
+            return awaitVibe(requestId, wait_seconds);
+        },
+        vibecoding_result({ request_id, wait_seconds }) {
+            return awaitVibe(String(request_id || ''), wait_seconds);
         },
     };
 }
@@ -287,7 +481,10 @@ function createMcpHandler(deps) {
                     capabilities: { tools: { listChanged: false } },
                     serverInfo: SERVER_INFO,
                     instructions: 'Ferramentas do MeuTerminal: abra páginas (open_url) para o usuário ver o '
-                        + 'resultado, mostre pastas no gerenciador de arquivos (open_folder; list_drives mostra o Google Drive/rclone), confira com screenshot/read_page e avise com notify.',
+                        + 'resultado (beside=true divide a tela com o seu terminal; live_preview = Live Server de uma pasta), mostre pastas '
+                        + 'no gerenciador de arquivos (open_folder; list_drives mostra o Google Drive/rclone), confira com screenshot/read_page '
+                        + 'e avise com notify (push com som no celular). Para começar um projeto novo com o usuário, use start_vibecoding. '
+                        + 'A sua aba de terminal está em $MEUTERMINAL_TAB_ID: passe como terminal_tab_id.',
                 });
             }
             case 'ping':

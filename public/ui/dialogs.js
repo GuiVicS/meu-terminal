@@ -4,6 +4,8 @@
  * (focus trapping, Esc to close and the backdrop come from the browser).
  */
 import { icon } from './icons.js';
+import { pushStatus, enablePush, disablePush, testPush } from '../managers/push.js';
+import { toast } from './toast.js';
 
 function createDialog(id, title) {
     const dialog = document.createElement('dialog');
@@ -251,6 +253,16 @@ export function createSettingsDialog(settings, getSession, commands) {
                     encerra nada. Só fechar a aba (✕) encerra o processo dela.</span></span>
             </div>
         </section>
+        <section class="settings-section push-section">
+            <h3 class="section-label">Notificações</h3>
+            <p class="setting-help">Receba avisos dos agentes (MCP <code class="mono">notify</code>) com som, mesmo
+                com o app fechado. Ative em cada aparelho.</p>
+            <p class="push-status" data-push-status>Verificando…</p>
+            <div class="push-actions">
+                <button type="button" class="btn btn-primary" data-push-toggle hidden>Ativar neste aparelho</button>
+                <button type="button" class="btn btn-ghost" data-push-test hidden>Enviar teste</button>
+            </div>
+        </section>
         <section class="settings-section mcp-section">
             <h3 class="section-label">Agentes (MCP)</h3>
             <p class="setting-help mcp-help">Agentes rodando nos terminais (Claude Code e outros com MCP) podem
@@ -321,11 +333,64 @@ export function createSettingsDialog(settings, getSession, commands) {
 
     const commandsAdmin = mountCommandsAdmin(body.querySelector('[data-commands]'), commands);
 
+    // Push notifications for this device
+    const pushEl = {
+        status: body.querySelector('[data-push-status]'),
+        toggle: body.querySelector('[data-push-toggle]'),
+        test: body.querySelector('[data-push-test]'),
+    };
+    const loadPush = async () => {
+        let s;
+        try {
+            s = await pushStatus();
+        } catch (e) {
+            s = { supported: false, reason: e.message };
+        }
+        pushEl.toggle.hidden = !s.supported;
+        pushEl.test.hidden = !s.subscribed;
+        if (!s.supported) {
+            pushEl.status.textContent = s.reason;
+            return;
+        }
+        const others = s.devices ? ` Aparelhos com notificações: ${s.devices}.` : '';
+        pushEl.status.textContent = s.subscribed ? `Ativadas neste aparelho.${others}`
+            : s.permission === 'denied' ? 'Bloqueadas neste navegador: libere as notificações do site nas configurações.'
+                : `Desativadas neste aparelho.${others}`;
+        pushEl.toggle.textContent = s.subscribed ? 'Desativar neste aparelho' : 'Ativar neste aparelho';
+        pushEl.toggle.className = `btn ${s.subscribed ? 'btn-ghost' : 'btn-primary'}`;
+        pushEl.toggle.dataset.on = s.subscribed ? '1' : '';
+    };
+    pushEl.toggle.addEventListener('click', async () => {
+        pushEl.toggle.disabled = true;
+        try {
+            if (pushEl.toggle.dataset.on) await disablePush();
+            else {
+                await enablePush();
+                toast('Notificações ativadas. Enviando um teste…');
+                await testPush();
+            }
+        } catch (e) {
+            toast(e.message, { tone: 'error', duration: 6000 });
+        } finally {
+            pushEl.toggle.disabled = false;
+            loadPush();
+        }
+    });
+    pushEl.test.addEventListener('click', async () => {
+        try {
+            const r = await testPush();
+            toast(r.sent ? `Teste enviado para ${r.sent} aparelho(s).` : 'Nenhum aparelho recebeu o teste.');
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+        }
+    });
+
     return {
         open() {
             sync();
             commandsAdmin.refresh();
             loadMcpInfo();
+            loadPush();
             dialog.showModal();
         },
     };

@@ -49,6 +49,7 @@ class SessionManager {
         this.log = log;
         this.runtimes = new Map(); // id -> running state (pty, headless screen, clients)
         this.sockets = new Set();  // every attached socket (for workspace notifications)
+        this.pendingInput = new Map(); // id -> command to type once the shell starts
     }
 
     // ---------- workspace (REST) ----------
@@ -231,7 +232,7 @@ class SessionManager {
 
     startShell(rt, row = this.store.get(rt.id)) {
         const cwd = this.pickCwd(row);
-        const pty = this.spawnShell({ cwd, cols: rt.cols, rows: rt.rows });
+        const pty = this.spawnShell({ id: rt.id, cwd, cols: rt.cols, rows: rt.rows });
         rt.pty = pty;
         rt.info = this.shellInfo(pty, cwd);
         this.store.update(rt.id, { pid: pty.pid });
@@ -254,6 +255,29 @@ class SessionManager {
             this.changed();
         });
         this.send(rt, { type: 'info', ...rt.info });
+        // A command queued before the shell existed (vibecoding: start the agent)
+        const queued = this.pendingInput.get(rt.id);
+        if (queued) {
+            this.pendingInput.delete(rt.id);
+            setTimeout(() => { if (rt.pty === pty) pty.write(queued); }, 600);
+        }
+    }
+
+    /**
+     * Types a command in a terminal tab (starting its shell if nobody opened it yet).
+     * The text is typed as-is: end it with `\r` to run it.
+     */
+    runCommand(id, text) {
+        const row = this.store.get(id);
+        if (!row || row.status !== 'open' || (row.kind && row.kind !== 'terminal')) return false;
+        const rt = this.runtimes.get(id);
+        if (rt && rt.pty) {
+            rt.pty.write(text);
+            return true;
+        }
+        this.pendingInput.set(id, text);
+        if (!rt) this.ensureRuntime(id);
+        return true;
     }
 
     /** First existing directory among: last cwd, starting cwd, server default. */
