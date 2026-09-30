@@ -12,7 +12,7 @@ const MAX_LENGTH = 10000;
 
 export default class ClipboardHistory {
     constructor() {
-        this.storage = new StorageManager('dumbterm-');
+        this.storage = new StorageManager('meuterminal-');
         this.items = this.storage.get('clipboard', []);
     }
 

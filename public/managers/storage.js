@@ -7,7 +7,7 @@ export default class StorageManager {
      * Constructor for StorageManager
      * @param {string} prefix - Optional prefix for all storage keys
      */
-    constructor(prefix = 'dumbterm-') {
+    constructor(prefix = 'meuterminal-') {
         this.prefix = prefix;
         this.isAvailable = this._checkAvailability();
     }

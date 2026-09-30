@@ -34,7 +34,7 @@ const SEQUENCES = [
 ];
 const MOD_FINAL = { A: 'ArrowUp', B: 'ArrowDown', C: 'ArrowRight', D: 'ArrowLeft', H: 'Home', F: 'End' };
 
-const prefs = new StorageManager('dumbterm-');
+const prefs = new StorageManager('meuterminal-');
 
 export default class BrowserSession {
     /**
@@ -239,6 +239,7 @@ export default class BrowserSession {
             else if (m.type === 'ports') this.showPorts(m.ports);
             else if (m.type === 'editable' && m.value && coarse()) this.openKeyboard();
             else if (m.type === 'workspace') this.hooks.onWorkspaceChanged();
+            else if (m.type === 'open-tab' || m.type === 'notify') this.hooks.onServerMessage(m);
         };
         ws.onerror = () => ws.close();
         ws.onclose = event => {

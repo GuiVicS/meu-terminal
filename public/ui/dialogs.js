@@ -250,7 +250,46 @@ export function createSettingsDialog(settings, getSession, commands) {
                     <span class="setting-help">As abas e os processos ficam no servidor: fechar o app não
                     encerra nada. Só fechar a aba (✕) encerra o processo dela.</span></span>
             </div>
+        </section>
+        <section class="settings-section mcp-section">
+            <h3 class="section-label">Agentes (MCP)</h3>
+            <p class="setting-help mcp-help">Agentes rodando nos terminais (Claude Code e outros com MCP) podem
+                abrir páginas numa aba de navegador, ver a tela (screenshot), ler o texto, listar abas e portas
+                e mostrar avisos. Rode uma vez num terminal do MeuTerminal:</p>
+            <div class="mcp-command">
+                <code class="mono" data-mcp-command>carregando…</code>
+                <button type="button" class="btn btn-ghost" data-copy-mcp>Copiar</button>
+            </div>
+            <p class="setting-help">Outros agentes: MCP por HTTP em <code class="mono" data-mcp-url></code>,
+                com o cabeçalho <code class="mono">Authorization: Bearer $MEUTERMINAL_MCP_TOKEN</code>
+                (variável já definida em todo terminal). Só funciona de dentro do servidor.</p>
         </section>`;
+    const mcpCommand = body.querySelector('[data-mcp-command]');
+    body.querySelector('[data-copy-mcp]').addEventListener('click', async e => {
+        const button = e.currentTarget;
+        try {
+            await navigator.clipboard.writeText(mcpCommand.textContent);
+            button.textContent = 'Copiado';
+        } catch {
+            // No clipboard permission (e.g. plain HTTP): select the text for manual copy
+            const range = document.createRange();
+            range.selectNodeContents(mcpCommand);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+            button.textContent = 'Selecionado';
+        }
+        setTimeout(() => { button.textContent = 'Copiar'; }, 2000);
+    });
+    const loadMcpInfo = () => {
+        const base = (window.appConfig?.basePath || '').replace(/\/+$/, '');
+        fetch(`${base}/api/mcp-info`, { credentials: 'same-origin', cache: 'no-store' })
+            .then(r => r.json())
+            .then(info => {
+                mcpCommand.textContent = info.claude;
+                body.querySelector('[data-mcp-url]').textContent = info.url;
+            })
+            .catch(() => { mcpCommand.textContent = 'Não foi possível carregar.'; });
+    };
 
     const sync = () => {
         body.querySelectorAll('[data-setting]').forEach(input => {
@@ -286,6 +325,7 @@ export function createSettingsDialog(settings, getSession, commands) {
         open() {
             sync();
             commandsAdmin.refresh();
+            loadMcpInfo();
             dialog.showModal();
         },
     };

@@ -11,10 +11,13 @@ const os = require('os');
 const fs = require('fs');
 const { generatePWAManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
+const { TotpVerifier } = require('./scripts/totp');
 const SessionStore = require('./scripts/session-store');
 const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
+const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
+const { FileManager, FileError } = require('./scripts/file-manager');
 
 const app = express();
 const server = http.createServer(app);
@@ -31,7 +34,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // runs on machines without a C++ toolchain
 const ptyModule = DEMO_MODE ? require('./scripts/demo/terminal') : require('node-pty');
 const ASSETS_DIR = path.join(PUBLIC_DIR, 'assets');
-const CACHE_NAME = `DUMBTERM_CACHE_V${APP_VERSION}`;
+const CACHE_NAME = `MEUTERMINAL_CACHE_V${APP_VERSION}`;
 // SQLite file with the sessions (tabs). Mount its folder as a volume to keep it across deploys.
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'meuterminal.db');
 const SHELL = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash');
@@ -78,6 +81,14 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
 const isEmailAuth = AUTH_EMAIL !== '' && AUTH_PASSWORD !== '';
 const AUTH_COOKIE = `${projectName}_AUTH`;
 
+// Optional two-factor login (TOTP authenticator app). Only active with email login.
+// An invalid secret stops the server instead of silently turning 2FA off.
+const TOTP_SECRET = (process.env.AUTH_TOTP_SECRET || '').trim();
+const totp = isEmailAuth && TOTP_SECRET ? new TotpVerifier(TOTP_SECRET) : null;
+if (TOTP_SECRET && !isEmailAuth) {
+    console.warn('AUTH_TOTP_SECRET ignorado: a verificação em duas etapas exige AUTH_EMAIL e AUTH_PASSWORD.');
+}
+
 // Legacy PIN login, only used when email login is not configured
 const PIN = isEmailAuth ? '' : process.env[`${projectName}_PIN`];
 const isPinRequired = !!(PIN && PIN.trim() !== '');
@@ -86,7 +97,7 @@ const isAuthRequired = AUTH_MODE !== 'none';
 
 // Log which protection is enabled
 if (isEmailAuth) {
-    debugLog('Email/password login is enabled for:', AUTH_EMAIL);
+    debugLog('Email/password login is enabled for:', AUTH_EMAIL, totp ? '(with 2FA)' : '');
 } else if (isPinRequired) {
     debugLog('PIN protection is enabled, PIN length:', PIN.length);
 } else {
@@ -95,10 +106,10 @@ if (isEmailAuth) {
 
 // ---- Email login tokens ----
 // The cookie never contains the password: it holds an expiry and an HMAC signature.
-// The key is derived from the credentials, so changing the password in .env logs
-// everyone out, while a server restart does not.
+// The key is derived from the credentials (and the 2FA secret), so changing the
+// password or turning 2FA on/off in .env logs everyone out; a restart does not.
 const TOKEN_KEY = crypto.createHash('sha256')
-    .update(`meu-terminal-auth\0${AUTH_EMAIL}\0${AUTH_PASSWORD}`)
+    .update(`meu-terminal-auth\0${AUTH_EMAIL}\0${AUTH_PASSWORD}\0${totp ? TOTP_SECRET : ''}`)
     .digest();
 
 function signToken(expiresAt) {
@@ -169,7 +180,7 @@ function recordAttempt(ip) {
 // Security middleware
 app.set('trust proxy', 1);
 app.use(cors(getCorsOptions(BASE_URL)));
-app.use(express.json());
+app.use(express.json({ limit: '5mb' })); // file editor saves text through JSON
 app.use(cookieParser());
 
 // Session configuration with secure settings
@@ -259,6 +270,8 @@ app.use(BASE_PATH, (req, res, next) => {
         // The browser fetches the worker script on its own to check for updates; if that
         // hits the login redirect the update fails silently and the PWA stays on old code.
         '/service-worker.js',
+        // Agents' MCP endpoint: has its own check (local only + bearer token)
+        '/mcp',
     ];
 
     // Check if the current path matches any of the public paths
@@ -277,6 +290,11 @@ app.get(BASE_PATH + '/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Step-by-step guide: turning on the authenticator app (2FA)
+app.get(BASE_PATH + '/guia', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'guia.html'));
+});
+
 // Serve config.js for frontend
 app.get(BASE_PATH + '/config.js', (req, res) => {
     debugLog('Serving config.js with basePath:', BASE_PATH);
@@ -288,6 +306,7 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         authMode: AUTH_MODE,
         isDemoMode: DEMO_MODE,
         browserAvailable: browsers.available, // Chromium installed: browser tabs enabled
+        filesAvailable: FILES_ENABLED, // file manager tabs
         version: APP_VERSION,
         cacheName: CACHE_NAME
     }
@@ -328,7 +347,7 @@ app.get(BASE_PATH + '/login', (req, res) => {
 
 // Tells the login page which form to show
 app.get(BASE_PATH + '/auth-mode', (req, res) => {
-    res.json({ mode: AUTH_MODE });
+    res.json({ mode: AUTH_MODE, twoFactor: !!totp });
 });
 
 // Email + password login
@@ -346,7 +365,7 @@ app.post(BASE_PATH + '/login', (req, res) => {
         });
     }
 
-    const { email, password } = req.body || {};
+    const { email, password, code } = req.body || {};
     if (typeof email !== 'string' || typeof password !== 'string') {
         return res.status(400).json({ error: 'Informe email e senha.' });
     }
@@ -356,6 +375,19 @@ app.post(BASE_PATH + '/login', (req, res) => {
     const passwordOk = safeEqual(password, AUTH_PASSWORD);
 
     setTimeout(() => {
+        if (emailOk && passwordOk && totp) {
+            // Second step: the authenticator code. Asking for it isn't a failed attempt;
+            // a wrong code is (counts toward the lockout like a wrong password).
+            if (typeof code !== 'string' || !code.trim()) {
+                return res.status(401).json({ needCode: true });
+            }
+            if (!totp.verify(code)) {
+                debugLog('2FA code rejected');
+                recordAttempt(ip);
+                const left = Math.max(0, MAX_ATTEMPTS - loginAttempts.get(ip).count);
+                return res.status(401).json({ needCode: true, error: 'Código inválido ou já usado.', attemptsLeft: left });
+            }
+        }
         if (emailOk && passwordOk) {
             debugLog('Email login successful');
             resetAttempts(ip);
@@ -494,6 +526,12 @@ const browsers = new BrowserManager({
     log: (...args) => console.log('[navegador]', ...args),
 });
 
+// File manager tabs: this server's folders + rclone remotes (Google Drive...) when installed.
+// Off in the public demo (it would expose the host); DEMO_FILES=true turns it on for tests.
+const FILES_ENABLED = !DEMO_MODE || process.env.DEMO_FILES === 'true';
+// FILES_HOME: the folder the file manager opens at (default: the shell's home)
+const files = new FileManager({ home: process.env.FILES_HOME || (DEMO_MODE ? os.homedir() : HOME_DIR), log: debugLog });
+
 app.get(BASE_PATH + '/api/sessions', (req, res) => {
     res.json(sessions.list());
 });
@@ -503,6 +541,9 @@ app.post(BASE_PATH + '/api/sessions', (req, res) => {
     if (kind === 'browser' && !browsers.available) {
         return res.status(503).json({ error: 'Chromium não está instalado no servidor.' });
     }
+    if (kind === 'files' && !FILES_ENABLED) {
+        return res.status(503).json({ error: 'Gerenciador de arquivos desligado.' });
+    }
     // "localhost:5173" -> "http://localhost:5173" (same rules as the address bar)
     const pageUrl = kind === 'browser' && url ? normalizeUrl(url) : url;
     res.status(201).json(sessions.create({ name, cwd, color, afterId, reopenId, kind, url: pageUrl }));
@@ -511,6 +552,48 @@ app.post(BASE_PATH + '/api/sessions', (req, res) => {
 // Ports listening on the server ("localhost:5173 detectado" in the new tab page)
 app.get(BASE_PATH + '/api/ports', async (req, res) => {
     res.json(await listPorts([Number(PORT)]));
+});
+
+// ---------- MCP server for agents running inside the terminals ----------
+// Every shell gets MEUTERMINAL_MCP_URL / MEUTERMINAL_MCP_TOKEN (see spawnShell).
+const MCP_TOKEN = mcpToken(sessionStore);
+const MCP_URL = `http://127.0.0.1:${PORT}${BASE_PATH}/mcp`;
+const mcpHandler = createMcpHandler({
+    sessions, store: sessionStore, browsers, files: FILES_ENABLED ? files : null,
+    listPorts, normalizeUrl, port: Number(PORT),
+});
+
+/**
+ * Agents run on this machine: only loopback connections with the token are accepted.
+ * Requests carrying an Origin come from a web page (DNS rebinding etc.) and are refused.
+ */
+function mcpAuth(req, res, next) {
+    const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    const header = req.get('authorization') || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!local || req.get('origin') || !safeEqual(token, MCP_TOKEN)) {
+        return res.status(401).json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized' } });
+    }
+    next();
+}
+
+app.post(BASE_PATH + '/mcp', mcpAuth, (req, res) => {
+    mcpHandler(req, res).catch(e => {
+        console.error('MCP error:', e);
+        res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } });
+    });
+});
+// No server-initiated stream (GET) or session teardown (DELETE): POST only
+app.all(BASE_PATH + '/mcp', (req, res) => res.status(405).set('Allow', 'POST').end());
+
+// Settings screen: how to register the MCP in an agent (behind the normal login)
+app.get(BASE_PATH + '/api/mcp-info', (req, res) => {
+    res.json({
+        url: MCP_URL,
+        token: MCP_TOKEN,
+        claude: 'claude mcp add --transport http --scope user meuterminal "$MEUTERMINAL_MCP_URL" '
+            + '--header "Authorization: Bearer $MEUTERMINAL_MCP_TOKEN"',
+    });
 });
 
 // Declared before "/:id" so "order" isn't taken for an id
@@ -538,6 +621,110 @@ app.delete(BASE_PATH + '/api/recent/:id', (req, res) => {
     sessions.forget(req.params.id);
     res.json({ success: true });
 });
+
+// ---------- Files (the "Arquivos" tabs) ----------
+const one = value => (Array.isArray(value) ? value[0] : value);
+const many = value => (value === undefined ? [] : Array.isArray(value) ? value : [value]);
+
+/** Wraps a files route: disabled check + errors as { error } with the right status. */
+function filesRoute(handler) {
+    return async (req, res) => {
+        if (!FILES_ENABLED) return res.status(404).json({ error: 'Gerenciador de arquivos desligado.' });
+        try {
+            await handler(req, res);
+        } catch (e) {
+            const status = e instanceof FileError ? e.status : 500;
+            if (status >= 500) console.error('Files error:', e);
+            if (!res.headersSent) res.status(status).json({ error: e.message || 'Erro' });
+            else res.destroy();
+        }
+    };
+}
+
+app.get(BASE_PATH + '/api/files/sources', filesRoute(async (req, res) => {
+    res.json(await files.sources());
+}));
+
+app.get(BASE_PATH + '/api/files/list', filesRoute(async (req, res) => {
+    res.json(await files.list(one(req.query.source), one(req.query.path)));
+}));
+
+app.get(BASE_PATH + '/api/files/stat', filesRoute(async (req, res) => {
+    res.json(await files.stat(one(req.query.source), one(req.query.path)));
+}));
+
+app.get(BASE_PATH + '/api/files/size', filesRoute(async (req, res) => {
+    res.json(await files.folderSize(one(req.query.source), one(req.query.path)));
+}));
+
+app.get(BASE_PATH + '/api/files/search', filesRoute(async (req, res) => {
+    res.json(await files.search(one(req.query.source), one(req.query.path), one(req.query.q)));
+}));
+
+// Raw file (preview, <img>/<video> sources, download with ?download=1)
+app.get(BASE_PATH + '/api/files/raw', filesRoute(async (req, res) => {
+    await files.send(req, res, one(req.query.source), one(req.query.path), { download: one(req.query.download) === '1' });
+}));
+
+// Folder or several items as .tar.gz (?path=<folder>&names=a&names=b)
+app.get(BASE_PATH + '/api/files/archive', filesRoute(async (req, res) => {
+    await files.sendArchive(res, one(req.query.source), one(req.query.path), many(req.query.names));
+}));
+
+app.get(BASE_PATH + '/api/files/text', filesRoute(async (req, res) => {
+    res.json(await files.readText(one(req.query.source), one(req.query.path)));
+}));
+
+app.put(BASE_PATH + '/api/files/text', filesRoute(async (req, res) => {
+    const { source, path: filePath, text, expectMtime, force } = req.body || {};
+    res.json(await files.writeText(source, filePath, text, { expectMtime, force: !!force }));
+}));
+
+// Upload: the request body is the file itself (no multipart), streamed to disk/rclone
+app.post(BASE_PATH + '/api/files/upload', filesRoute(async (req, res) => {
+    const result = await files.upload(req, one(req.query.source), one(req.query.path), one(req.query.name), {
+        overwrite: one(req.query.overwrite) === '1',
+    });
+    res.status(201).json(result);
+}));
+
+app.post(BASE_PATH + '/api/files/op', filesRoute(async (req, res) => {
+    const b = req.body || {};
+    switch (b.op) {
+        case 'mkdir': return res.json(await files.mkdir(b.source, b.path, b.name));
+        case 'touch': return res.json(await files.touch(b.source, b.path, b.name));
+        case 'rename': return res.json(await files.rename(b.source, b.path, b.name));
+        case 'delete': return res.json(await files.remove(b.source, many(b.paths)));
+        case 'copy':
+        case 'move':
+            return res.json(await files.transfer(many(b.items), b.dest || {}, { move: b.op === 'move' }));
+        default:
+            return res.status(400).json({ error: 'Operação desconhecida.' });
+    }
+}));
+
+// Favorite folders (sidebar), shared by every device
+app.get(BASE_PATH + '/api/files/favorites', filesRoute(async (req, res) => {
+    const row = sessionStore.db.prepare(`SELECT value FROM meta WHERE key = 'files_favorites'`).get();
+    let list = [];
+    try {
+        list = row ? JSON.parse(row.value) : [];
+    } catch { /* reset */ }
+    res.json(Array.isArray(list) ? list : []);
+}));
+
+app.put(BASE_PATH + '/api/files/favorites', filesRoute(async (req, res) => {
+    const list = (Array.isArray(req.body) ? req.body : []).slice(0, 100)
+        .filter(f => f && typeof f.path === 'string' && f.path.length <= 4096)
+        .map(f => ({
+            source: typeof f.source === 'string' ? f.source.slice(0, 200) : 'local',
+            path: f.path,
+            name: typeof f.name === 'string' ? f.name.slice(0, 100) : '',
+        }));
+    sessionStore.db.prepare(`INSERT INTO meta (key, value) VALUES ('files_favorites', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(JSON.stringify(list));
+    res.json(list);
+}));
 
 // ---------- Quick commands (managed in Settings, used from the shortcut bar) ----------
 const commands = new CommandStore(sessionStore.db);
@@ -649,6 +836,11 @@ wss.on('connection', (ws, req) => {
                 quality: params.get('quality'),
                 visible: params.get('visible') !== '0',
             });
+        } else if (row && row.status === 'open' && row.kind === 'files') {
+            // File tabs use HTTP; the socket only carries workspace notices (MCP open-tab...)
+            sessions.sockets.add(ws);
+            ws.on('close', () => sessions.sockets.delete(ws));
+            ws.send(JSON.stringify({ type: 'ready' }));
         } else if (sessionId) {
             debugLog('Attaching to session', sessionId);
             sessions.attach(ws, sessionId, { cols: params.get('cols'), rows: params.get('rows') });
@@ -709,7 +901,10 @@ function spawnShell({ cwd, cols = 80, rows = 24 }) {
             // Force buffer flushing for better alternate buffer handling
             STDBUF: 'L',
             // Ensure proper handling of alternate buffer in applications
-            TERM_PROGRAM: 'xterm-256color'
+            TERM_PROGRAM: 'xterm-256color',
+            // Agents in this shell can call MeuTerminal's MCP (open_url, screenshot...)
+            MEUTERMINAL_MCP_URL: MCP_URL,
+            MEUTERMINAL_MCP_TOKEN: MCP_TOKEN
         }
     });
 }

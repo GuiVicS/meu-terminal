@@ -575,6 +575,73 @@ class BrowserManager {
         }
     }
 
+    // ---------- used by the MCP server (agents), no viewer needed ----------
+
+    /** Opens (if needed) and returns the page of a browser tab row. */
+    async ensurePage(row) {
+        const page = this.getPage(row);
+        await this.openPage(page);
+        return page;
+    }
+
+    /** Navigates a tab and waits (up to 15s) for the page to load. */
+    async navigateTab(row, rawUrl) {
+        const url = normalizeUrl(rawUrl);
+        if (!url) throw new Error('URL inválida');
+        const page = await this.ensurePage(row);
+        await this.navigate(page, url);
+        await this.waitForLoad(page, 15000);
+        return { url: page.state.url, title: page.state.title };
+    }
+
+    waitForLoad(page, timeout) {
+        return new Promise(resolve => {
+            const started = Date.now();
+            const check = () => {
+                if (!page.state.loading || Date.now() - started > timeout) resolve();
+                else setTimeout(check, 200);
+            };
+            setTimeout(check, 300);
+        });
+    }
+
+    /** PNG screenshot of what the tab shows (or the whole page). */
+    async screenshot(row, { fullPage = false } = {}) {
+        const page = await this.ensurePage(row);
+        await this.waitForLoad(page, 10000);
+        const params = { format: 'png' };
+        if (fullPage) {
+            // Whole page: clip to the document size (capped so huge pages stay reasonable)
+            const { cssContentSize } = await this.call(page, 'Page.getLayoutMetrics');
+            params.captureBeyondViewport = true;
+            params.clip = {
+                x: 0, y: 0, scale: 1,
+                width: Math.ceil(cssContentSize.width),
+                height: Math.min(Math.ceil(cssContentSize.height), 10000),
+            };
+        }
+        const { data } = await this.call(page, 'Page.captureScreenshot', params);
+        return { data, url: page.state.url, title: page.state.title };
+    }
+
+    /** Title, URL and visible text of the page (truncated for the agent's context). */
+    async readText(row, maxChars = 50000) {
+        const page = await this.ensurePage(row);
+        await this.waitForLoad(page, 10000);
+        const { result } = await this.call(page, 'Runtime.evaluate', {
+            expression: `(() => ({ title: document.title, url: location.href,
+                text: (document.body ? document.body.innerText : '') }))()`,
+            returnByValue: true,
+        });
+        const value = result.value || {};
+        const text = String(value.text || '');
+        return {
+            title: value.title || '',
+            url: value.url || page.state.url,
+            text: text.length > maxChars ? `${text.slice(0, maxChars)}\n…(cortado: ${text.length} caracteres)` : text,
+        };
+    }
+
     shutdown() {
         try { this.proc && this.proc.kill(); } catch { /* gone */ }
     }

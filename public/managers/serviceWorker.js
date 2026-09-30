@@ -268,7 +268,7 @@ export default class ServiceWorkerManager {
                 console.log(`Using previously received cacheName: ${this._receivedCacheName}`);
                 // Try to extract version from the cached cacheName
                 const versionMatch = this._receivedCacheName.match(/.*_V(.+)$/) || 
-                                    this._receivedCacheName.match(/DUMBTERM_CACHE_(.+)$/);
+                                    this._receivedCacheName.match(/MEUTERMINAL_CACHE_(.+)$/);
                 
                 if (versionMatch && versionMatch[1]) {
                     const version = versionMatch[1];
@@ -287,14 +287,14 @@ export default class ServiceWorkerManager {
             const cacheKeys = await caches.keys();
             console.log('Available caches:', cacheKeys);
             
-            // Support both formats: DUMBTERM_PWA_CACHE_V* and DUMBTERM_CACHE_* or any from config
-            const dumbTermCaches = cacheKeys.filter(key => 
+            // Support both formats: MEUTERMINAL_CACHE_V* and MEUTERMINAL_CACHE_* or any from config
+            const appCaches = cacheKeys.filter(key => 
                 (configCacheName && key === configCacheName) || 
-                (key.startsWith('DUMBTERM_') && (key.includes('_V') || key.includes('_CACHE_')))
+                (key.startsWith('MEUTERMINAL_') && (key.includes('_V') || key.includes('_CACHE_')))
             );
             
-            if (dumbTermCaches.length === 0) {
-                console.log('No DumbTerm cache found');
+            if (appCaches.length === 0) {
+                console.log('No MeuTerminal cache found');
                 return {
                     version: window.appConfig?.version || null,
                     cacheName: configCacheName || null,
@@ -304,28 +304,28 @@ export default class ServiceWorkerManager {
             
             // If config cacheName exists and is in the list, prioritize it
             let latestCache;
-            if (configCacheName && dumbTermCaches.includes(configCacheName)) {
+            if (configCacheName && appCaches.includes(configCacheName)) {
                 latestCache = configCacheName;
                 console.log(`Using config-specified cacheName: ${latestCache}`);
             } else {
                 // Otherwise sort caches by version to get the latest
-                dumbTermCaches.sort((a, b) => {
+                appCaches.sort((a, b) => {
                     // Extract version from different patterns
                     const getVersion = (cacheName) => {
-                        const vMatch = cacheName.match(/.*_V(.+)$/) || cacheName.match(/DUMBTERM_CACHE_(.+)$/);
+                        const vMatch = cacheName.match(/.*_V(.+)$/) || cacheName.match(/MEUTERMINAL_CACHE_(.+)$/);
                         return vMatch && vMatch[1] ? vMatch[1] : '';
                     };
                     const versionA = getVersion(a);
                     const versionB = getVersion(b);
                     return versionB.localeCompare(versionA);
                 });
-                latestCache = dumbTermCaches[0];
+                latestCache = appCaches[0];
                 console.log(`Selected latest cache: ${latestCache}`);
             }
             
             // Extract version from cacheName
             let version;
-            const versionMatch = latestCache.match(/.*_V(.+)$/) || latestCache.match(/DUMBTERM_CACHE_(.+)$/);
+            const versionMatch = latestCache.match(/.*_V(.+)$/) || latestCache.match(/MEUTERMINAL_CACHE_(.+)$/);
             version = versionMatch && versionMatch[1] ? versionMatch[1] : window.appConfig?.version || null;
             
             console.log(`Found cache version: ${version}, cacheName: ${latestCache}`);
@@ -337,7 +337,7 @@ export default class ServiceWorkerManager {
                 version: version,
                 cacheName: latestCache,
                 isFirstInstall: false,
-                allCaches: dumbTermCaches
+                allCaches: appCaches
             };
         } catch (error) {
             console.error('Error getting cache version:', error);

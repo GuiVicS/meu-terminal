@@ -7,6 +7,7 @@
 import StorageManager from './storage.js';
 import TerminalSession, { STATE } from './session.js';
 import BrowserSession from './browserSession.js';
+import FilesSession from './filesSession.js';
 import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
@@ -58,7 +59,7 @@ export default class TerminalManager {
         this.workspaceEl = workspace;
         this.events = events;
         // Only per-device UI state stays in the browser (which tab is active here)
-        this.storage = new StorageManager('dumbterm-');
+        this.storage = new StorageManager('meuterminal-');
 
         this.sessions = new Map(); // id -> TerminalSession, insertion order = tab order
         this.activeId = null;
@@ -87,8 +88,10 @@ export default class TerminalManager {
             onAuthRequired: () => { window.location.href = joinPath('login'); },
             onRemoved: s => this.removeLocal(s.id),
             onWorkspaceChanged: () => this.scheduleReconcile(),
+            onServerMessage: m => this.onServerMessage(m),
             onTerminalMenu: (s, x, y) => this.events.onTerminalMenu?.(s, x, y),
             isAppShortcut: e => !!this.matchShortcut(e),
+            openTab: opts => this.create(opts),
             transformInput: data => this.events.transformInput(data),
         };
 
@@ -119,7 +122,7 @@ export default class TerminalManager {
     /** Creates a tab view for a server session (no request). Idempotent. */
     addSession(row, { index, activate = false } = {}) {
         if (this.sessions.has(row.id)) return this.sessions.get(row.id);
-        const Kind = row.kind === 'browser' ? BrowserSession : TerminalSession;
+        const Kind = row.kind === 'browser' ? BrowserSession : row.kind === 'files' ? FilesSession : TerminalSession;
         const session = new Kind({ row, settings: this.settings, hooks: this.hooks });
 
         const at = index ?? this.sessions.size;
@@ -142,7 +145,7 @@ export default class TerminalManager {
         try {
             const row = await api('POST', 'sessions', {
                 name,
-                cwd: kind === 'browser' ? undefined : (cwd || this.settings.get('defaultCwd') || undefined),
+                cwd: kind === 'browser' ? undefined : (cwd || (kind === 'files' ? undefined : this.settings.get('defaultCwd')) || undefined),
                 color,
                 afterId,
                 reopenId,
@@ -236,6 +239,10 @@ export default class TerminalManager {
         if (!s) return;
         if (s.kind === 'browser') {
             this.create({ kind: 'browser', name: s.name, url: s.url, afterId: id });
+            return;
+        }
+        if (s.kind === 'files') {
+            this.create({ kind: 'files', name: s.name, url: s.source, cwd: s.path, afterId: id });
             return;
         }
         // A duplicate is a new shell in the same directory - processes can't be cloned
@@ -347,6 +354,7 @@ export default class TerminalManager {
         this.closeNewSessionPage(false);
         if (recent) this.create({ reopenId: recent.id });
         else if (kind === 'browser') this.create({ kind, name, url });
+        else if (kind === 'files') this.create({ kind, name, cwd: cwd || undefined });
         else this.create({ name, cwd });
     }
 
@@ -357,6 +365,15 @@ export default class TerminalManager {
             return;
         }
         this.create({ kind: 'browser', url });
+    }
+
+    /** New file manager tab (optionally at a folder of the server). */
+    createFiles(cwd) {
+        if (!window.appConfig?.filesAvailable) {
+            toast('O gerenciador de arquivos está desligado neste servidor.', { tone: 'error' });
+            return;
+        }
+        this.create({ kind: 'files', cwd });
     }
 
     async forgetRecent(index) {
@@ -396,6 +413,9 @@ export default class TerminalManager {
         showMenu([
             { label: 'Nova sessão', icon: 'plus', hint: k.newTab, run: () => this.create() },
             { label: 'Nova aba de navegador', icon: 'globe', hint: `${k.mod}+B`, run: () => this.createBrowser() },
+            { label: 'Novo gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`, run: () => this.createFiles() },
+            ...(s.kind === 'terminal' ? [{ label: 'Abrir pasta atual nos Arquivos', icon: 'folderOpen',
+                run: () => this.createFiles(s.cwd || s.startCwd || undefined) }] : []),
             { label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) },
             { label: 'Renomear', icon: 'edit', hint: k.rename, run: () => this.tabBar.startRename(id) },
             { label: s.pinned ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(id) },
@@ -417,7 +437,7 @@ export default class TerminalManager {
             const s = this.sessions.get(id);
             return {
                 label: s.name,
-                icon: s.pinned ? 'pin' : 'terminal',
+                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : 'terminal',
                 hint: s.displayCwd(),
                 checked: id === this.activeId,
                 run: () => this.activate(id),
@@ -460,6 +480,7 @@ export default class TerminalManager {
             if (key === 't' && e.shiftKey) return 'reopen';
             if (key === 't') return 'new';
             if (key === 'b') return 'newBrowser';
+            if (key === 'e') return 'newFiles';
             if (key === 'n') return 'newPage';
             if (key === 'w') return 'close';
             if (key === 'r') return 'rename';
@@ -495,6 +516,7 @@ export default class TerminalManager {
         switch (action) {
             case 'new': return this.create();
             case 'newBrowser': return this.createBrowser();
+            case 'newFiles': return this.createFiles();
             case 'newPage': return this.openNewSessionPage();
             case 'reopen': return this.restoreLastClosed();
             case 'close': return this.activeId !== null && this.close(this.activeId);
@@ -504,6 +526,7 @@ export default class TerminalManager {
             case 'search':
                 // Browser tabs are images of a page: there's no text here to search
                 if (this.active?.kind === 'browser') return this.active.focus();
+                if (this.active?.kind === 'files') return this.active.openFind();
                 return this.search.open();
             default: return this.events.onAction(action); // fullscreen, settings: handled by the shell
         }
@@ -525,6 +548,7 @@ export default class TerminalManager {
         return [
             { keys: `${m}+T`, label: 'Nova sessão' },
             { keys: `${m}+B`, label: 'Nova aba de navegador' },
+            { keys: `${m}+E`, label: 'Novo gerenciador de arquivos' },
             { keys: `${m}+N`, label: 'Nova sessão com opções' },
             { keys: `${m}+Shift+T`, label: 'Reabrir sessão fechada' },
             { keys: `${m}+W`, label: 'Fechar sessão (encerra o processo)' },
@@ -536,6 +560,27 @@ export default class TerminalManager {
             { keys: `${m}+F`, label: 'Tela cheia' },
             { keys: `${c}+,`, label: 'Configurações' },
         ];
+    }
+
+    // ---------- messages from agents (MCP) ----------
+
+    /**
+     * "open-tab" (open_url) and "notify" arrive once per open tab socket: the nonce
+     * makes each one run a single time per window.
+     */
+    async onServerMessage(m) {
+        this.seenNonces = this.seenNonces || new Set();
+        if (m.nonce) {
+            if (this.seenNonces.has(m.nonce)) return;
+            this.seenNonces.add(m.nonce);
+            if (this.seenNonces.size > 200) this.seenNonces = new Set([...this.seenNonces].slice(-100));
+        }
+        if (m.type === 'notify') {
+            toast(m.message, { duration: 6000 });
+        } else if (m.type === 'open-tab') {
+            await this.reconcile(); // make sure the new tab exists here
+            if (this.sessions.has(m.id)) this.activate(m.id, { focus: !isCoarse() });
+        }
     }
 
     // ---------- sync with the server ----------

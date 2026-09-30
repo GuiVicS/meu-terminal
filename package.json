@@ -1,6 +1,6 @@
 {
-  "name": "dumbterm",
-  "version": "2.2.0",
+  "name": "meuterminal",
+  "version": "2.4.0",
   "description": "A stupidly simple web-based terminal emulator, with common tools and Starship enabled (via Docker)! 🚀",
   "main": "server.js",
   "engines": {
@@ -9,7 +9,9 @@
   "scripts": {
     "start": "npm run copy-xterm && node server.js",
     "dev": "npm run copy-xterm && nodemon server.js",
-    "copy-xterm": "node scripts/copy-xterm.js"
+    "copy-xterm": "node scripts/copy-xterm.js",
+    "2fa": "node scripts/totp-setup.js",
+    "icons": "node scripts/build-icons.js"
   },
   "dependencies": {
     "@xterm/addon-attach": "^0.11.0",
@@ -34,6 +36,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "lucide-static": "^1.49.0",
     "nodemon": "^3.1.10"
   }
 }

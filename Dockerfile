@@ -18,6 +18,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --fix-missing \
     traceroute \
     build-essential \
     python3 \
+    # File manager: Google Drive and other clouds (configure with "rclone config")
+    rclone \
     # Browser tabs: headless Chromium on the server + fonts so pages render text/emoji
     chromium \
     fonts-liberation \
@@ -36,8 +38,18 @@ ENV LANG=en_US.UTF-8 \
     SHELL=/bin/bash \
     CHROMIUM_PATH=/usr/bin/chromium
 
+# "npm i -g" and user installers (Claude Code, pipx, uv...) go to the home folder,
+# which is a volume (docker-compose.yml): installed tools survive redeploys
+ENV NPM_CONFIG_PREFIX=/root/.npm-global \
+    PATH=/root/.npm-global/bin:/root/.local/bin:$PATH
+
 # Install Starship
 RUN curl -sS https://starship.rs/install.sh | sh -s -- --yes
+
+# Claude Code comes with the image ("claude" in any terminal). Goes to /usr/local, not
+# the home volume, so every deploy brings the current version.
+RUN npm install -g --prefix /usr/local @anthropic-ai/claude-code && npm cache clean --force
+
 WORKDIR /app
 
 # Copy package files first for better layer caching
