@@ -239,6 +239,7 @@ export default class BrowserSession {
             else if (m.type === 'ports') this.showPorts(m.ports);
             else if (m.type === 'editable' && m.value && coarse()) this.openKeyboard();
             else if (m.type === 'workspace') this.hooks.onWorkspaceChanged();
+            else if (m.type === 'open-tab' || m.type === 'notify') this.hooks.onServerMessage(m);
         };
         ws.onerror = () => ws.close();
         ws.onclose = event => {

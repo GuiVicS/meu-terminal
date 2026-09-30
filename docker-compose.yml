@@ -19,6 +19,9 @@ services:
       # Email + password login (when both are set they replace the PIN)
       AUTH_EMAIL: ${AUTH_EMAIL:-}
       AUTH_PASSWORD: ${AUTH_PASSWORD:-}
+      # Optional two-factor login (authenticator app code). Generate with:
+      #   docker compose exec dumbterm node scripts/totp-setup.js
+      AUTH_TOTP_SECRET: ${AUTH_TOTP_SECRET:-}
       # Optional PIN protection (leave empty to disable; ignored when email login is set)
       DUMBTERM_PIN: ${DUMBTERM_PIN:-1234}
       # The base URL for the application

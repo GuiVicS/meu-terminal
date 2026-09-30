@@ -156,26 +156,52 @@ document.addEventListener('DOMContentLoaded', () => {
         const form = document.getElementById('emailForm');
         const errorEl = document.getElementById('loginError');
         const button = form.querySelector('button[type="submit"]');
+        const codeField = form.querySelector('[data-step="code"]');
+        const credentialFields = [form.email.closest('.field'), form.password.closest('.field')];
+        // 'credentials' (email + password) or 'code' (two-factor, when enabled on the server)
+        let step = 'credentials';
         form.hidden = false;
         form.email.focus();
+
+        const buttonLabel = () => (step === 'code' ? 'Verificar' : 'Entrar');
+
+        function showCodeStep() {
+            step = 'code';
+            credentialFields.forEach(field => { field.hidden = true; });
+            codeField.hidden = false;
+            document.getElementById('loginSubtitle').textContent = 'Verificação em duas etapas';
+            form.code.value = '';
+            form.code.focus();
+        }
+
+        // Six digits typed (or pasted/auto-filled): submit right away
+        form.code.addEventListener('input', () => {
+            form.code.value = form.code.value.replace(/\D/g, '').slice(0, 6);
+            if (form.code.value.length === 6 && !button.disabled) form.requestSubmit();
+        });
 
         form.addEventListener('submit', async e => {
             e.preventDefault();
             const email = form.email.value.trim();
             const password = form.password.value;
+            const code = step === 'code' ? form.code.value.trim() : undefined;
             if (!email || !password) {
                 errorEl.textContent = 'Informe email e senha.';
+                return;
+            }
+            if (step === 'code' && code.length !== 6) {
+                errorEl.textContent = 'Digite os 6 dígitos do app autenticador.';
                 return;
             }
 
             errorEl.textContent = '';
             button.disabled = true;
-            button.textContent = 'Entrando…';
+            button.textContent = step === 'code' ? 'Verificando…' : 'Entrando…';
             try {
                 const response = await fetch(joinPath('login'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password }),
+                    body: JSON.stringify({ email, password, code }),
                     credentials: 'same-origin',
                 });
                 const data = await response.json().catch(() => ({}));
@@ -189,18 +215,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     form.querySelectorAll('input').forEach(input => { input.disabled = true; });
                     return;
                 }
+                // Right email/password, and the server wants the authenticator code
+                if (data.needCode && step !== 'code') {
+                    showCodeStep();
+                    return;
+                }
                 errorEl.textContent = data.attemptsLeft > 0
                     ? `${data.error} ${data.attemptsLeft} tentativa(s) restante(s).`
                     : (data.error || 'Não foi possível entrar.');
-                form.password.value = '';
-                form.password.focus();
+                if (step === 'code') {
+                    form.code.value = '';
+                    form.code.focus();
+                } else {
+                    form.password.value = '';
+                    form.password.focus();
+                }
             } catch (error) {
                 console.error('Login error:', error);
                 errorEl.textContent = 'Ocorreu um erro. Tente novamente.';
             } finally {
                 if (!form.password.disabled) {
                     button.disabled = false;
-                    button.textContent = 'Entrar';
+                    button.textContent = buttonLabel();
                 }
             }
         });

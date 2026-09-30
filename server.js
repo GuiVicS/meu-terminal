@@ -11,10 +11,12 @@ const os = require('os');
 const fs = require('fs');
 const { generatePWAManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
+const { TotpVerifier } = require('./scripts/totp');
 const SessionStore = require('./scripts/session-store');
 const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
+const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
 
 const app = express();
 const server = http.createServer(app);
@@ -78,6 +80,14 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
 const isEmailAuth = AUTH_EMAIL !== '' && AUTH_PASSWORD !== '';
 const AUTH_COOKIE = `${projectName}_AUTH`;
 
+// Optional two-factor login (TOTP authenticator app). Only active with email login.
+// An invalid secret stops the server instead of silently turning 2FA off.
+const TOTP_SECRET = (process.env.AUTH_TOTP_SECRET || '').trim();
+const totp = isEmailAuth && TOTP_SECRET ? new TotpVerifier(TOTP_SECRET) : null;
+if (TOTP_SECRET && !isEmailAuth) {
+    console.warn('AUTH_TOTP_SECRET ignorado: a verificação em duas etapas exige AUTH_EMAIL e AUTH_PASSWORD.');
+}
+
 // Legacy PIN login, only used when email login is not configured
 const PIN = isEmailAuth ? '' : process.env[`${projectName}_PIN`];
 const isPinRequired = !!(PIN && PIN.trim() !== '');
@@ -86,7 +96,7 @@ const isAuthRequired = AUTH_MODE !== 'none';
 
 // Log which protection is enabled
 if (isEmailAuth) {
-    debugLog('Email/password login is enabled for:', AUTH_EMAIL);
+    debugLog('Email/password login is enabled for:', AUTH_EMAIL, totp ? '(with 2FA)' : '');
 } else if (isPinRequired) {
     debugLog('PIN protection is enabled, PIN length:', PIN.length);
 } else {
@@ -95,10 +105,10 @@ if (isEmailAuth) {
 
 // ---- Email login tokens ----
 // The cookie never contains the password: it holds an expiry and an HMAC signature.
-// The key is derived from the credentials, so changing the password in .env logs
-// everyone out, while a server restart does not.
+// The key is derived from the credentials (and the 2FA secret), so changing the
+// password or turning 2FA on/off in .env logs everyone out; a restart does not.
 const TOKEN_KEY = crypto.createHash('sha256')
-    .update(`meu-terminal-auth\0${AUTH_EMAIL}\0${AUTH_PASSWORD}`)
+    .update(`meu-terminal-auth\0${AUTH_EMAIL}\0${AUTH_PASSWORD}\0${totp ? TOTP_SECRET : ''}`)
     .digest();
 
 function signToken(expiresAt) {
@@ -259,6 +269,8 @@ app.use(BASE_PATH, (req, res, next) => {
         // The browser fetches the worker script on its own to check for updates; if that
         // hits the login redirect the update fails silently and the PWA stays on old code.
         '/service-worker.js',
+        // Agents' MCP endpoint: has its own check (local only + bearer token)
+        '/mcp',
     ];
 
     // Check if the current path matches any of the public paths
@@ -328,7 +340,7 @@ app.get(BASE_PATH + '/login', (req, res) => {
 
 // Tells the login page which form to show
 app.get(BASE_PATH + '/auth-mode', (req, res) => {
-    res.json({ mode: AUTH_MODE });
+    res.json({ mode: AUTH_MODE, twoFactor: !!totp });
 });
 
 // Email + password login
@@ -346,7 +358,7 @@ app.post(BASE_PATH + '/login', (req, res) => {
         });
     }
 
-    const { email, password } = req.body || {};
+    const { email, password, code } = req.body || {};
     if (typeof email !== 'string' || typeof password !== 'string') {
         return res.status(400).json({ error: 'Informe email e senha.' });
     }
@@ -356,6 +368,19 @@ app.post(BASE_PATH + '/login', (req, res) => {
     const passwordOk = safeEqual(password, AUTH_PASSWORD);
 
     setTimeout(() => {
+        if (emailOk && passwordOk && totp) {
+            // Second step: the authenticator code. Asking for it isn't a failed attempt;
+            // a wrong code is (counts toward the lockout like a wrong password).
+            if (typeof code !== 'string' || !code.trim()) {
+                return res.status(401).json({ needCode: true });
+            }
+            if (!totp.verify(code)) {
+                debugLog('2FA code rejected');
+                recordAttempt(ip);
+                const left = Math.max(0, MAX_ATTEMPTS - loginAttempts.get(ip).count);
+                return res.status(401).json({ needCode: true, error: 'Código inválido ou já usado.', attemptsLeft: left });
+            }
+        }
         if (emailOk && passwordOk) {
             debugLog('Email login successful');
             resetAttempts(ip);
@@ -511,6 +536,47 @@ app.post(BASE_PATH + '/api/sessions', (req, res) => {
 // Ports listening on the server ("localhost:5173 detectado" in the new tab page)
 app.get(BASE_PATH + '/api/ports', async (req, res) => {
     res.json(await listPorts([Number(PORT)]));
+});
+
+// ---------- MCP server for agents running inside the terminals ----------
+// Every shell gets MEUTERMINAL_MCP_URL / MEUTERMINAL_MCP_TOKEN (see spawnShell).
+const MCP_TOKEN = mcpToken(sessionStore);
+const MCP_URL = `http://127.0.0.1:${PORT}${BASE_PATH}/mcp`;
+const mcpHandler = createMcpHandler({
+    sessions, store: sessionStore, browsers, listPorts, normalizeUrl, port: Number(PORT),
+});
+
+/**
+ * Agents run on this machine: only loopback connections with the token are accepted.
+ * Requests carrying an Origin come from a web page (DNS rebinding etc.) and are refused.
+ */
+function mcpAuth(req, res, next) {
+    const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    const header = req.get('authorization') || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!local || req.get('origin') || !safeEqual(token, MCP_TOKEN)) {
+        return res.status(401).json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized' } });
+    }
+    next();
+}
+
+app.post(BASE_PATH + '/mcp', mcpAuth, (req, res) => {
+    mcpHandler(req, res).catch(e => {
+        console.error('MCP error:', e);
+        res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } });
+    });
+});
+// No server-initiated stream (GET) or session teardown (DELETE): POST only
+app.all(BASE_PATH + '/mcp', (req, res) => res.status(405).set('Allow', 'POST').end());
+
+// Settings screen: how to register the MCP in an agent (behind the normal login)
+app.get(BASE_PATH + '/api/mcp-info', (req, res) => {
+    res.json({
+        url: MCP_URL,
+        token: MCP_TOKEN,
+        claude: 'claude mcp add --transport http --scope user meuterminal "$MEUTERMINAL_MCP_URL" '
+            + '--header "Authorization: Bearer $MEUTERMINAL_MCP_TOKEN"',
+    });
 });
 
 // Declared before "/:id" so "order" isn't taken for an id
@@ -709,7 +775,10 @@ function spawnShell({ cwd, cols = 80, rows = 24 }) {
             // Force buffer flushing for better alternate buffer handling
             STDBUF: 'L',
             // Ensure proper handling of alternate buffer in applications
-            TERM_PROGRAM: 'xterm-256color'
+            TERM_PROGRAM: 'xterm-256color',
+            // Agents in this shell can call MeuTerminal's MCP (open_url, screenshot...)
+            MEUTERMINAL_MCP_URL: MCP_URL,
+            MEUTERMINAL_MCP_TOKEN: MCP_TOKEN
         }
     });
 }

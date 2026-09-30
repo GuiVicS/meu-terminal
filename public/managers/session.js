@@ -275,6 +275,8 @@ export default class TerminalSession {
                 this.setState(STATE.EXITED);
             } else if (message.type === 'workspace') {
                 this.hooks.onWorkspaceChanged();
+            } else if (message.type === 'open-tab' || message.type === 'notify') {
+                this.hooks.onServerMessage(message); // from the MCP (agents)
             } else if (message.type === 'info') {
                 this.shell = message.shell;
                 this.home = message.home;

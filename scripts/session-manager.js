@@ -163,7 +163,13 @@ class SessionManager {
 
     /** Tells every connected tab that the session list changed (other device, other tab). */
     changed() {
-        const msg = JSON.stringify({ type: 'workspace' });
+        this.broadcast({ type: 'workspace' });
+    }
+
+    /** Sends a message to every open app window (e.g. MCP "open this tab", "notify"). */
+    broadcast(message) {
+        // Each app window has one socket per tab: the nonce lets it handle a message once
+        const msg = JSON.stringify({ ...message, nonce: crypto.randomUUID() });
         this.sockets.forEach(ws => {
             if (ws.readyState === ws.OPEN) ws.send(msg);
         });

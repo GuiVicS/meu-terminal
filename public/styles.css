@@ -1322,3 +1322,36 @@ body.page-login { overflow: auto; }
     .browser-toolbar { padding: 2px 4px; }
     .browser-address input { height: 34px; }
 }
+/* Two-factor code field (login) */
+.login-card input.code-input {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    letter-spacing: 0.4em;
+    text-align: center;
+}
+/* Login fields never push the card wider than the screen (the code field has a
+   large, spaced font whose intrinsic width is wider than a phone) */
+.login-card .field { min-width: 0; }
+.login-card .field input { width: 100%; min-width: 0; }
+/* Settings: MCP for agents */
+.mcp-help { margin: 0 4px 10px; }
+.mcp-command {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 8px 8px 14px;
+    margin-bottom: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+}
+.mcp-command code {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+.mcp-command .btn { height: 36px; padding: 0 14px; flex-shrink: 0; }
+.mcp-section code.mono { font-size: 12px; overflow-wrap: anywhere; }

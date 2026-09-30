@@ -296,6 +296,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     updateShortcutBar();
 
+    document.getElementById('newTabBtn').innerHTML = icon('plus', 18);
     document.getElementById('newTabBtn').addEventListener('click', () => workspace.openNewSessionPage());
 
     // ---------- overflow menu ----------

@@ -87,6 +87,7 @@ export default class TerminalManager {
             onAuthRequired: () => { window.location.href = joinPath('login'); },
             onRemoved: s => this.removeLocal(s.id),
             onWorkspaceChanged: () => this.scheduleReconcile(),
+            onServerMessage: m => this.onServerMessage(m),
             onTerminalMenu: (s, x, y) => this.events.onTerminalMenu?.(s, x, y),
             isAppShortcut: e => !!this.matchShortcut(e),
             transformInput: data => this.events.transformInput(data),
@@ -536,6 +537,27 @@ export default class TerminalManager {
             { keys: `${m}+F`, label: 'Tela cheia' },
             { keys: `${c}+,`, label: 'Configurações' },
         ];
+    }
+
+    // ---------- messages from agents (MCP) ----------
+
+    /**
+     * "open-tab" (open_url) and "notify" arrive once per open tab socket: the nonce
+     * makes each one run a single time per window.
+     */
+    async onServerMessage(m) {
+        this.seenNonces = this.seenNonces || new Set();
+        if (m.nonce) {
+            if (this.seenNonces.has(m.nonce)) return;
+            this.seenNonces.add(m.nonce);
+            if (this.seenNonces.size > 200) this.seenNonces = new Set([...this.seenNonces].slice(-100));
+        }
+        if (m.type === 'notify') {
+            toast(m.message, { duration: 6000 });
+        } else if (m.type === 'open-tab') {
+            await this.reconcile(); // make sure the new tab exists here
+            if (this.sessions.has(m.id)) this.activate(m.id, { focus: !isCoarse() });
+        }
     }
 
     // ---------- sync with the server ----------

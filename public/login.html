@@ -47,9 +47,16 @@
                     <input type="email" name="email" autocomplete="username" inputmode="email"
                         autocapitalize="off" spellcheck="false" required>
                 </label>
-                <label class="field">
+                <label class="field" data-step="credentials">
                     <span class="field-label">Senha</span>
                     <input type="password" name="password" autocomplete="current-password" required>
+                </label>
+                <!-- Second step, only when AUTH_TOTP_SECRET is set -->
+                <label class="field" data-step="code" hidden>
+                    <span class="field-label">Código do app autenticador</span>
+                    <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code"
+                        pattern="[0-9]*" maxlength="6" placeholder="000000" class="code-input">
+                    <span class="field-help">Abra o Google Authenticator (ou similar) e digite os 6 dígitos.</span>
                 </label>
                 <p class="login-error" id="loginError" role="alert"></p>
                 <button type="submit" class="btn btn-primary">Entrar</button>
