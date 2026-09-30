@@ -433,7 +433,7 @@ export default class FilesSession {
                 return;
             }
             if (m.type === 'workspace') this.hooks.onWorkspaceChanged();
-            else if (m.type === 'open-tab' || m.type === 'notify') this.hooks.onServerMessage(m);
+            else if (m.nonce) this.hooks.onServerMessage(m); // app-wide notices (open-tab, notify, split...)
         };
         ws.onerror = () => ws.close();
         ws.onclose = event => {

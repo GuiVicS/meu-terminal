@@ -13,6 +13,7 @@ import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { toast } from '../ui/toast.js';
+import { playChime } from '../ui/sound.js';
 
 const RECONCILE_DELAY = 250;
 
@@ -92,6 +93,15 @@ export default class TerminalManager {
             onTerminalMenu: (s, x, y) => this.events.onTerminalMenu?.(s, x, y),
             isAppShortcut: e => !!this.matchShortcut(e),
             openTab: opts => this.create(opts),
+            // Folder for "reload on save": the terminal beside it, else the last terminal used
+            suggestFolder: s => {
+                const partner = this.split && (this.split.a === s.id || this.split.b === s.id)
+                    ? this.sessions.get(this.split.a === s.id ? this.split.b : this.split.a) : null;
+                const terminals = [...this.sessions.values()].filter(x => x.kind === 'terminal');
+                const t = partner?.kind === 'terminal' ? partner
+                    : terminals.find(x => x.id === this.lastTerminalId) || terminals[0];
+                return t?.cwd || t?.startCwd || '~';
+            },
             transformInput: data => this.events.transformInput(data),
         };
 
@@ -99,6 +109,7 @@ export default class TerminalManager {
 
         // Capture phase: runs before xterm sees the key, so shortcuts never reach the shell
         document.addEventListener('keydown', e => this.onKeyDown(e), true);
+        this.setupSplit();
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
                 this.sessions.forEach(s => s.reconnectIfDropped());
@@ -132,6 +143,7 @@ export default class TerminalManager {
 
         this.tabBar.add(session, at);
         session.mount(this.workspaceEl.querySelector('.terminal-panels'));
+        session.shown = false;
         session.setActive(false);
         if (activate) this.activate(row.id, { focus: !isCoarse() });
         return session;
@@ -169,16 +181,203 @@ export default class TerminalManager {
         if (!next) return;
         this.closeNewSessionPage(false);
         if (this.activeId !== id) {
-            this.active?.setActive(false);
             this.activeId = id;
-            next.setActive(true);
             this.tabBar.setActive(id);
             this.tabBar.update(next);
             this.search.bind(next);
             this.events.onActiveChange(next);
             this.storage.set('activeSession', id);
+            if (next.kind === 'terminal') {
+                this.lastTerminalId = id;
+                this.reportFocus(id);
+            }
         }
+        this.applyVisibility();
         if (focus) next.focus();
+    }
+
+    // ---------- split view (two tabs side by side, like VS Code's Live Server setup) ----------
+
+    /** The pair shown right now: the saved split when the active tab is part of it. */
+    visiblePair() {
+        const s = this.split;
+        if (!s || !this.sessions.has(s.a) || !this.sessions.has(s.b)) return null;
+        return s.a === this.activeId || s.b === this.activeId ? [s.a, s.b] : null;
+    }
+
+    /** Shows the active tab (or the split pair) and hides the rest. */
+    applyVisibility() {
+        const pair = this.visiblePair();
+        const shown = new Set(pair || (this.activeId ? [this.activeId] : []));
+        this.sessions.forEach((session, id) => {
+            const on = shown.has(id);
+            if (session.shown !== on) {
+                session.shown = on;
+                session.setActive(on);
+            }
+            const tab = this.tabBar.tabs.get(id);
+            if (tab) {
+                tab.classList.toggle('paired', !!pair && shown.has(id));
+                tab.classList.toggle('in-view', !!pair && on && id !== this.activeId);
+            }
+        });
+        this.layoutPanels(pair);
+    }
+
+    /** Positions the two panels and the divider (row on wide screens, stacked on phones). */
+    layoutPanels(pair = this.visiblePair()) {
+        const box = this.panelsEl;
+        this.sessions.forEach(s => s.panel.classList.remove('pane-a', 'pane-b', 'pane-focused'));
+        if (!pair) {
+            box.classList.remove('split', 'row', 'col');
+            this.divider.hidden = true;
+            return;
+        }
+        const row = box.clientWidth >= 640 && box.clientWidth >= box.clientHeight * 0.9;
+        let [first, second] = pair;
+        // Stacked: the page/files on top, the terminal at the bottom (next to the keyboard)
+        if (!row && this.sessions.get(first).kind === 'terminal' && this.sessions.get(second).kind !== 'terminal') {
+            [first, second] = [second, first];
+        }
+        box.classList.add('split');
+        box.classList.toggle('row', row);
+        box.classList.toggle('col', !row);
+        box.style.setProperty('--split', String(this.split.ratio || 0.5));
+        this.sessions.get(first).panel.classList.add('pane-a');
+        this.sessions.get(second).panel.classList.add('pane-b');
+        this.sessions.get(this.activeId)?.panel.classList.add('pane-focused');
+        this.divider.hidden = false;
+        this.divider.setAttribute('aria-orientation', row ? 'vertical' : 'horizontal');
+    }
+
+    /** Pairs two tabs (a = usually the terminal) and shows them. */
+    setSplit(a, b, { focus = a, ratio } = {}) {
+        if (!this.sessions.has(a) || !this.sessions.has(b) || a === b) return;
+        this.split = { a, b, ratio: ratio || this.split?.ratio || 0.5 };
+        this.storage.set('split', this.split);
+        // Keep the pair next to each other in the tab bar
+        const ids = this.order.filter(id => id !== b);
+        ids.splice(ids.indexOf(a) + 1, 0, b);
+        if (ids.join() !== this.order.join()) this.setOrder(ids);
+        this.activate(focus, { focus: !isCoarse() });
+        this.applyVisibility();
+    }
+
+    clearSplit({ keep } = {}) {
+        if (!this.split) return;
+        this.split = null;
+        this.storage.remove('split');
+        if (keep && this.sessions.has(keep)) this.activate(keep);
+        this.applyVisibility();
+    }
+
+    setupSplit() {
+        this.panelsEl = this.workspaceEl.querySelector('.terminal-panels');
+        const saved = this.storage.get('split');
+        this.split = saved && saved.a && saved.b ? saved : null;
+
+        const divider = document.createElement('div');
+        divider.className = 'split-divider';
+        divider.hidden = true;
+        divider.setAttribute('role', 'separator');
+        divider.setAttribute('aria-label', 'Arraste para mudar o tamanho dos painéis');
+        divider.tabIndex = 0;
+        divider.innerHTML = '<span class="split-grip" aria-hidden="true"></span>';
+        this.panelsEl.appendChild(divider);
+        this.divider = divider;
+
+        const setRatio = ratio => {
+            if (!this.split) return;
+            this.split.ratio = Math.min(0.85, Math.max(0.15, ratio));
+            this.panelsEl.style.setProperty('--split', String(this.split.ratio));
+        };
+        divider.addEventListener('pointerdown', e => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            try {
+                divider.setPointerCapture(e.pointerId);
+            } catch { /* window listeners below still track the drag */ }
+            this.panelsEl.classList.add('resizing');
+            const box = this.panelsEl.getBoundingClientRect();
+            const row = this.panelsEl.classList.contains('row');
+            const move = ev => {
+                if (ev.pointerId !== e.pointerId) return;
+                setRatio(row ? (ev.clientX - box.left) / box.width : (ev.clientY - box.top) / box.height);
+            };
+            // Always ends the drag (up, cancel, lost capture, window blur): a stuck "resizing"
+            // state would block every tap on the panels
+            const end = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', end);
+                window.removeEventListener('pointercancel', end);
+                window.removeEventListener('blur', end);
+                divider.removeEventListener('lostpointercapture', end);
+                this.panelsEl.classList.remove('resizing');
+                if (this.split) this.storage.set('split', this.split);
+            };
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', end);
+            window.addEventListener('pointercancel', end);
+            window.addEventListener('blur', end);
+            divider.addEventListener('lostpointercapture', end);
+        });
+        divider.addEventListener('keydown', e => {
+            const delta = { ArrowLeft: -0.05, ArrowUp: -0.05, ArrowRight: 0.05, ArrowDown: 0.05 }[e.key];
+            if (!delta || !this.split) return;
+            e.preventDefault();
+            setRatio(this.split.ratio + delta);
+            this.storage.set('split', this.split);
+        });
+        divider.addEventListener('dblclick', () => {
+            setRatio(0.5);
+            if (this.split) this.storage.set('split', this.split);
+        });
+
+        // Touching/clicking a pane makes it the focused one (status bar, shortcuts, search)
+        this.panelsEl.addEventListener('pointerdown', e => {
+            const pair = this.visiblePair();
+            if (!pair) return;
+            const panel = e.target.closest('.terminal-panel');
+            const id = panel?.id.replace(/^panel-/, '');
+            if (id && id !== this.activeId && pair.includes(id)) this.activate(id);
+        }, true);
+
+        // Rotating the phone / resizing the window switches between side by side and stacked
+        new ResizeObserver(() => this.layoutPanels()).observe(this.panelsEl);
+    }
+
+    /** Menu to choose what goes beside a tab. */
+    openSplitMenu(id, pos = {}) {
+        const s = this.sessions.get(id);
+        if (!s) return;
+        const kindIcon = k => (k === 'browser' ? 'globe' : k === 'files' ? 'folder' : 'terminal');
+        const others = this.order.filter(o => o !== id).map(o => this.sessions.get(o));
+        const newBeside = async opts => {
+            const created = await this.create({ ...opts, afterId: id });
+            if (created) this.setSplit(id, created.id, { focus: s.kind === 'terminal' ? id : created.id });
+        };
+        showMenu([
+            ...(window.appConfig?.browserAvailable ? [{ label: 'Nova aba de navegador', icon: 'globe', run: () => newBeside({ kind: 'browser' }) }] : []),
+            ...(window.appConfig?.filesAvailable ? [{ label: 'Arquivos desta pasta', icon: 'folder',
+                run: () => newBeside({ kind: 'files', cwd: s.kind === 'terminal' ? (s.cwd || s.startCwd || undefined) : undefined }) }] : []),
+            { label: 'Novo terminal', icon: 'terminal', run: () => newBeside({}) },
+            ...(others.length ? ['separator'] : []),
+            ...others.map(o => ({ label: o.name, icon: kindIcon(o.kind), hint: o.displayCwd?.() || '',
+                run: () => this.setSplit(id, o.id, { focus: id }) })),
+        ], { ...pos, label: `Dividir tela com ${s.name}` });
+    }
+
+    /** Tells the server which terminal the user works in (agents open things beside it). */
+    reportFocus(id) {
+        clearTimeout(this.focusTimer);
+        this.focusTimer = setTimeout(() => {
+            fetch(joinPath('api/focus'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id }),
+            }).catch(() => {});
+        }, 300);
     }
 
     /** Removes a tab view locally (the server already dropped or will drop it). */
@@ -193,6 +392,10 @@ export default class TerminalManager {
         session.dispose();
         this.tabBar.remove(id);
         this.sessions.delete(id);
+        if (this.split && (this.split.a === id || this.split.b === id)) {
+            this.split = null;
+            this.storage.remove('split');
+        }
 
         if (this.activeId === id) {
             this.activeId = null;
@@ -416,6 +619,9 @@ export default class TerminalManager {
             { label: 'Novo gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`, run: () => this.createFiles() },
             ...(s.kind === 'terminal' ? [{ label: 'Abrir pasta atual nos Arquivos', icon: 'folderOpen',
                 run: () => this.createFiles(s.cwd || s.startCwd || undefined) }] : []),
+            ...(this.split && (this.split.a === id || this.split.b === id)
+                ? [{ label: 'Desfazer divisão', icon: 'panelLeft', run: () => this.clearSplit({ keep: id }) }]
+                : [{ label: 'Dividir tela com…', icon: 'panelLeft', run: () => this.openSplitMenu(id, { x, y, anchor }) }]),
             { label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) },
             { label: 'Renomear', icon: 'edit', hint: k.rename, run: () => this.tabBar.startRename(id) },
             { label: s.pinned ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(id) },
@@ -576,10 +782,18 @@ export default class TerminalManager {
             if (this.seenNonces.size > 200) this.seenNonces = new Set([...this.seenNonces].slice(-100));
         }
         if (m.type === 'notify') {
-            toast(m.message, { duration: 6000 });
+            const title = m.title && m.title !== 'MeuTerminal' ? `${m.title}: ` : '';
+            toast(title + m.message, { duration: 8000 });
+            if (m.sound !== false) playChime();
         } else if (m.type === 'open-tab') {
             await this.reconcile(); // make sure the new tab exists here
             if (this.sessions.has(m.id)) this.activate(m.id, { focus: !isCoarse() });
+        } else if (m.type === 'split') {
+            await this.reconcile();
+            if (m.b) this.setSplit(m.a, m.b, { focus: m.focus || m.a });
+            else this.clearSplit({ keep: m.a });
+        } else if (m.type === 'vibe-form' || m.type === 'vibe-form-close') {
+            this.events.onVibeForm?.(m);
         }
     }
 

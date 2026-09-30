@@ -274,6 +274,15 @@ footer { color: var(--text-2); font-size: 0.85rem; margin-top: 56px; text-align:
                 <li>O botão de engrenagem troca o tamanho (da aba, celular 390×844 ou desktop 1280×800) e a qualidade da imagem. Use "Leve (4G)" em conexões ruins.</li>
                 <li>Logins e cookies das páginas ficam salvos no servidor.</li>
             </ul>
+            <h3>Tela dividida (tipo Live Server do VS Code)</h3>
+            <ul>
+                <li>No menu da aba (botão direito ou toque longo), escolha <strong>Dividir tela com…</strong> e depois outra aba, uma aba nova de navegador ou os arquivos da pasta. O menu ⋮ também tem "Dividir tela…".</li>
+                <li>No computador as duas abas ficam lado a lado. No celular em pé, ficam uma em cima da outra, com a página em cima e o terminal embaixo, perto do teclado. Arraste o divisor para mudar o tamanho; duplo clique volta para metade/metade.</li>
+                <li>O painel em que você tocou por último é o que recebe o teclado, a busca e a barra de status. Ele fica marcado com uma linha roxa.</li>
+                <li>Tocar numa aba que não está na divisão mostra só ela; voltar para uma das duas mostra a divisão de novo. Para desfazer, use "Desfazer divisão" no menu da aba.</li>
+            </ul>
+            <h3>Recarregar ao salvar</h3>
+            <p>Na aba de navegador, engrenagem → <strong>Recarregar ao salvar arquivos…</strong> e escolha a pasta do projeto: a página recarrega sozinha sempre que um arquivo dela muda. Aparece o selo <strong>ao vivo</strong> na barra. Sites só com HTML/CSS/JS nem precisam de servidor: a prévia serve a pasta direto, e só o navegador do app acessa.</p>
         </section>
 
         <!-- 5 -->
@@ -356,9 +365,23 @@ footer { color: var(--text-2); font-size: 0.85rem; margin-top: 56px; text-align:
                 <tr><td><code>open_folder</code></td><td>Abre uma pasta no gerenciador de arquivos (ou num terminal, com <code>view: "terminal"</code>). Aceita o Drive: <code>gdrive:Documentos</code>.</td></tr>
                 <tr><td><code>list_drives</code></td><td>Mostra o servidor e as nuvens do rclone.</td></tr>
                 <tr><td><code>list_tabs</code> / <code>list_ports</code></td><td>Lista as abas abertas e os projetos rodando.</td></tr>
-                <tr><td><code>notify</code></td><td>Mostra um aviso na sua tela ("Build pronto").</td></tr>
+                <tr><td><code>notify</code></td><td>Aviso com som na tela do app e <strong>notificação push</strong> no celular, mesmo com o app fechado ("Build pronto").</td></tr>
+                <tr><td><code>live_preview</code></td><td>Abre a prévia de uma pasta de site ao lado do terminal, recarregando a cada arquivo salvo.</td></tr>
+                <tr><td><code>split_tabs</code></td><td>Divide a tela entre duas abas (ou desfaz).</td></tr>
+                <tr><td><code>start_vibecoding</code></td><td>Abre o formulário de projeto novo na sua tela e monta o ambiente (veja abaixo).</td></tr>
             </table></div>
             <p>O MCP só aceita conexões do próprio servidor e com o token do app: nada disso fica exposto na internet.</p>
+            <p>Com <code>open_url</code>, o agente pode abrir a página <strong>ao lado</strong> do terminal dele (tela dividida) e pedir para ela recarregar quando os arquivos mudarem. Cada terminal tem o próprio endereço em <code>$MEUTERMINAL_TAB_ID</code>, que o agente usa para saber onde abrir.</p>
+            <h3>Modo vibecoding</h3>
+            <p>Para começar um projeto do zero conversando com a IA:</p>
+            <ol class="steps">
+                <li>Abra ⋮ → <strong>Novo projeto (vibecoding)</strong>, ou peça ao agente no terminal: "vamos vibecodar um projeto novo".</li>
+                <li>Preencha o formulário: nome do projeto, tipo (site HTML, React + Vite, Next.js, API Node ou outro), o que você quer construir, a pasta e o agente (Claude Code, Codex ou nenhum).</li>
+                <li>O app cria a pasta (com <code>git init</code>, se marcado) e divide a tela: <strong>terminal do agente</strong> de um lado e <strong>prévia ao vivo</strong> do outro. Os <strong>arquivos do projeto</strong> abrem numa aba separada.</li>
+                <li>O agente recebe o pedido e começa a construir. Em sites HTML a prévia atualiza a cada arquivo salvo; em Vite/Next ela abre sozinha quando o servidor de desenvolvimento sobe.</li>
+            </ol>
+            <h3>Notificações no celular</h3>
+            <p>Em ⋮ → Configurações → <strong>Notificações</strong>, toque em "Ativar neste aparelho". A partir daí, quando o agente usar <code>notify</code>, você recebe a notificação com som mesmo com o app fechado. No iPhone, primeiro instale o app na tela inicial (Compartilhar → Adicionar à Tela de Início) e ative por ele. Com o app aberto na tela, o aviso aparece dentro dele, também com som.</p>
         </section>
 
         <!-- 8 -->
