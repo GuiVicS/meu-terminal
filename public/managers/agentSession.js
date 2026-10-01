@@ -145,6 +145,8 @@ export default class AgentSession {
             onConfig: (configId, value) => this.action('config', { configId, value }).then(s => this.applySession(s)).catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
             searchFiles: query => this.searchFiles(query),
             onLocalCommand: (name, args) => this.runLocalCommand(name, args),
+            onQueueRemove: itemId => api('DELETE', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/queue/${encodeURIComponent(itemId)}`)
+                .catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
         });
         this.side = new SidePanel(this.el.side, {
             cwd: () => this.cwd,
@@ -354,6 +356,9 @@ export default class AgentSession {
                 if (this.session) this.session.capabilities = { ...this.session.capabilities, configOptions: d.options };
                 this.composer.setSession(this.session);
                 break;
+            case 'queue.update':
+                this.composer.setQueue(d.items);
+                break;
             case 'commands.update':
                 this.composer.setCommands(d.commands);
                 break;
@@ -533,7 +538,7 @@ export default class AgentSession {
                 return this.openHistory(head.querySelector('[data-act="history"]'), { onlyPast: true, query: args });
             case 'clear':
                 return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id })
-                    .then(() => this.hooks.onWorkspaceChanged())
+                    .then(data => this.hooks.showTab?.(data.tab.id))
                     .catch(e => toast(e.message, { tone: 'error' }));
             case 'model': return choose(configSelect('model'), args);
             case 'effort': return choose(configSelect('thought_level'), args);
@@ -558,9 +563,13 @@ export default class AgentSession {
     /** "Conversas": new conversation, or a past one of this agent in this folder (incl. terminal ones). */
     async openHistory(anchor, { onlyPast = false, query = '' } = {}) {
         if (!this.session) return;
-        const start = body => api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
-            .then(() => this.hooks.onWorkspaceChanged())
-            .catch(e => toast(e.message, { tone: 'error' }));
+        const start = (body) => {
+            // Loading a long conversation from the terminal takes a few seconds
+            if (body.resumeAcpSessionId) toast(`Abrindo "${body.title || 'conversa'}"…`);
+            return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
+                .then(data => this.hooks.showTab?.(data.tab.id))
+                .catch(e => toast(e.message, { tone: 'error' }));
+        };
         const items = [{ label: 'Nova conversa', icon: 'plus', run: () => start({}) }];
         if (onlyPast && !(this.session.capabilities && this.session.capabilities.history)) {
             this.conversation.note('Este agente não lista conversas anteriores.', 'info');

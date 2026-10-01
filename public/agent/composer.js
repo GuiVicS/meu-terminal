@@ -9,11 +9,15 @@ import { icon } from '../ui/icons.js';
 import { askConfirm } from '../ui/prompt.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { pickServerFiles, serverFileUrl } from '../ui/filePicker.js';
+import { toast } from '../ui/toast.js';
 import { esc } from './markdown.js';
 
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
 const MAX_IMAGES = 5;
-const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024; // the request body limit is 5 MB (base64 grows ~33%)
+const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024; // per image sent (base64 grows ~33%; the route takes 40 MB)
+const MAX_IMAGE_INPUT = 40 * 1024 * 1024;  // bigger photos are refused; smaller ones are reduced
+const MAX_IMAGE_SIDE = 2000;               // px: larger photos are scaled down before sending
+const DRAFT_PREFIX = 'mt-agent-draft:';
 const MAX_FILES = 10;
 const UPLOAD_DIR = 'anexos'; // device uploads go to <session folder>/anexos
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
@@ -38,6 +42,34 @@ export const LOCAL_COMMANDS = [
 
 // Modes that skip the permission questions: they need an explicit confirmation
 const DANGEROUS_MODES = ['bypassPermissions'];
+
+/**
+ * Phone photos are often 4-12 MB: scale down to MAX_IMAGE_SIDE and re-encode as JPEG (WebP when
+ * the image has transparency is not worth checking: PNG screenshots are usually small already).
+ * Returns the original file when it is small enough or cannot be decoded.
+ */
+async function shrinkImage(file) {
+    if (file.size <= 1.5 * 1024 * 1024 && file.type !== 'image/heic') return file;
+    let bitmap;
+    try {
+        bitmap = await createImageBitmap(file);
+    } catch {
+        return file;
+    }
+    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    for (const quality of [0.85, 0.7, 0.55]) {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+        if (blob && blob.size <= MAX_IMAGE_BYTES) {
+            return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+        }
+    }
+    return file;
+}
 
 function readAsBase64(file) {
     return new Promise((resolve, reject) => {
@@ -67,11 +99,14 @@ export default class Composer {
         this.commands = [];
         this.images = [];
         this.files = []; // { name, path|null, size, status: 'uploading'|'ready'|'error', error? }
+        this.queue = []; // "modo fila": messages waiting on the server ({ id, text, images })
+        this.draftKey = null;
         this.busy = false;
         this.suggest = { items: [], index: 0, kind: null, start: 0 };
         this.searchSeq = 0;
 
         el.innerHTML = `
+            <div class="ag-queue" hidden></div>
             <div class="ag-selectors"></div>
             <div class="ag-images" hidden></div>
             <div class="ag-suggest" role="listbox" hidden></div>
@@ -85,7 +120,7 @@ export default class Composer {
             </form>`;
         const q = sel => el.querySelector(sel);
         this.ui = {
-            selectors: q('.ag-selectors'), images: q('.ag-images'), suggest: q('.ag-suggest'),
+            selectors: q('.ag-selectors'), images: q('.ag-images'), suggest: q('.ag-suggest'), queue: q('.ag-queue'),
             form: q('form'), input: q('textarea'), file: q('input[type="file"]'),
             attach: q('.ag-attach-btn'), stop: q('.ag-stop'), send: q('.ag-send'),
         };
@@ -101,12 +136,30 @@ export default class Composer {
         input.addEventListener('input', () => {
             this.autosize();
             this.updateSuggestions();
+            this.saveDraftSoon();
+        });
+        this.ui.queue.addEventListener('click', e => {
+            const btn = e.target.closest('[data-queue-act]');
+            if (!btn) return;
+            const item = this.queue.find(i => i.id === btn.dataset.id);
+            if (!item) return;
+            if (btn.dataset.queueAct === 'edit') {
+                // Back to the box (and out of the queue) to change it
+                this.opts.onQueueRemove?.(item.id).then(() => {
+                    this.ui.input.value = item.text + (this.ui.input.value ? `\n${this.ui.input.value}` : '');
+                    this.autosize();
+                    this.ui.input.focus();
+                    this.saveDraftSoon();
+                }).catch(() => {});
+            } else {
+                this.opts.onQueueRemove?.(item.id).catch(() => {});
+            }
         });
         input.addEventListener('keydown', e => this.onKey(e));
         input.addEventListener('blur', () => setTimeout(() => this.closeSuggestions(), 150));
         input.addEventListener('paste', e => {
             const files = [...(e.clipboardData?.files || [])].filter(f => IMAGE_TYPES.includes(f.type));
-            if (files.length && this.canAttach()) {
+            if (files.length && this.canAttach()) { // big photos are reduced in addImages
                 e.preventDefault();
                 this.addImages(files);
             }
@@ -129,6 +182,7 @@ export default class Composer {
             if (remove.dataset.removeFile !== undefined) this.files.splice(Number(remove.dataset.removeFile), 1);
             else this.images.splice(Number(remove.dataset.remove), 1);
             this.renderImages();
+            this.saveDraftSoon();
         });
     }
 
@@ -136,6 +190,8 @@ export default class Composer {
 
     setSession(session) {
         this.session = session;
+        if (!this.draftKey && session && session.id) this.restoreDraft(DRAFT_PREFIX + session.id);
+        this.setQueue(session && session.queue);
         this.renderSelectors();
     }
 
@@ -162,14 +218,72 @@ export default class Composer {
     setBusy(busy, status) {
         this.busy = busy;
         this.ui.stop.hidden = !busy;
-        this.ui.send.hidden = busy;
+        // While the agent works the send button queues the message ("modo fila")
+        this.ui.send.classList.toggle('queue', busy);
+        this.ui.send.setAttribute('aria-label', busy ? 'Adicionar à fila' : 'Enviar');
+        this.ui.send.title = busy ? 'Adicionar à fila (vai quando o agente terminar)' : 'Enviar';
         // Short texts on phones: the field is a single line there
         const narrow = window.matchMedia('(max-width: 600px)').matches;
         this.ui.input.placeholder = status === 'stopped'
             ? 'Agente parado: toque em Retomar'
-            : busy ? (narrow ? 'Trabalhando… escreva a próxima' : 'O agente está trabalhando… (pode escrever a próxima mensagem)')
+            : busy ? (narrow ? 'Trabalhando… a próxima entra na fila' : 'O agente está trabalhando… a próxima mensagem entra na fila')
                 : (narrow ? 'Mensagem, / ou @' : 'Mensagem… ( / comandos · @ arquivos )');
         this.ui.send.disabled = status === 'starting' || status === 'stopped';
+    }
+
+    // ---------- queue ("modo fila") ----------
+
+    setQueue(items) {
+        this.queue = Array.isArray(items) ? items : [];
+        const box = this.ui.queue;
+        box.hidden = !this.queue.length;
+        if (!this.queue.length) {
+            box.innerHTML = '';
+            return;
+        }
+        box.innerHTML = `
+            <div class="ag-queue-head">${icon('list', 13)} Na fila · ${this.queue.length}<span>vai quando o agente terminar</span></div>
+            <ol class="ag-queue-list">${this.queue.map((item, i) => `
+                <li class="ag-queue-item">
+                    <span class="ag-queue-n">${i + 1}</span>
+                    <span class="ag-queue-text">${esc(item.text.trim() || '(só imagens)')}${item.images ? ` <em>${icon('fileImage', 12)} ${item.images}</em>` : ''}</span>
+                    <button type="button" class="icon-btn" data-queue-act="edit" data-id="${esc(item.id)}" aria-label="Editar" title="Editar (volta para a caixa)">${icon('edit', 14)}</button>
+                    <button type="button" class="icon-btn" data-queue-act="remove" data-id="${esc(item.id)}" aria-label="Tirar da fila" title="Tirar da fila">${icon('x', 14)}</button>
+                </li>`).join('')}</ol>`;
+    }
+
+    // ---------- draft (kept per conversation: survives reloads and tab switches) ----------
+
+    restoreDraft(key) {
+        this.draftKey = key;
+        let draft = null;
+        try {
+            draft = JSON.parse(localStorage.getItem(key) || 'null');
+        } catch { /* storage blocked or bad JSON */ }
+        if (!draft) return;
+        if (draft.text && !this.ui.input.value) {
+            this.ui.input.value = draft.text;
+            requestAnimationFrame(() => this.autosize());
+        }
+        if (Array.isArray(draft.files) && !this.files.length) {
+            this.files = draft.files.filter(f => f && f.path).map(f => ({ name: f.name, path: f.path, size: f.size, status: 'ready' }));
+            this.renderImages();
+        }
+    }
+
+    saveDraftSoon() {
+        clearTimeout(this.draftTimer);
+        this.draftTimer = setTimeout(() => this.saveDraft(), 250);
+    }
+
+    saveDraft() {
+        if (!this.draftKey) return;
+        const text = this.ui.input.value;
+        const files = this.files.filter(f => f.status === 'ready').map(({ name, path, size }) => ({ name, path, size }));
+        try {
+            if (!text.trim() && !files.length) localStorage.removeItem(this.draftKey);
+            else localStorage.setItem(this.draftKey, JSON.stringify({ text, files, at: Date.now() }));
+        } catch { /* storage full or blocked: the draft only lives in the box */ }
     }
 
     canAttach() {
@@ -246,7 +360,7 @@ export default class Composer {
 
     /** An image the agent can see goes as an image; anything else as a file path. */
     isImageForAgent(file) {
-        return this.canAttach() && IMAGE_TYPES.includes(file.type) && file.size <= MAX_IMAGE_BYTES
+        return this.canAttach() && IMAGE_TYPES.includes(file.type) && file.size <= MAX_IMAGE_INPUT
             && this.images.length < MAX_IMAGES;
     }
 
@@ -303,12 +417,18 @@ export default class Composer {
             Object.assign(entry, { status: 'error', error: error.message });
         }
         this.renderImages();
+        this.saveDraftSoon();
     }
 
     async addImages(files) {
-        for (const file of files) {
+        for (const original of files) {
             if (this.images.length >= MAX_IMAGES) break;
-            if (!IMAGE_TYPES.includes(file.type) || file.size > MAX_IMAGE_BYTES) continue;
+            if (!IMAGE_TYPES.includes(original.type) || original.size > MAX_IMAGE_INPUT) continue;
+            const file = await shrinkImage(original);
+            if (file.size > MAX_IMAGE_BYTES) {
+                toast(`"${original.name}" é grande demais mesmo reduzida.`, { tone: 'error' });
+                continue;
+            }
             const data = await readAsBase64(file);
             this.images.push({ mimeType: file.type, data, url: URL.createObjectURL(file), name: file.name });
         }
@@ -353,7 +473,7 @@ export default class Composer {
             return;
         }
         const ready = this.files.filter(f => f.status === 'ready');
-        if ((!typed && !this.images.length && !ready.length) || this.busy || this.ui.send.disabled) return;
+        if ((!typed && !this.images.length && !ready.length) || this.ui.send.disabled) return;
         if (this.files.some(f => f.status === 'uploading')) return; // wait for the uploads
         // Files go as their paths on the server: every agent can read them from there
         const text = ready.length
@@ -370,12 +490,14 @@ export default class Composer {
         try {
             await this.opts.onSend({ text, images });
             previous.images.forEach(img => URL.revokeObjectURL(img.url));
+            this.saveDraft(); // the box is empty now: drops the saved draft
         } catch {
             // Keep what the user wrote if it was not accepted
             this.ui.input.value = previous.text;
             this.images = previous.images;
             this.files = previous.files;
             this.renderImages();
+            this.saveDraftSoon();
             this.autosize();
         }
     }

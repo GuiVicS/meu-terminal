@@ -94,6 +94,11 @@ export default class TerminalManager {
             onTerminalMenu: (s, x, y) => this.events.onTerminalMenu?.(s, x, y),
             isAppShortcut: e => !!this.matchShortcut(e),
             openTab: opts => this.create(opts),
+            // A tab the server just created (new/resumed agent conversation): show it
+            showTab: async (id) => {
+                await this.reconcile();
+                if (this.sessions.has(id)) this.activate(id, { focus: true });
+            },
             // Folder for "reload on save": the terminal beside it, else the last terminal used
             suggestFolder: s => {
                 const partner = this.split && (this.split.a === s.id || this.split.b === s.id)

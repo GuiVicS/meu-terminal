@@ -39,21 +39,55 @@ test('markdown: common syntax renders', async () => {
         '```js', 'const a = 1;', '```', '', '[site](https://meuterminal.app)', '',
         '| a | b |', '|---|---|', '| 1 | 2 |',
     ].join('\n'));
-    assert.match(html, /<h3>Título<\/h3>/);
+    assert.match(html, /<h3 class="md-h1">Título<\/h3>/);
     assert.match(html, /<strong>negrito<\/strong>/);
     assert.match(html, /<em>itálico<\/em>/);
     assert.match(html, /<code>código<\/code>/);
     assert.match(html, /<ul><li>item 1<\/li>/);
     assert.match(html, /md-task done/);
     assert.match(html, /<ol><li>um<\/li><li>dois<\/li><\/ol>/);
-    assert.match(html, /<div class="md-code" data-lang="js"><pre><code>const a = 1;<\/code><\/pre><\/div>/);
+    assert.match(html, /<div class="md-code" data-lang="javascript" data-ext="js" data-closed>/);
+    assert.match(html, /<span>JavaScript<\/span>/);
+    assert.match(html, /data-code-act="copy"/);
+    assert.match(html, /<pre><code>const a = 1;<\/code><\/pre>/);
     assert.match(html, /<a href="https:\/\/meuterminal.app" target="_blank" rel="noopener noreferrer">site<\/a>/);
     assert.match(html, /<table>.*<th>a<\/th>.*<td>2<\/td>/s);
 });
 
 test('markdown: an unfinished code fence while streaming still renders as code', async () => {
     const { renderMarkdown } = await load('markdown.js');
-    assert.match(renderMarkdown('Veja:\n```py\nprint(1)'), /<pre><code>print\(1\)<\/code><\/pre>/);
+    const html = renderMarkdown('Veja:\n```py\nprint(1)');
+    assert.match(html, /<pre><code>print\(1\)<\/code><\/pre>/);
+    assert.match(html, /md-code streaming/);
+    assert.doesNotMatch(html, /data-closed/, 'not highlighted until the fence closes');
+});
+
+test('markdown: file names, code in list items, callouts, images, list numbers', async () => {
+    const { renderMarkdown } = await load('markdown.js');
+    const html = renderMarkdown([
+        '```ts title=src/app.ts', 'let a = 1', '```', '',
+        '1. Instale:', '   ```bash', '   npm i', '   ```', '2. Rode', '',
+        '> [!WARNING]', '> cuidado', '',
+        '![logo](https://x.test/a.png) ![x](javascript:alert(1))', '',
+        '5. cinco',
+    ].join('\n'));
+    assert.match(html, /data-lang="typescript" data-ext="ts" data-file="app.ts"/);
+    assert.match(html, /<pre><code>npm i<\/code><\/pre>/, 'indented fence inside a list item is a code block');
+    assert.match(html, /<ol start="2"><li>Rode<\/li>/);
+    assert.match(html, /md-callout warning/);
+    assert.match(html, /<img src="https:\/\/x.test\/a.png"/);
+    assert.doesNotMatch(html, /src="javascript:/);
+    assert.match(html, /<ol start="5">/);
+});
+
+test('code blocks: fence info parsing', async () => {
+    const { parseFenceInfo } = await load('codeblock.js');
+    assert.deepEqual(parseFenceInfo('js'), { lang: 'javascript', label: 'JavaScript', file: null, path: null, ext: 'js' });
+    assert.equal(parseFenceInfo('python:scripts/run.py').file, 'run.py');
+    assert.equal(parseFenceInfo('app.py').lang, 'python');
+    assert.equal(parseFenceInfo('sh').label, 'Bash');
+    assert.equal(parseFenceInfo('weird-lang').label, 'weird-lang');
+    assert.equal(parseFenceInfo('').label, 'Código');
 });
 
 test('diff: minimal line changes with context and counts', async () => {

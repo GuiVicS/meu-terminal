@@ -38,6 +38,7 @@ const EVENT_FIELDS = {
     // Title/updatedAt reported by the agent itself
     'session.info': [],
     'commands.update': ['commands'],
+    'queue.update': ['items'],          // "modo fila": messages waiting for the current turn
     'error': ['message'],
     // Anything an adapter cannot map. The UI shows it as a generic card: nothing disappears.
     'raw': ['source', 'payload'],

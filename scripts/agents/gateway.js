@@ -12,6 +12,8 @@ const { AcpMapper, normalizeConfigOptions } = require('./acp-mapping');
 const { validateEvent } = require('./events');
 const { loadAgents } = require('./registry');
 
+const MAX_QUEUE = 20; // messages waiting while the agent works ("modo fila")
+
 const ACP_PROTOCOL_VERSION = 1;
 
 class GatewayError extends Error {
@@ -152,6 +154,7 @@ class AgentGateway extends EventEmitter {
             capabilities: row.capabilities,
             lastSeq: row.last_seq,
             pendingPermissions: this.store.pendingPermissions(row.id),
+            queue: this.queueSummary(this.runtimes.get(row.id)),
             createdAt: row.created_at,
             updatedAt: row.updated_at,
         };
@@ -192,7 +195,8 @@ class AgentGateway extends EventEmitter {
         const id = crypto.randomUUID();
         this.store.insertSession({ id, agent, cwd, title });
         if (resumeAcpSessionId) this.store.updateSession(id, { acp_session_id: String(resumeAcpSessionId) });
-        await this.spawnAgent(id, { resume: !!resumeAcpSessionId });
+        // A conversation from the terminal (or another app): its history is not in our log yet
+        await this.spawnAgent(id, { resume: !!resumeAcpSessionId, importHistory: !!resumeAcpSessionId });
         return this.get(id);
     }
 
@@ -247,7 +251,7 @@ class AgentGateway extends EventEmitter {
         }
     }
 
-    async spawnAgent(sessionId, { resume }) {
+    async spawnAgent(sessionId, { resume, importHistory = false }) {
         const row = this.store.getSession(sessionId);
         const def = this.agents[row.agent];
         const mapper = new AcpMapper({ maxText: this.maxText });
@@ -280,7 +284,8 @@ class AgentGateway extends EventEmitter {
                 clientInfo: { name: 'meuterminal', version: require('../../package.json').version },
             }, { timeoutMs: this.startTimeoutMs });
 
-            const session = await this.openAcpSession(runtime, row, init, resume);
+            const session = await this.openAcpSession(runtime, row, init, resume, importHistory);
+            if (session.imported) this.finishImport(sessionId, runtime);
             runtime.acpSessionId = session.sessionId;
             runtime.capabilities = { ...deriveCapabilities(init, session.result), resumed: session.resumed };
             runtime.mode = runtime.capabilities.currentMode || runtime.mode;
@@ -314,11 +319,24 @@ class AgentGateway extends EventEmitter {
     /**
      * New session, or the previous agent session: session/resume (no history replay) when
      * supported, else session/load (the agent replays history, which we already have: ignored).
+     * importHistory (a conversation we never saw, e.g. from the terminal): session/load first,
+     * and its replay becomes our events so the UI shows the whole conversation.
      */
-    async openAcpSession(runtime, row, init, resume) {
+    async openAcpSession(runtime, row, init, resume, importHistory = false) {
         const params = { cwd: row.cwd, mcpServers: this.mcpServers };
         const caps = (init && init.agentCapabilities) || {};
         const timeout = { timeoutMs: this.startTimeoutMs };
+        if (resume && row.acp_session_id && importHistory && caps.loadSession) {
+            runtime.importing = { user: null, assistantOpen: false };
+            try {
+                // A long conversation takes a while to replay
+                const result = await runtime.client.request('session/load', { ...params, sessionId: row.acp_session_id }, { timeoutMs: Math.max(this.startTimeoutMs, 120000) });
+                return { sessionId: row.acp_session_id, result, resumed: true, imported: true };
+            } catch (error) {
+                this.log('Agent session load (import) failed, trying resume:', error.message);
+                runtime.importing = null;
+            }
+        }
         if (resume && row.acp_session_id) {
             try {
                 if (caps.sessionCapabilities && caps.sessionCapabilities.resume) {
@@ -431,7 +449,60 @@ class AgentGateway extends EventEmitter {
             throw new GatewayError(error.message, 502);
         } finally {
             runtime.prompting = false;
+            // "modo fila": the next message goes on its own (setImmediate: after this turn's events)
+            if ((runtime.queue || []).length) setImmediate(() => this.drainQueue(sessionId));
         }
+    }
+
+    // ---------- queue ("modo fila"): messages written while the agent works ----------
+
+    /**
+     * Sends now when the agent is free, else queues the message; queued messages go one per
+     * turn, in order, as soon as the current turn ends. Returns { queued, id? }.
+     */
+    enqueue(sessionId, text, { images = [] } = {}) {
+        const runtime = this.requireRuntime(sessionId);
+        if (typeof text !== 'string') text = '';
+        if (!text.trim() && !images.length) throw new GatewayError('Mensagem vazia.');
+        if (images.length && !runtime.capabilities.images) throw new GatewayError('Este agente não aceita imagens.');
+        runtime.queue = runtime.queue || [];
+        if (!runtime.prompting && !runtime.queue.length) {
+            this.prompt(sessionId, text, { images }).catch(e => this.log('Agent prompt:', e.message));
+            return { queued: false };
+        }
+        if (runtime.queue.length >= MAX_QUEUE) throw new GatewayError(`A fila já tem ${MAX_QUEUE} mensagens.`, 429);
+        const item = { id: crypto.randomUUID(), text, images, createdAt: new Date().toISOString() };
+        runtime.queue.push(item);
+        this.emitQueue(sessionId, runtime);
+        return { queued: true, id: item.id };
+    }
+
+    /** Removes a queued message (it was not sent yet). */
+    dequeue(sessionId, itemId) {
+        const runtime = this.requireRuntime(sessionId);
+        const before = (runtime.queue || []).length;
+        runtime.queue = (runtime.queue || []).filter(i => i.id !== itemId);
+        const removed = runtime.queue.length !== before;
+        if (removed) this.emitQueue(sessionId, runtime);
+        return removed;
+    }
+
+    /** What the windows show: text and image count (never the image bytes). */
+    queueSummary(runtime) {
+        return (runtime && runtime.queue || []).map(i => ({ id: i.id, text: i.text, images: i.images.length, createdAt: i.createdAt }));
+    }
+
+    emitQueue(sessionId, runtime) {
+        this.emitEvent(sessionId, 'queue.update', { items: this.queueSummary(runtime) });
+    }
+
+    /** Turn over: the next queued message goes (unless the agent stopped or the session closed). */
+    drainQueue(sessionId) {
+        const runtime = this.runtimes.get(sessionId);
+        if (!runtime || runtime.prompting || !runtime.ready || !(runtime.queue || []).length) return;
+        const item = runtime.queue.shift();
+        this.emitQueue(sessionId, runtime);
+        this.prompt(sessionId, item.text, { images: item.images }).catch(e => this.log('Queued prompt:', e.message));
     }
 
     /** Stops the current turn (ESC / stop button). The prompt resolves with stopReason 'cancelled'. */
@@ -547,6 +618,22 @@ class AgentGateway extends EventEmitter {
         // session/load replays the whole conversation: we already have it in our event log
         if (runtime.loading) return;
         for (const { type, data } of runtime.mapper.mapUpdate(params && params.update)) {
+            // Importing a conversation: rebuild its turns from the replay
+            if (runtime.importing) {
+                const imp = runtime.importing;
+                if (type === 'message.user') {
+                    // A user message arrives in several chunks: one bubble
+                    if (imp.user === null) {
+                        if (imp.assistantOpen) this.emitEvent(sessionId, 'message.assistant.done', { stopReason: 'end_turn', replayed: true });
+                        imp.assistantOpen = false;
+                        imp.user = '';
+                    }
+                    imp.user += data.text || '';
+                    continue;
+                }
+                this.flushImportedUser(sessionId, imp);
+                if (type === 'message.assistant.delta' || type === 'thought.delta' || type.startsWith('tool.')) imp.assistantOpen = true;
+            }
             if (type === 'mode.update') {
                 this.applyMode(sessionId, runtime, data.modeId);
                 continue;
@@ -561,6 +648,21 @@ class AgentGateway extends EventEmitter {
             if (data && Array.isArray(data.media)) data.media = data.media.map(m => this.storeMedia(sessionId, m));
             this.emitEvent(sessionId, type, data);
         }
+    }
+
+    flushImportedUser(sessionId, imp) {
+        if (imp.user === null) return;
+        if (imp.user.trim()) this.emitEvent(sessionId, 'message.user', { text: imp.user, replayed: true });
+        imp.user = null;
+    }
+
+    /** End of an imported replay: closes the last turn. */
+    finishImport(sessionId, runtime) {
+        const imp = runtime.importing;
+        if (!imp) return;
+        this.flushImportedUser(sessionId, imp);
+        if (imp.assistantOpen) this.emitEvent(sessionId, 'message.assistant.done', { stopReason: 'end_turn', replayed: true });
+        runtime.importing = null;
     }
 
     enableCapability(sessionId, runtime, name) {
