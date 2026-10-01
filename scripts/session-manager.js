@@ -24,6 +24,7 @@ function cleanName(name) {
 function defaultName(type, n, cwd) {
     if (type === 'browser') return `Navegador ${n}`;
     if (type === 'agent') return 'Agente';
+    if (type === 'notes') return 'Anotações';
     if (type === 'files') {
         const folder = cwd && cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
         return folder ? folder.slice(0, 60) : 'Arquivos';
@@ -91,7 +92,8 @@ class SessionManager {
      * Creates a tab. kind 'terminal' (default) gets a shell; kind 'browser' gets a page
      * in the server's Chromium (see browser-manager.js); kind 'files' is a file manager
      * (url = source: 'local' or an rclone remote, cwd = folder); kind 'agent' is the agent UI
-     * (url = agent gateway session id, cwd = project folder).
+     * (url = agent gateway session id, cwd = project folder); kind 'notes' is the notes app
+     * (data lives in the notes table, see notes-store.js).
      */
     create({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
         // Reopening a closed session = new shell/page with the same name/dir/URL/color
@@ -105,7 +107,7 @@ class SessionManager {
         }
         const wanted = kind || base.kind;
         // 'agent' = agent UI tab (url = agent gateway session id, see scripts/agents/)
-        const type = ['browser', 'files', 'agent'].includes(wanted) ? wanted : 'terminal';
+        const type = ['browser', 'files', 'agent', 'notes'].includes(wanted) ? wanted : 'terminal';
         const n = this.store.nextCounter();
         const startCwd = type !== 'browser'
             ? (typeof cwd === 'string' && cwd.trim().slice(0, 4096)) || base.cwd || null

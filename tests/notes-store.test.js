@@ -95,6 +95,8 @@ test('trash, restore, purge and emptyTrash', () => {
     assert.deepEqual(s.list().map(r => r.title).sort(), ['a', 'b']);
     s.trash(a.id);
     s.trash(b.id);
+    assert.equal(s.trashCount(), 2);
     assert.equal(s.emptyTrash(), 2);
+    assert.equal(s.trashCount(), 0);
     assert.deepEqual(s.list({ trash: true }), []);
 });

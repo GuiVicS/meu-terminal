@@ -15,6 +15,7 @@ const { TotpVerifier } = require('./scripts/totp');
 const SessionStore = require('./scripts/session-store');
 const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
+const NotesStore = require('./scripts/notes-store');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
 const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
 const { FileManager, FileError } = require('./scripts/file-manager');
@@ -355,6 +356,7 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         isDemoMode: DEMO_MODE,
         browserAvailable: browsers.available, // Chromium installed: browser tabs enabled
         filesAvailable: FILES_ENABLED, // file manager tabs
+        notesAvailable: NOTES_ENABLED, // notes tabs
         hljsVersion: HLJS_VERSION, // syntax highlighting in the agent chat (vendor/hljs/<version>/)
         version: APP_VERSION,
         cacheName: CACHE_NAME
@@ -647,6 +649,7 @@ const browsers = new BrowserManager({
 // File manager tabs: this server's folders + rclone remotes (Google Drive...) when installed.
 // Off in the public demo (it would expose the host); DEMO_FILES=true turns it on for tests.
 const FILES_ENABLED = !DEMO_MODE || process.env.DEMO_FILES === 'true';
+const NOTES_ENABLED = process.env.NOTES_ENABLED !== 'false'; // notes tabs (on by default)
 // FILES_HOME: the folder the file manager opens at (default: the shell's home)
 const files = new FileManager({ home: process.env.FILES_HOME || (DEMO_MODE ? os.homedir() : HOME_DIR), log: debugLog });
 
@@ -710,6 +713,9 @@ app.post(BASE_PATH + '/api/sessions', (req, res) => {
     }
     if (kind === 'files' && !FILES_ENABLED) {
         return res.status(503).json({ error: 'Gerenciador de arquivos desligado.' });
+    }
+    if (kind === 'notes' && !NOTES_ENABLED) {
+        return res.status(503).json({ error: 'Anotações desligadas.' });
     }
     // "localhost:5173" -> "http://localhost:5173" (same rules as the address bar)
     const pageUrl = kind === 'browser' && url ? normalizeUrl(url) : url;
@@ -1221,6 +1227,70 @@ app.delete(BASE_PATH + '/api/commands/:id', (req, res) => {
     res.json({ success: true });
 });
 
+// ---------- Notes (the notes tab; every device reads and writes the same notes) ----------
+const notes = new NotesStore(sessionStore.db);
+
+const notesRoute = handler => (req, res) => {
+    if (!NOTES_ENABLED) return res.status(404).json({ error: 'Anotações desligadas.' });
+    return handler(req, res);
+};
+// Tell the other devices (their notes tabs listen on the workspace socket) that something changed.
+const notesChanged = id => sessions.broadcast({ type: 'notes', id });
+
+app.get(BASE_PATH + '/api/notes', notesRoute((req, res) => {
+    const trash = req.query.trash === '1';
+    res.json({
+        notes: notes.list({ q: req.query.q, tag: req.query.tag, trash }),
+        tags: notes.tags(),
+        trashCount: notes.trashCount(),
+    });
+}));
+
+app.post(BASE_PATH + '/api/notes', notesRoute((req, res) => {
+    const created = notes.create(req.body || {});
+    notesChanged(created.id);
+    res.status(201).json(created);
+}));
+
+// Must come before /api/notes/:id so "trash" is not read as an id
+app.delete(BASE_PATH + '/api/notes/trash', notesRoute((req, res) => {
+    const removed = notes.emptyTrash();
+    if (removed) notesChanged(null);
+    res.json({ success: true, removed });
+}));
+
+app.get(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
+    const note = notes.get(req.params.id);
+    if (!note) return res.status(404).json({ error: 'Anotação não encontrada.' });
+    res.json(note);
+}));
+
+app.patch(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
+    const { baseUpdatedAt, ...patch } = req.body || {};
+    const base = Number.isFinite(baseUpdatedAt) ? baseUpdatedAt : undefined;
+    const result = notes.update(req.params.id, patch, base);
+    if (!result) return res.status(404).json({ error: 'Anotação não encontrada.' });
+    if (result.conflict) {
+        return res.status(409).json({ error: 'Esta anotação foi alterada em outro aparelho.', note: result.note });
+    }
+    notesChanged(req.params.id);
+    res.json(result.note);
+}));
+
+app.post(BASE_PATH + '/api/notes/:id/restore', notesRoute((req, res) => {
+    if (!notes.restore(req.params.id)) return res.status(404).json({ error: 'Anotação não está na lixeira.' });
+    notesChanged(req.params.id);
+    res.json(notes.get(req.params.id));
+}));
+
+// Live note -> trash; note already in the trash -> deleted for good
+app.delete(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
+    const id = req.params.id;
+    if (!notes.trash(id) && !notes.purge(id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
+    notesChanged(id);
+    res.json({ success: true });
+}));
+
 // Logout endpoint
 app.post(BASE_PATH + '/logout', (req, res) => {
     debugLog('Logout request received');
@@ -1310,8 +1380,8 @@ wss.on('connection', (ws, req) => {
             });
         } else if (row && row.status === 'open' && row.kind === 'agent') {
             attachAgentTab(ws, row, Math.max(0, Number(params.get('since')) || 0));
-        } else if (row && row.status === 'open' && row.kind === 'files') {
-            // File tabs use HTTP; the socket only carries workspace notices (MCP open-tab...)
+        } else if (row && row.status === 'open' && (row.kind === 'files' || row.kind === 'notes')) {
+            // File and notes tabs use HTTP; the socket only carries notices (MCP open-tab, notes changed...)
             sessions.sockets.add(ws);
             ws.on('close', () => sessions.sockets.delete(ws));
             ws.send(JSON.stringify({ type: 'ready' }));

@@ -105,6 +105,10 @@ class NotesStore {
             }));
     }
 
+    trashCount() {
+        return this.db.prepare('SELECT COUNT(*) AS n FROM notes WHERE deleted_at IS NOT NULL').get().n;
+    }
+
     /** Every tag in use (outside the trash) with its note count, for the tag filter. */
     tags() {
         return this.db.prepare(`SELECT value AS tag, COUNT(*) AS count FROM notes, json_each(notes.tags)
