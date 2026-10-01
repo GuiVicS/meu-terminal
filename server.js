@@ -21,6 +21,7 @@ const { FileManager, FileError } = require('./scripts/file-manager');
 const { LiveServers } = require('./scripts/live-server');
 const { Vibe } = require('./scripts/vibe');
 const { PushNotifier } = require('./scripts/push');
+const QRCode = require('qrcode');
 const AgentStore = require('./scripts/agents/agent-store');
 const { AgentGateway, GatewayError } = require('./scripts/agents/gateway');
 const { AgentLauncher } = require('./scripts/agents/launch');
@@ -262,8 +263,37 @@ const authMiddleware = (req, res, next) => {
     return res.redirect(BASE_PATH + '/login');
 };
 
+// ---------- Cross-site protection (CSRF / cross-site WebSocket) ----------
+// Independent of ALLOWED_ORIGINS (often "*"): anything that changes state, and every
+// WebSocket, must come from this app's own pages. Browsers always send Origin on those
+// requests; calls without it (curl, agents on the server) are not browser attacks.
+// Needed because "same-site" is wider than "same-origin": other apps under the same
+// domain (e.g. *.easypanel.host, other subdomains) would otherwise get the login cookie.
+const EXTRA_ORIGINS = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim())
+    .filter(o => o && o !== '*').map(o => { try { return new URL(o).origin; } catch { return null; } }).filter(Boolean));
+function isSameOrigin(req) {
+    const origin = req.headers.origin;
+    if (origin === undefined) return true;
+    let parsed;
+    try {
+        parsed = new URL(origin); // "null" (sandboxed pages, file://) fails here
+    } catch {
+        return false;
+    }
+    const hosts = [req.headers.host, ...String(req.headers['x-forwarded-host'] || '').split(',')]
+        .map(h => String(h || '').trim().toLowerCase()).filter(Boolean);
+    return hosts.includes(parsed.host.toLowerCase()) || EXTRA_ORIGINS.has(parsed.origin);
+}
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 // Global middleware for origin validation and authentication
 app.use(BASE_PATH, (req, res, next) => {
+    // /mcp and /api/agent-launch: server-local + token (and /mcp refuses any Origin)
+    if (!SAFE_METHODS.has(req.method) && req.path !== '/mcp' && req.path !== '/api/agent-launch' && !isSameOrigin(req)) {
+        console.warn('Blocked cross-site request:', req.method, req.path, 'from', req.headers.origin);
+        return res.status(403).json({ error: 'Origem não permitida.' });
+    }
+
     // List of paths that should be publicly accessible
     const publicPaths = [
         '/login',
@@ -429,6 +459,60 @@ app.post(BASE_PATH + '/login', (req, res) => {
         const attemptsLeft = Math.max(0, MAX_ATTEMPTS - loginAttempts.get(ip).count);
         res.status(401).json({ error: 'Email ou senha incorretos.', attemptsLeft });
     }, crypto.randomInt(50, 150));
+});
+
+// ---------- Pairing another device by QR code ----------
+// A logged-in device shows a QR code; the phone scans it and is logged in without typing
+// the password. Codes are random, single-use and expire in 2 minutes. 2FA isn't asked
+// again: the device that created the code already passed it.
+const PAIR_TTL_MS = 2 * 60 * 1000;
+const pairCodes = new Map(); // code -> expiresAt
+
+function cookieOptions(req) {
+    return {
+        httpOnly: true,
+        secure: req.secure || (BASE_URL.startsWith('https') && NODE_ENV === 'production'),
+        sameSite: 'strict',
+        maxAge: MAX_SESSION_AGE,
+    };
+}
+
+/** Logs this browser in (same cookie as a password login). */
+function grantLogin(req, res) {
+    req.session.authenticated = true;
+    if (AUTH_MODE === 'email') res.cookie(AUTH_COOKIE, createAuthToken(), cookieOptions(req));
+    else if (PIN) res.cookie(`${projectName}_PIN`, PIN, cookieOptions(req));
+}
+
+app.post(BASE_PATH + '/api/pair', async (req, res) => {
+    if (!isAuthRequired) return res.status(400).json({ error: 'Sem login configurado: o app já abre direto.' });
+    const now = Date.now();
+    pairCodes.forEach((expiresAt, code) => { if (expiresAt < now) pairCodes.delete(code); });
+    if (pairCodes.size > 20) return res.status(429).json({ error: 'Códigos demais ativos. Espere 2 minutos.' });
+    const code = crypto.randomBytes(24).toString('base64url');
+    pairCodes.set(code, now + PAIR_TTL_MS);
+    // The address this device is using (the phone must reach the same one)
+    const base = (req.headers.origin && isSameOrigin(req) ? req.headers.origin : BASE_URL).replace(/\/+$/, '');
+    const url = `${base}${BASE_PATH}/login?pair=${code}`;
+    const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
+    res.json({ url, svg, expiresIn: PAIR_TTL_MS / 1000 });
+});
+
+// The phone that scanned the QR code redeems it (public route, rate-limited like the login)
+app.post(BASE_PATH + '/login/pair', (req, res) => {
+    const ip = req.ip;
+    if (isLockedOut(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente mais tarde.' });
+    const code = String((req.body || {}).code || '');
+    const expiresAt = pairCodes.get(code);
+    if (!expiresAt || expiresAt < Date.now()) {
+        recordAttempt(ip);
+        return res.status(401).json({ error: 'Código inválido ou expirado. Gere um novo QR code.' });
+    }
+    pairCodes.delete(code); // single use
+    resetAttempts(ip);
+    grantLogin(req, res);
+    debugLog('Device paired by QR code');
+    res.json({ success: true, redirect: BASE_PATH + '/' });
 });
 
 app.get(BASE_PATH + '/pin-length', (req, res) => {
@@ -702,13 +786,20 @@ const agentLauncher = new AgentLauncher({
     commandExists,
     log: debugLog,
 });
-if (AGENT_UI_ENABLED) {
+// The agent UI runs code on this server: it needs a login (AUTH_EMAIL/AUTH_PASSWORD or PIN)
+if (AGENT_UI_ENABLED && isAuthRequired) {
     try {
         writeShims(AGENT_SHIM_DIR, agentGateway.listAgents().filter(a => !a.terminalOnly).map(a => a.id));
     } catch (e) {
         console.error('Could not write agent shims:', e.message);
     }
 }
+
+// Without a login anyone reaching the app could run agents: refuse (shims fall back to the terminal)
+app.use(BASE_PATH + '/api', (req, res, next) => {
+    if (isAuthRequired || !/^\/agent/.test(req.path) || req.path === '/agents') return next();
+    res.status(403).json({ error: 'O modo UI de agentes precisa de login: defina AUTH_EMAIL e AUTH_PASSWORD.' });
+});
 
 /** Runs an agent route: GatewayError -> its status; anything else -> 500. */
 function agentRoute(handler) {
@@ -749,7 +840,8 @@ app.put(BASE_PATH + '/api/agent-prefs', (req, res) => res.json(agentLauncher.set
 
 app.get(BASE_PATH + '/api/agents', (req, res) => {
     res.json({
-        enabled: AGENT_UI_ENABLED,
+        enabled: AGENT_UI_ENABLED && isAuthRequired,
+        needsLogin: !isAuthRequired,
         agents: agentGateway.listAgents().map(a => ({
             ...a,
             installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].command),
@@ -1131,7 +1223,8 @@ const wss = new WebSocketServer({
         debugLog('Verifying WebSocket connection from:', info.req.headers.origin);
         
         const origin = info.req.headers.origin;
-        const isOriginValid = validateOrigin(origin);
+        // Same origin as the app (cross-site WebSocket hijacking) and the configured list
+        const isOriginValid = isSameOrigin(info.req) && validateOrigin(origin);
         if (isOriginValid) callback(true); // allow the connection
         else {
             console.warn("Blocked connection from origin:", {origin});

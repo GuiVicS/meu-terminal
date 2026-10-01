@@ -2005,3 +2005,10 @@ audio.fm-media { width: min(520px, 90%); }
 .agent-launch-info dd { margin: 0; overflow-wrap: anywhere; }
 .agent-launch-timer { margin: 10px 0 0; font-size: 12px; color: var(--text-3); }
 .agent-launch-dialog .prompt-actions .btn { min-height: 44px; min-width: 96px; }
+
+/* Pairing by QR code (settings) */
+.pair-box { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 12px 0; }
+.pair-qr { width: min(240px, 100%); padding: 12px; background: #fff; border: 2px solid var(--shadow-color); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+.pair-qr:empty { display: none; }
+.pair-qr svg { display: block; width: 100%; height: auto; }
+

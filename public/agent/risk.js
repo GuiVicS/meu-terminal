@@ -55,3 +55,33 @@ export function assessRisk(request, cwd) {
     }
     return [...new Set(reasons)];
 }
+
+// ---------- secrets ----------
+
+const MASK = value => `${value.slice(0, 4)}…••••••`;
+
+const SECRET_PATTERNS = [
+    // PEM private keys: the whole body goes
+    [/(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----)/g, (m, a, b) => `${a}\n••••••\n${b}`],
+    // Known token formats (OpenAI/Anthropic, GitHub, AWS, Slack, Google, JWT)
+    [/\b(sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|(?:AKIA|ASIA)[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,})\b/g, m => MASK(m)],
+    // Authorization: Bearer <token>
+    [/(Bearer\s+)([A-Za-z0-9._~+/-]{16,}=*)/gi, (m, a, v) => a + MASK(v)],
+    // NAME_KEY=value / "password": "value" / token: value
+    [/((?:api[_-]?key|secret|token|passw(?:or)?d|pwd|access[_-]?key|private[_-]?key|client[_-]?secret|auth)[A-Za-z0-9_]*["']?\s*[=:]\s*["']?)([^\s"'&,;]{6,})/gi, (m, a, v) => a + MASK(v)],
+    // https://user:password@host
+    [/(\/\/[^/\s:@]+:)([^/\s@]{3,})(@)/g, (m, a, v, b) => `${a}••••••${b}`],
+];
+
+/**
+ * Hides secrets (API keys, tokens, passwords, private keys) in commands and outputs shown
+ * in the agent UI: screens get shared and photographed. Keeps the first characters so the
+ * user still recognizes which key it is.
+ * @param {string} text
+ */
+export function maskSecrets(text) {
+    if (typeof text !== 'string' || !text) return text;
+    let out = text;
+    for (const [pattern, replace] of SECRET_PATTERNS) out = out.replace(pattern, replace);
+    return out;
+}

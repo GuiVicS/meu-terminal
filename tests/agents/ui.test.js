@@ -91,3 +91,24 @@ test('risk: dangerous commands and writes outside the project are flagged', asyn
     assert.match(assessRisk({ kind: 'edit', input: { file_path: '/root/projetos/loja/.env' } }, cwd).join(), /credenciais/);
     assert.match(assessRisk({ kind: 'write', input: { file_path: 'C:\\Users\\x\\proj2\\a.txt' } }, 'C:\\Users\\x\\proj').join(), /fora da pasta/, 'sibling folder with the same prefix is outside');
 });
+
+test('secrets: keys, tokens and passwords are masked; normal text is kept', async () => {
+    const { maskSecrets } = await load('risk.js');
+    const cases = [
+        ['export OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwx', 'abcdefghijklmnopqrstuvwx'],
+        ['curl -H "Authorization: Bearer abcdef0123456789abcdef" https://api.x', 'abcdef0123456789abcdef'],
+        ['token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef1234'],
+        ['aws AKIAABCDEFGHIJKLMNOP', 'ABCDEFGHIJKLMNOP'],
+        ['{"password": "hunter2hunter2"}', 'hunter2hunter2'],
+        ['git clone https://user:s3cretpass@github.com/x/y.git', 's3cretpass'],
+        ['MEUTERMINAL_MCP_TOKEN=Zx9vQ2mL8kP4rT6wY1uE', 'Zx9vQ2mL8kP4rT6wY1uE'],
+        ['-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQAB\n-----END OPENSSH PRIVATE KEY-----', 'AAAAB3NzaC1yc2EAAAADAQAB'],
+    ];
+    for (const [text, secret] of cases) {
+        const masked = maskSecrets(text);
+        assert.ok(!masked.includes(secret), `não escondeu: ${text} -> ${masked}`);
+    }
+    const plain = 'npm run dev -- --port 5173 && git status';
+    assert.equal(maskSecrets(plain), plain);
+    assert.equal(maskSecrets('echo $MEUTERMINAL_MCP_TOKEN'), 'echo $MEUTERMINAL_MCP_TOKEN');
+});

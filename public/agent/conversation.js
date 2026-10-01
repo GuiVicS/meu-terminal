@@ -7,7 +7,7 @@
 import { icon } from '../ui/icons.js';
 import { renderMarkdown, esc } from './markdown.js';
 import { renderDiff } from './diff.js';
-import { assessRisk } from './risk.js';
+import { assessRisk, maskSecrets } from './risk.js';
 
 const TOOL_META = {
     bash: { icon: 'terminal', verb: 'Terminal' },
@@ -241,7 +241,7 @@ export default class Conversation {
     paintTool(tool) {
         const d = tool.data;
         const el = tool.el;
-        el.querySelector('.ag-tool-title').textContent = this.toolTitle(d);
+        el.querySelector('.ag-tool-title').textContent = maskSecrets(this.toolTitle(d));
         const state = el.querySelector('.ag-tool-state');
         const status = d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled' ? d.status : 'running';
         el.dataset.status = status;
@@ -252,9 +252,9 @@ export default class Conversation {
         const parts = [];
         let stats = '';
         if (d.kind === 'bash' && d.input && d.input.command) {
-            parts.push(`<div class="ag-cmd"><span>$</span> ${esc(d.input.command)}</div>`);
+            parts.push(`<div class="ag-cmd"><span>$</span> ${esc(maskSecrets(d.input.command))}</div>`);
         } else if (d.kind === 'mcp' || d.kind === 'other' || d.kind === 'fetch') {
-            if (d.input && Object.keys(d.input).length) parts.push(`<pre class="ag-input">${esc(JSON.stringify(d.input, null, 2))}</pre>`);
+            if (d.input && Object.keys(d.input).length) parts.push(`<pre class="ag-input">${esc(maskSecrets(JSON.stringify(d.input, null, 2)))}</pre>`);
         } else if (d.kind === 'task') {
             const input = d.input || {};
             if (input.prompt) parts.push(`<div class="ag-sub-prompt">${esc(input.prompt)}</div>`);
@@ -272,7 +272,7 @@ export default class Conversation {
         }
         if (d.output && !(d.kind === 'task' && d.status !== 'completed' && d.status !== 'failed')) {
             const long = d.output.length > OUTPUT_PREVIEW;
-            const text = long ? d.output.slice(0, OUTPUT_PREVIEW) : d.output;
+            const text = maskSecrets(long ? d.output.slice(0, OUTPUT_PREVIEW) : d.output);
             parts.push(`<pre class="ag-output${d.kind === 'task' ? ' md' : ''}">${esc(text)}</pre>`);
             if (long) parts.push(`<button type="button" class="ag-link" data-show-all="${esc(d.toolId)}">Ver tudo (${d.output.length.toLocaleString('pt-BR')} caracteres)</button>`);
             if (d.truncated) parts.push('<div class="ag-muted">Saída cortada pelo servidor (muito longa).</div>');
@@ -326,7 +326,7 @@ export default class Conversation {
         const risks = assessRisk(d, this.cwd());
         const input = d.input || {};
         const detail = input.command
-            ? `<div class="ag-cmd"><span>$</span> ${esc(input.command)}</div>`
+            ? `<div class="ag-cmd"><span>$</span> ${esc(maskSecrets(input.command))}</div>`
             : d.diffs && d.diffs.length ? d.diffs.map(x => renderDiff(x).html).join('') : '';
         const el = this.add(`
             <div class="ag-perm-head">${icon('shield', 16)} <span>${esc(d.title)}</span></div>
@@ -372,7 +372,7 @@ export default class Conversation {
         const all = e.target.closest('[data-show-all]');
         if (all) {
             const tool = this.tools.get(all.dataset.showAll);
-            if (tool) all.previousElementSibling.textContent = tool.data.output;
+            if (tool) all.previousElementSibling.textContent = maskSecrets(tool.data.output);
             all.remove();
             return;
         }
