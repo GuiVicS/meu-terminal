@@ -369,6 +369,54 @@ export default class TerminalManager {
         ], { ...pos, label: `Dividir tela com ${s.name}` });
     }
 
+    /** Folder of the active tab (terminal cwd, files folder, agent folder), for new agent conversations. */
+    currentFolder() {
+        const s = this.active;
+        if (!s) return '~';
+        if (s.kind === 'files') return s.source === 'local' && s.path ? s.path : '~';
+        if (s.kind === 'browser') return this.hooks.suggestFolder(s);
+        return s.cwd || s.startCwd || '~';
+    }
+
+    /** "Nova conversa com agente": pick an agent; the conversation opens in the active tab's folder. */
+    async openAgentMenu(anchor) {
+        let info;
+        try {
+            const r = await fetch(joinPath('api/agents'), { credentials: 'same-origin', cache: 'no-store' });
+            info = await r.json();
+        } catch {
+            toast('Não foi possível listar os agentes.', { tone: 'error' });
+            return;
+        }
+        const folder = this.currentFolder();
+        const agents = (info.agents || []).filter(a => !a.terminalOnly);
+        showMenu(agents.length ? agents.map(a => ({
+            label: a.label,
+            icon: 'bot',
+            hint: a.installed ? '' : 'não instalado',
+            disabled: !a.installed,
+            run: () => this.createAgent(a.id, folder),
+        })) : [{ label: 'Nenhum agente com modo UI', icon: 'info', disabled: true }],
+        { anchor, label: `Nova conversa em ${folder}` });
+    }
+
+    async createAgent(agent, cwd) {
+        try {
+            const r = await fetch(joinPath('api/agent-sessions'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agent, cwd, afterId: this.activeId || undefined }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.error || `Erro ${r.status}`);
+            await this.reconcile();
+            if (this.sessions.has(data.tab.id)) this.activate(data.tab.id, { focus: true });
+        } catch (e) {
+            toast(`Não foi possível abrir o agente: ${e.message}`, { tone: 'error', duration: 6000 });
+        }
+    }
+
     /** Tells the server which terminal the user works in (agents open things beside it). */
     reportFocus(id) {
         clearTimeout(this.focusTimer);

@@ -263,6 +263,17 @@ export function createSettingsDialog(settings, getSession, commands) {
                 <button type="button" class="btn btn-ghost" data-push-test hidden>Enviar teste</button>
             </div>
         </section>
+        <section class="settings-section agent-ui-section">
+            <h3 class="section-label">Modo UI dos agentes</h3>
+            <p class="setting-help">Ao digitar <code class="mono">claude</code>, <code class="mono">codex</code> ou
+                <code class="mono">opencode</code> num terminal, o MeuTerminal pergunta se você quer abrir o agente
+                numa aba com chat, ferramentas, diffs e pedidos de permissão.</p>
+            <label class="setting">
+                <span class="setting-text">Perguntar ao abrir agentes</span>
+                <input type="checkbox" class="switch" data-agent-intercept>
+            </label>
+            <div data-agent-prefs></div>
+        </section>
         <section class="settings-section mcp-section">
             <h3 class="section-label">Agentes (MCP)</h3>
             <p class="setting-help mcp-help">Agentes rodando nos terminais (Claude Code e outros com MCP) podem
@@ -385,12 +396,57 @@ export function createSettingsDialog(settings, getSession, commands) {
         }
     });
 
+    // Agent UI preferences (server side: the same on every device)
+    const agentIntercept = body.querySelector('[data-agent-intercept]');
+    const agentPrefs = body.querySelector('[data-agent-prefs]');
+    const agentApi = (method, route, data) => {
+        const base = (window.appConfig?.basePath || '').replace(/\/+$/, '');
+        return fetch(`${base}/api/${route}`, {
+            method,
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: data ? { 'Content-Type': 'application/json' } : undefined,
+            body: data ? JSON.stringify(data) : undefined,
+        }).then(r => (r.ok ? r.json() : Promise.reject(new Error(`Erro ${r.status}`))));
+    };
+    const renderAgentPrefs = (agents, prefs) => {
+        agentIntercept.checked = prefs.intercept;
+        agentPrefs.innerHTML = agents.filter(a => !a.terminalOnly).map(a => `
+            <label class="setting">
+                <span class="setting-text">${a.label}
+                    <span class="setting-help">${a.installed ? '' : 'Adaptador não instalado: abre sempre no terminal.'}</span></span>
+                <select data-agent-pref="${a.id}"${prefs.intercept ? '' : ' disabled'}>
+                    <option value="ask">Perguntar</option>
+                    <option value="ui">Sempre no modo UI</option>
+                    <option value="terminal">Sempre no terminal</option>
+                </select>
+            </label>`).join('');
+        agentPrefs.querySelectorAll('[data-agent-pref]').forEach(sel => { sel.value = prefs.agents[sel.dataset.agentPref] || 'ask'; });
+    };
+    let agentList = [];
+    const loadAgentPrefs = () => Promise.all([agentApi('GET', 'agents'), agentApi('GET', 'agent-prefs')])
+        .then(([info, prefs]) => {
+            agentList = info.agents;
+            body.querySelector('.agent-ui-section').hidden = !info.enabled;
+            renderAgentPrefs(agentList, prefs);
+        })
+        .catch(() => { body.querySelector('.agent-ui-section').hidden = true; });
+    const saveAgentPrefs = data => agentApi('PUT', 'agent-prefs', data)
+        .then(prefs => renderAgentPrefs(agentList, prefs))
+        .catch(e => toast(`Não foi possível salvar: ${e.message}`, { tone: 'error' }));
+    agentIntercept.addEventListener('change', () => saveAgentPrefs({ intercept: agentIntercept.checked }));
+    agentPrefs.addEventListener('change', (e) => {
+        const sel = e.target.closest('[data-agent-pref]');
+        if (sel) saveAgentPrefs({ agents: { [sel.dataset.agentPref]: sel.value } });
+    });
+
     return {
         open() {
             sync();
             commandsAdmin.refresh();
             loadMcpInfo();
             loadPush();
+            loadAgentPrefs();
             dialog.showModal();
         },
     };

@@ -373,19 +373,39 @@ class AgentGateway extends EventEmitter {
      * Sends a user message and resolves with the stop reason when the turn ends.
      * One turn at a time per session (the UI disables the send button meanwhile).
      */
-    async prompt(sessionId, text) {
+    /**
+     * @param {string} sessionId
+     * @param {string} text
+     * @param {{ images?: Array<{ mimeType: string, data: string }> }} [opts] - base64 images (pasted/attached)
+     */
+    async prompt(sessionId, text, { images = [] } = {}) {
         const runtime = this.requireRuntime(sessionId);
-        if (typeof text !== 'string' || !text.trim()) throw new GatewayError('Mensagem vazia.');
+        if (typeof text !== 'string') text = '';
+        if (!text.trim() && !images.length) throw new GatewayError('Mensagem vazia.');
         if (runtime.prompting) throw new GatewayError('O agente ainda está respondendo.', 409);
+        if (images.length && !runtime.capabilities.images) throw new GatewayError('Este agente não aceita imagens.');
+        for (const image of images) {
+            if (!/^image\/(png|jpeg|gif|webp)$/.test(image && image.mimeType) || typeof image.data !== 'string') {
+                throw new GatewayError('Imagem inválida (use PNG, JPEG, GIF ou WebP).');
+            }
+        }
         runtime.prompting = true;
         const row = this.store.getSession(sessionId);
-        if (!row.title) this.store.updateSession(sessionId, { title: text.trim().replace(/\s+/g, ' ').slice(0, 60) });
-        this.emitEvent(sessionId, 'message.user', { text });
+        if (!row.title && text.trim()) this.store.updateSession(sessionId, { title: text.trim().replace(/\s+/g, ' ').slice(0, 60) });
+        // The event log keeps only the images' type and size (not the bytes)
+        this.emitEvent(sessionId, 'message.user', {
+            text,
+            ...(images.length ? { images: images.map(i => ({ mimeType: i.mimeType, bytes: Math.floor(i.data.length * 3 / 4) })) } : {}),
+        });
         this.setState(sessionId, 'thinking');
         try {
+            const prompt = [
+                ...images.map(i => ({ type: 'image', mimeType: i.mimeType, data: i.data })),
+                ...(text.trim() ? [{ type: 'text', text }] : []),
+            ];
             const result = await runtime.client.request('session/prompt', {
                 sessionId: runtime.acpSessionId,
-                prompt: [{ type: 'text', text }],
+                prompt,
             }, { timeoutMs: 0 });
             const stopReason = (result && result.stopReason) || 'end_turn';
             this.emitEvent(sessionId, 'message.assistant.done', { stopReason });

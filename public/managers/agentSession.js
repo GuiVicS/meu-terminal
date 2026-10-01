@@ -1,35 +1,46 @@
 /**
  * agentSession.js
  * Agent UI tab (kind 'agent'): a conversation with a coding agent (Claude, OpenCode, Codex)
- * through the server's agent gateway. PROVISIONAL view for phase 3; the full UI is phase 4.
+ * through the server's agent gateway. Chat + tool cards (public/agent/conversation.js), message
+ * box (composer.js) and a side panel with plan, subagents, changed files and usage (sidepanel.js).
  * Same interface as TerminalSession, so tabs, status bar and menus work with it.
  */
 import { STATE, SESSION_COLORS } from './session.js';
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
+import { showMenu } from '../ui/contextMenu.js';
+import Conversation from '../agent/conversation.js';
+import Composer from '../agent/composer.js';
+import SidePanel from '../agent/sidepanel.js';
+import { esc } from '../agent/markdown.js';
 
-const MAX_RECONNECT_ATTEMPTS = 6;
+const MAX_RECONNECT_ATTEMPTS = 8;
 const CLOSE_SESSION_GONE = 4404;
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
-const coarse = () => window.matchMedia('(pointer: coarse)').matches;
+const wide = () => window.matchMedia('(min-width: 1100px)').matches;
 
-const STATUS_LABEL = {
-    starting: 'iniciando', idle: 'pronto', thinking: 'trabalhando', waiting_permission: 'aguardando permissão',
-    error: 'erro', stopped: 'parado', closed: 'encerrado',
+const STATUS = {
+    starting: { label: 'Iniciando', tone: 'busy' },
+    idle: { label: 'Pronto', tone: 'ok' },
+    thinking: { label: 'Trabalhando', tone: 'busy' },
+    waiting_permission: { label: 'Aguardando você', tone: 'warn' },
+    error: { label: 'Erro', tone: 'bad' },
+    stopped: { label: 'Parado', tone: 'bad' },
+    closed: { label: 'Encerrado', tone: 'bad' },
 };
-const TOOL_ICON = { bash: 'terminal', read: 'fileText', edit: 'edit', write: 'filePlus', search: 'search', fetch: 'globe', mcp: 'bolt', task: 'bot', think: 'info', other: 'bolt' };
-
-function esc(text) {
-    return String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
 
 async function api(method, route, body) {
     const response = await fetch(`${basePath()}/api/${route}`, {
         method,
         credentials: 'same-origin',
+        cache: 'no-store',
         headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
         body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+    if (response.redirected && /\/login$/.test(new URL(response.url).pathname)) {
+        window.location.href = `${basePath()}/login`;
+        throw new Error('Sua sessão expirou. Entre de novo.');
+    }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Erro ${response.status}`);
     return data;
@@ -64,15 +75,16 @@ export default class AgentSession {
         this.addons = null;
         this.hasActivity = false;
 
-        this.session = null;     // agent session snapshot from the server
-        this.lastSeq = 0;        // replay point for reconnects
-        this.tools = new Map();  // toolId -> card element
-        this.current = null;     // assistant message element receiving deltas
+        this.session = null;      // agent session snapshot (capabilities, mode, status...)
+        this.status = 'starting';
+        this.lastSeq = 0;         // replay point for reconnects
+        this.pending = new Map(); // permissionId -> permission.request data
         this.active = false;
         this.ws = null;
         this.reconnectAttempts = 0;
         this.disposed = false;
         this.timers = new Set();
+        this.panelOpen = null;    // null = automatic (open on wide screens)
 
         this.panel = document.createElement('div');
         this.panel.className = 'terminal-panel agent-panel';
@@ -90,44 +102,85 @@ export default class AgentSession {
     mount(parent) {
         parent.appendChild(this.panel);
         this.panel.innerHTML = `
-            <div class="agent-bar">
-                <span class="agent-title">${icon('bot', 16)} <b></b></span>
-                <span class="agent-status"></span>
-                <select class="agent-mode" aria-label="Modo" hidden></select>
-                <select class="agent-model" aria-label="Modelo" hidden></select>
-                <button type="button" class="btn agent-resume" hidden>Retomar</button>
-            </div>
-            <div class="agent-log" role="log" aria-live="polite" tabindex="0"></div>
-            <form class="agent-composer" autocomplete="off">
-                <textarea rows="1" placeholder="Mensagem para o agente…" aria-label="Mensagem" enterkeyhint="send"></textarea>
-                <button type="button" class="icon-btn agent-stop" aria-label="Parar" hidden>${icon('square', 18)}</button>
-                <button type="submit" class="icon-btn agent-send" aria-label="Enviar">${icon('arrowUp', 18)}</button>
-            </form>`;
+            <header class="ag-head">
+                <span class="ag-head-icon">${icon('bot', 18)}</span>
+                <div class="ag-head-text">
+                    <div class="ag-head-title"></div>
+                    <div class="ag-head-sub"><span class="ag-agent"></span> · <span class="ag-cwd mono"></span></div>
+                </div>
+                <span class="ag-status" role="status"></span>
+                <button type="button" class="icon-btn" data-act="history" aria-label="Conversas">${icon('history', 18)}</button>
+                <button type="button" class="icon-btn" data-act="terminal" aria-label="Abrir terminal nesta pasta">${icon('terminal', 18)}</button>
+                <button type="button" class="icon-btn" data-act="files" aria-label="Abrir os arquivos da pasta">${icon('folder', 18)}</button>
+                <button type="button" class="icon-btn" data-act="panel" aria-label="Painel do agente" aria-expanded="false">${icon('panelLeft', 18)}</button>
+            </header>
+            <div class="ag-banner" role="status" hidden></div>
+            <div class="ag-body">
+                <div class="ag-main">
+                    <div class="ag-log" role="log" aria-label="Conversa com o agente" tabindex="0">
+                        <div class="ag-empty">${icon('bot', 28)}<p>Conectando ao agente…</p></div>
+                    </div>
+                    <button type="button" class="ag-jump" hidden aria-label="Ir para o fim">${icon('chevronDown', 18)}</button>
+                    <div class="ag-pending" hidden></div>
+                    <div class="ag-composer"></div>
+                </div>
+                <aside class="ag-side" aria-label="Painel do agente"></aside>
+            </div>`;
         const q = sel => this.panel.querySelector(sel);
         this.el = {
-            title: q('.agent-title b'), status: q('.agent-status'), mode: q('.agent-mode'), model: q('.agent-model'),
-            resume: q('.agent-resume'), log: q('.agent-log'), form: q('.agent-composer'),
-            input: q('.agent-composer textarea'), stop: q('.agent-stop'), send: q('.agent-send'),
+            title: q('.ag-head-title'), agent: q('.ag-agent'), cwd: q('.ag-cwd'), status: q('.ag-status'),
+            banner: q('.ag-banner'), body: q('.ag-body'), log: q('.ag-log'), jump: q('.ag-jump'),
+            pending: q('.ag-pending'), side: q('.ag-side'), panelBtn: q('[data-act="panel"]'),
         };
-        this.el.form.addEventListener('submit', e => {
-            e.preventDefault();
-            this.sendPrompt();
+        this.conversation = new Conversation(this.el.log, {
+            cwd: () => this.cwd,
+            onPermission: (permissionId, optionId) => this.answerPermission(permissionId, optionId),
+            onOpenFile: path => this.openFile(path),
         });
-        this.el.input.addEventListener('keydown', e => {
-            // Enter sends on desktop; on phones Enter is a new line (send button instead)
-            if (e.key === 'Enter' && !e.shiftKey && !coarse()) {
-                e.preventDefault();
-                this.sendPrompt();
-            }
+        this.composer = new Composer(q('.ag-composer'), {
+            cwd: () => this.cwd,
+            onSend: msg => this.sendPrompt(msg),
+            onCancel: () => this.action('cancel').catch(e => toast(e.message, { tone: 'error' })),
+            onMode: modeId => this.action('mode', { modeId }).then(s => this.applySession(s)).catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
+            onConfig: (configId, value) => this.action('config', { configId, value }).then(s => this.applySession(s)).catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
+            searchFiles: query => this.searchFiles(query),
         });
-        this.el.stop.addEventListener('click', () => this.action('cancel').catch(e => toast(e.message, { tone: 'error' })));
-        this.el.resume.addEventListener('click', () => this.action('resume').catch(e => toast(e.message, { tone: 'error' })));
-        this.el.mode.addEventListener('change', () => this.action('mode', { modeId: this.el.mode.value }).catch(e => toast(e.message, { tone: 'error' })));
-        this.el.model.addEventListener('change', () => {
-            const option = this.modelOption();
-            if (option) this.action('config', { configId: option.id, value: this.el.model.value }).catch(e => toast(e.message, { tone: 'error' }));
+        this.side = new SidePanel(this.el.side, {
+            cwd: () => this.cwd,
+            onOpenFile: path => this.openFile(path),
+            onCommand: name => this.composer.insert(`/${name} `),
+            onShowTool: toolId => this.showTool(toolId),
         });
-        this.el.log.addEventListener('click', e => this.onLogClick(e));
+        this.side.render();
+
+        this.panel.querySelector('.ag-head').addEventListener('click', e => {
+            const btn = e.target.closest('[data-act]');
+            if (!btn) return;
+            if (btn.dataset.act === 'panel') this.togglePanel();
+            else if (btn.dataset.act === 'terminal') this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id });
+            else if (btn.dataset.act === 'files') this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id });
+            else if (btn.dataset.act === 'history') this.openHistory(btn);
+        });
+        this.el.banner.addEventListener('click', e => {
+            if (e.target.closest('[data-resume]')) this.resume();
+            if (e.target.closest('[data-reconnect]')) this.reconnectIfDropped();
+        });
+        this.el.pending.addEventListener('click', e => {
+            const b = e.target.closest('[data-option]');
+            if (b) this.answerPermission(b.dataset.perm, b.dataset.option);
+            else if (e.target.closest('[data-goto]')) this.el.log.querySelector('.ag-perm:not(.answered)')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+        this.el.log.addEventListener('scroll', () => {
+            this.el.jump.hidden = this.conversation.nearBottom();
+        }, { passive: true });
+        this.el.jump.addEventListener('click', () => {
+            this.el.log.scrollTop = this.el.log.scrollHeight;
+        });
+        this.mediaQuery = window.matchMedia('(min-width: 1100px)');
+        this.onMedia = () => this.applyPanel();
+        this.mediaQuery.addEventListener('change', this.onMedia);
+        this.applyPanel();
+        this.renderHead();
         this.connect();
     }
 
@@ -139,7 +192,7 @@ export default class AgentSession {
     }
 
     focus() {
-        if (!coarse()) this.el?.input.focus({ preventScroll: true });
+        this.composer?.focus();
     }
 
     applySettings() { /* uses the app theme */ }
@@ -154,11 +207,29 @@ export default class AgentSession {
         return this.cwd || 'agente';
     }
 
+    // ---------- side panel ----------
+
+    togglePanel() {
+        this.panelOpen = !this.isPanelOpen();
+        this.applyPanel();
+    }
+
+    isPanelOpen() {
+        return this.panelOpen === null ? wide() : this.panelOpen;
+    }
+
+    applyPanel() {
+        const open = this.isPanelOpen();
+        this.el.body.classList.toggle('side-open', open);
+        this.el.panelBtn.setAttribute('aria-expanded', String(open));
+    }
+
     // ---------- connection ----------
 
     connect() {
         if (this.disposed) return;
         this.setState(this.reconnectAttempts > 0 ? STATE.RECONNECTING : STATE.CONNECTING);
+        this.renderBanner();
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const query = new URLSearchParams({ session: this.id, since: String(this.lastSeq) });
         const ws = new WebSocket(`${protocol}//${window.location.host}${basePath()}/?${query}`);
@@ -168,8 +239,9 @@ export default class AgentSession {
             clearTimeout(timeout);
             this.reconnectAttempts = 0;
             this.setState(STATE.CONNECTED);
+            this.renderBanner();
         };
-        ws.onmessage = event => {
+        ws.onmessage = (event) => {
             let m;
             try {
                 m = JSON.parse(event.data);
@@ -178,12 +250,13 @@ export default class AgentSession {
             }
             if (m.type === 'agent-session') this.applySession(m.session);
             else if (m.type === 'agent-event') this.applyEvent(m.event);
-            else if (m.type === 'agent-missing') this.note('Esta sessão de agente não existe mais.', 'error');
+            else if (m.type === 'ready') this.onReady();
+            else if (m.type === 'agent-missing') this.showMissing();
             else if (m.type === 'workspace') this.hooks.onWorkspaceChanged();
             else if (m.nonce) this.hooks.onServerMessage(m); // app-wide notices (open-tab, agent-launch...)
         };
         ws.onerror = () => ws.close();
-        ws.onclose = event => {
+        ws.onclose = (event) => {
             clearTimeout(timeout);
             if (this.ws !== ws || this.disposed) return;
             if (event.code === 1008) {
@@ -196,12 +269,13 @@ export default class AgentSession {
                 return;
             }
             if (this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                const delay = 1000 * Math.pow(2, this.reconnectAttempts++);
+                const delay = Math.min(15000, 1000 * Math.pow(2, this.reconnectAttempts++));
                 this.setState(STATE.RECONNECTING);
                 this.later(() => this.connect(), delay);
             } else {
                 this.setState(STATE.DISCONNECTED);
             }
+            this.renderBanner();
         };
     }
 
@@ -218,202 +292,231 @@ export default class AgentSession {
         this.hooks.onStateChange(this);
     }
 
-    action(name, body = {}) {
-        return api('POST', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/${name}`, body);
+    onReady() {
+        const empty = this.el.log.querySelector('.ag-empty');
+        if (empty && this.lastSeq > 0) empty.remove();
+        else if (empty) empty.querySelector('p').textContent = 'Escreva uma mensagem para começar.';
+        this.el.log.scrollTop = this.el.log.scrollHeight;
     }
 
-    async sendPrompt() {
-        const text = this.el.input.value.trim();
-        if (!text) return;
-        this.el.input.value = '';
-        try {
-            await this.action('prompt', { text });
-        } catch (e) {
-            this.el.input.value = text;
-            toast(e.message, { tone: 'error' });
-        }
+    showMissing() {
+        this.el.log.innerHTML = `<div class="ag-empty">${icon('x', 28)}<p>Esta conversa não existe mais no servidor.</p></div>`;
+        this.composer.setBusy(false, 'stopped');
     }
 
-    // ---------- rendering ----------
+    // ---------- session & events ----------
 
     applySession(session) {
         this.session = session;
         this.cwd = session.cwd;
-        this.el.title.textContent = session.agentLabel;
-        this.renderStatus(session.status);
-        this.renderSelectors();
-    }
-
-    modelOption() {
-        return (this.session?.capabilities?.configOptions || []).find(o => o.category === 'model' && o.type === 'select') || null;
-    }
-
-    renderSelectors() {
-        const caps = this.session?.capabilities || {};
-        const modes = caps.modeList || [];
-        this.el.mode.hidden = !modes.length;
-        this.el.mode.innerHTML = modes.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
-        if (this.session?.mode) this.el.mode.value = this.session.mode;
-        const model = this.modelOption();
-        this.el.model.hidden = !model;
-        if (model) {
-            this.el.model.innerHTML = model.options.map(o => `<option value="${esc(o.value)}">${esc(o.name)}</option>`).join('');
-            this.el.model.value = model.currentValue;
-        }
-    }
-
-    renderStatus(status) {
-        if (this.session) this.session.status = status;
-        this.el.status.textContent = STATUS_LABEL[status] || status;
-        this.el.status.dataset.state = status;
-        const busy = status === 'thinking' || status === 'waiting_permission';
-        this.el.stop.hidden = !busy;
-        this.el.send.disabled = busy || status === 'starting';
-        this.el.resume.hidden = status !== 'stopped';
-        this.process = busy ? 'agente' : null;
+        this.status = session.status;
+        this.pending = new Map((session.pendingPermissions || []).map(p => [p.id, p.request]));
+        this.composer.setSession(session);
+        this.renderHead();
+        this.renderBanner();
+        this.renderPending();
         this.hooks.onInfo?.(this);
     }
 
-    append(html, className) {
-        const log = this.el.log;
-        const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-        const div = document.createElement('div');
-        div.className = className;
-        div.innerHTML = html;
-        log.appendChild(div);
-        if (stick) log.scrollTop = log.scrollHeight;
-        if (!this.active) this.hasActivity = true;
-        return div;
-    }
-
-    note(text, tone = '') {
-        this.append(esc(text), `agent-note ${tone}`);
-    }
-
     applyEvent(event) {
-        if (event.seq <= this.lastSeq) return; // already shown (replay overlap)
+        if (event.seq <= this.lastSeq) return; // replay overlap after a reconnect
         this.lastSeq = event.seq;
+        this.el.log.querySelector('.ag-empty')?.remove();
         const d = event.data || {};
+        this.conversation.apply(event);
+        this.side.apply(event);
+        this.scheduleSide();
+
         switch (event.type) {
             case 'status':
-                this.renderStatus(d.state);
-                if (d.state !== 'thinking') this.current = null;
+                this.status = d.state;
+                if (this.session) this.session.status = d.state;
+                this.renderHead();
+                this.renderBanner();
                 break;
             case 'session.start':
                 if (this.session) Object.assign(this.session, { capabilities: d.capabilities, mode: d.mode });
-                this.renderSelectors();
-                this.note(d.resumed ? 'Conversa retomada.' : `Sessão iniciada em ${d.cwd}`);
+                this.composer.setSession(this.session);
                 break;
-            case 'message.user':
-                this.current = null;
-                this.append(esc(d.text), 'agent-msg user');
-                break;
-            case 'message.assistant.delta':
-                if (!this.current) this.current = this.append('', 'agent-msg assistant');
-                this.current.textContent += d.text;
-                break;
-            case 'message.assistant.done':
-                this.current = null;
-                if (d.stopReason === 'cancelled') this.note('Interrompido.');
-                break;
-            case 'thought.delta':
-                // Reasoning is shown dimmed and compact (full view in phase 4)
-                if (!this.thought || this.current) this.thought = this.append('', 'agent-thought');
-                this.thought.textContent += d.text;
-                break;
-            case 'tool.start':
-                this.thought = null;
-                this.current = null;
-                this.renderTool(d, 'running');
-                break;
-            case 'tool.update':
-                this.renderTool(d, d.status === 'in_progress' ? 'running' : null);
-                break;
-            case 'tool.result':
-                this.renderTool(d, d.status);
-                break;
-            case 'subagent.update':
-                if (d.agentType || d.description) this.note(`Subagente ${d.agentType || ''}: ${d.description || ''}${d.async ? ' (em segundo plano)' : ''}`);
-                break;
-            case 'subagent.end':
-                this.note(`Subagente terminou${d.totalTokens ? ` · ${d.totalTokens} tokens` : ''}`);
-                break;
-            case 'permission.request':
-                this.renderPermission(d);
-                break;
-            case 'permission.response': {
-                const card = this.el.log.querySelector(`[data-permission="${CSS.escape(d.permissionId)}"]`);
-                if (card) {
-                    card.classList.add('answered');
-                    card.querySelector('.agent-perm-actions').textContent = d.outcome === 'selected' ? `Respondido: ${d.optionId}` : 'Cancelado';
+            case 'session.info':
+                if (d.title && this.session) {
+                    this.session.title = d.title;
+                    this.renderHead();
                 }
                 break;
-            }
             case 'mode.update':
                 if (this.session) this.session.mode = d.modeId;
-                this.el.mode.value = d.modeId;
+                this.composer.setSession(this.session);
+                this.renderBanner();
                 break;
             case 'config.update':
                 if (this.session) this.session.capabilities = { ...this.session.capabilities, configOptions: d.options };
-                this.renderSelectors();
+                this.composer.setSession(this.session);
                 break;
-            case 'plan.update':
-                this.append(d.steps.map(s => `<div>${s.status === 'completed' ? '✓' : '○'} ${esc(s.content)}</div>`).join(''), 'agent-plan');
+            case 'commands.update':
+                this.composer.setCommands(d.commands);
                 break;
-            case 'error':
-                this.note(d.message + (d.detail ? `\n${d.detail}` : ''), 'error');
+            case 'permission.request':
+                this.pending.set(d.permissionId, d);
+                this.renderPending();
+                if (!this.active) this.hasActivity = true;
                 break;
-            case 'raw':
-                // Nothing is hidden: unmapped events are listed (collapsed) for inspection
-                this.append(`<details><summary>evento bruto · ${esc(d.source)}</summary><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></details>`, 'agent-raw');
+            case 'permission.response':
+                this.pending.delete(d.permissionId);
+                this.renderPending();
+                break;
+            case 'message.user':
+                if (this.session && !this.session.title) {
+                    this.session.title = d.text.slice(0, 60);
+                    this.renderHead();
+                }
+                break;
+            case 'message.assistant.done':
+                if (!this.active) this.hasActivity = true;
                 break;
             default:
-                break; // usage, commands, session.info...: shown by the full UI (phase 4)
+                break;
         }
     }
 
-    renderTool(d, status) {
-        let card = this.tools.get(d.toolId);
-        if (!card) {
-            card = this.append(`<details><summary><span class="agent-tool-icon"></span><span class="agent-tool-title"></span><span class="agent-tool-state"></span></summary><pre class="agent-tool-out"></pre></details>`,
-                `agent-tool${d.parentToolId ? ' nested' : ''}`);
-            card.querySelector('.agent-tool-icon').innerHTML = icon(TOOL_ICON[d.kind] || 'bolt', 14);
-            this.tools.set(d.toolId, card);
-        }
-        if (d.title) card.querySelector('.agent-tool-title').textContent = d.title;
-        if (status) {
-            card.dataset.status = status;
-            card.querySelector('.agent-tool-state').textContent = status === 'running' ? '…' : status === 'completed' ? '✓' : '✕';
-        }
-        const out = [];
-        if (d.input && d.input.command) out.push(`$ ${d.input.command}`);
-        if (d.diffs && d.diffs.length) out.push(...d.diffs.map(x => `--- ${x.path}\n${x.newText}`));
-        if (d.output) out.push(d.output);
-        if (out.length) card.querySelector('.agent-tool-out').textContent = out.join('\n');
+    scheduleSide() {
+        if (this.sideFrame) return;
+        this.sideFrame = requestAnimationFrame(() => {
+            this.sideFrame = 0;
+            this.side.render();
+            this.el.panelBtn.classList.toggle('has-activity', this.side.hasActivity && !this.isPanelOpen());
+        });
     }
 
-    renderPermission(d) {
-        const detail = d.input && d.input.command ? d.input.command
-            : d.diffs && d.diffs.length ? d.diffs.map(x => x.path).join(', ') : '';
-        const html = `
-            <div class="agent-perm-title">${icon('shield', 15)} ${esc(d.title)}</div>
-            ${detail ? `<pre>${esc(detail)}</pre>` : ''}
-            <div class="agent-perm-actions">${d.options.map(o => `<button type="button" class="btn ${o.kind.startsWith('allow') ? 'btn-primary' : ''}" data-perm-option="${esc(o.id)}">${esc(o.name)}</button>`).join('')}</div>`;
-        const card = this.append(html, 'agent-perm');
-        card.dataset.permission = d.permissionId;
-        if (!this.active) this.hooks.onActivity?.(this);
+    renderHead() {
+        const s = this.session;
+        this.el.title.textContent = (s && s.title) || 'Nova conversa';
+        this.el.agent.textContent = (s && s.agentLabel) || this.name;
+        this.el.cwd.textContent = this.cwd || '';
+        this.el.cwd.title = this.cwd || '';
+        const st = STATUS[this.status] || { label: this.status, tone: '' };
+        this.el.status.textContent = st.label;
+        this.el.status.dataset.tone = st.tone;
+        const busy = this.status === 'thinking' || this.status === 'waiting_permission';
+        this.composer.setBusy(busy, this.status);
+        this.process = busy ? 'agente' : null;
     }
 
-    async onLogClick(e) {
-        const button = e.target.closest('[data-perm-option]');
-        if (!button) return;
-        const card = button.closest('[data-permission]');
-        card.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    renderBanner() {
+        const parts = [];
+        if (this.state === STATE.RECONNECTING || this.state === STATE.CONNECTING && this.lastSeq > 0) {
+            parts.push(`<div class="ag-banner-row info">${icon('loader', 14)} Reconectando…</div>`);
+        } else if (this.state === STATE.DISCONNECTED) {
+            parts.push(`<div class="ag-banner-row bad">Conexão perdida. <button type="button" class="ag-link" data-reconnect>Tentar de novo</button></div>`);
+        }
+        if (this.status === 'stopped') {
+            parts.push(`<div class="ag-banner-row bad">O agente está parado (servidor reiniciado, erro ou aba reaberta). <button type="button" class="btn btn-primary" data-resume>Retomar conversa</button></div>`);
+        }
+        // Permanent warning while the agent may act without asking
+        if (this.session && this.session.mode === 'bypassPermissions') {
+            parts.push(`<div class="ag-banner-row bad">${icon('shield', 14)} Modo sem permissões: o agente executa e altera arquivos sem perguntar.</div>`);
+        }
+        this.el.banner.innerHTML = parts.join('');
+        this.el.banner.hidden = !parts.length;
+    }
+
+    /** Sticky bar above the message box: pending permissions never scroll out of sight. */
+    renderPending() {
+        const list = [...this.pending.entries()];
+        this.el.pending.hidden = !list.length;
+        if (!list.length) {
+            this.el.pending.innerHTML = '';
+            return;
+        }
+        const [permissionId, d] = list[0];
+        const options = d.options || [];
+        this.el.pending.innerHTML = `
+            <button type="button" class="ag-pending-title" data-goto>${icon('shield', 15)} <span>${esc(d.title)}</span>${list.length > 1 ? ` <em>+${list.length - 1}</em>` : ''}</button>
+            <div class="ag-pending-actions">${options.map(o => `<button type="button" class="btn ${o.kind === 'allow_once' ? 'btn-primary' : o.kind.startsWith('reject') ? 'btn-ghost' : ''}" data-perm="${esc(permissionId)}" data-option="${esc(o.id)}">${esc(o.name)}</button>`).join('')}</div>`;
+    }
+
+    // ---------- actions ----------
+
+    action(name, body = {}) {
+        return api('POST', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/${name}`, body);
+    }
+
+    async sendPrompt({ text, images }) {
         try {
-            await this.action('permission', { permissionId: card.dataset.permission, optionId: button.dataset.permOption });
-        } catch (err) {
-            toast(err.message, { tone: 'error' });
+            await this.action('prompt', { text, images });
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+            throw e;
         }
+    }
+
+    async answerPermission(permissionId, optionId) {
+        try {
+            await this.action('permission', { permissionId, optionId });
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+        }
+    }
+
+    async resume() {
+        try {
+            this.applySession(await this.action('resume'));
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+        }
+    }
+
+    async searchFiles(query) {
+        const params = new URLSearchParams({ source: 'local', path: this.cwd || '~', q: query });
+        const r = await fetch(`${basePath()}/api/files/search?${params}`, { credentials: 'same-origin', cache: 'no-store' });
+        if (!r.ok) return [];
+        return (await r.json()).results || [];
+    }
+
+    /** Opens the file's folder in an "Arquivos" tab. */
+    openFile(path) {
+        const norm = String(path).replace(/\\/g, '/');
+        const folder = norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/')) || '/' : this.cwd;
+        this.hooks.openTab({ kind: 'files', url: 'local', cwd: folder, afterId: this.id });
+    }
+
+    showTool(toolId) {
+        const card = this.el.log.querySelector(`[data-tool-id="${CSS.escape(toolId)}"]`);
+        if (!card) return;
+        card.open = true;
+        card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        card.classList.add('flash');
+        this.later(() => card.classList.remove('flash'), 1200);
+        if (!wide()) {
+            this.panelOpen = false;
+            this.applyPanel();
+        }
+    }
+
+    /** "Conversas": new conversation, or a past one of this agent in this folder (incl. terminal ones). */
+    async openHistory(anchor) {
+        if (!this.session) return;
+        const start = body => api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
+            .then(() => this.hooks.onWorkspaceChanged())
+            .catch(e => toast(e.message, { tone: 'error' }));
+        const items = [{ label: 'Nova conversa', icon: 'plus', run: () => start({}) }];
+        if (this.session.capabilities && this.session.capabilities.history) {
+            showMenu([...items, 'separator', { label: 'Carregando conversas…', icon: 'loader', run: () => {} }], { anchor, label: 'Conversas' });
+            try {
+                const { sessions } = await api('GET', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/history`);
+                const fmt = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+                const past = sessions.slice(0, 20).map(h => ({
+                    label: h.title || 'Sem título',
+                    hint: h.updatedAt ? fmt.format(new Date(h.updatedAt)) : '',
+                    icon: 'history',
+                    run: () => start({ resumeAcpSessionId: h.sessionId, title: h.title }),
+                }));
+                items.push('separator', ...(past.length ? past : [{ label: 'Nenhuma conversa anterior nesta pasta', icon: 'info', run: () => {} }]));
+            } catch (e) {
+                items.push('separator', { label: `Histórico indisponível: ${e.message}`, icon: 'info', run: () => {} });
+            }
+        }
+        showMenu(items, { anchor, label: 'Conversas' });
     }
 
     // ---------- lifecycle ----------
@@ -432,6 +535,7 @@ export default class AgentSession {
         this.disposed = true;
         this.timers.forEach(clearTimeout);
         this.timers.clear();
+        this.mediaQuery?.removeEventListener('change', this.onMedia);
         if (this.ws) {
             this.ws.onclose = null;
             this.ws.close();

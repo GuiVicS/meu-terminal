@@ -338,7 +338,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             ...(config.filesAvailable ? [{ label: 'Gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`,
                 run: () => workspace.createFiles() }] : []),
             { label: 'Nova sessão com opções…', icon: 'terminal', run: () => workspace.openNewSessionPage() },
-            { label: 'Novo projeto (vibecoding)', icon: 'bot', run: () => vibeForm.open() },
+            { label: 'Nova conversa com agente', icon: 'bot', run: () => workspace.openAgentMenu(menuBtn) },
+            { label: 'Novo projeto (vibecoding)', icon: 'zap', run: () => vibeForm.open() },
             ...(workspace.activeId ? [workspace.split && workspace.visiblePair()
                 ? { label: 'Desfazer divisão da tela', icon: 'panelLeft', run: () => workspace.clearSplit({ keep: workspace.activeId }) }
                 : { label: 'Dividir tela…', icon: 'panelLeft', run: () => workspace.openSplitMenu(workspace.activeId, { anchor: menuBtn }) }] : []),

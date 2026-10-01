@@ -757,6 +757,23 @@ app.get(BASE_PATH + '/api/agents', (req, res) => {
     });
 });
 
+// New agent conversation in its own tab ("Nova conversa"), or an old one resumed ("Conversas")
+app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
+    const { agent, cwd, resumeAcpSessionId, title, afterId } = req.body || {};
+    if (typeof cwd !== 'string' || !cwd.trim()) return res.status(400).json({ error: 'Pasta inválida.' });
+    const folder = path.resolve(HOME_DIR, cwd.replace(/^~(?=$|[\\/])/, HOME_DIR));
+    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return res.status(400).json({ error: 'Pasta não encontrada.' });
+    const session = await agentGateway.startSession({
+        agent: String(agent || ''),
+        cwd: folder,
+        title: typeof title === 'string' ? title.slice(0, 120) : null,
+        resumeAcpSessionId: typeof resumeAcpSessionId === 'string' ? resumeAcpSessionId : null,
+    });
+    const def = agentGateway.agents[session.agent];
+    const tab = sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName, afterId: typeof afterId === 'string' ? afterId : undefined });
+    res.status(201).json({ tab, session });
+}));
+
 app.get(BASE_PATH + '/api/agent-sessions/:id', agentRoute(async (req, res) => {
     const session = agentGateway.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
@@ -771,9 +788,13 @@ app.get(BASE_PATH + '/api/agent-sessions/:id/history', agentRoute(async (req, re
 
 // The turn runs in the background: its progress arrives as events on the tab's socket
 app.post(BASE_PATH + '/api/agent-sessions/:id/prompt', agentRoute(async (req, res) => {
-    const text = String((req.body || {}).text || '');
+    const body = req.body || {};
+    const text = String(body.text || '');
+    // Pasted/attached images (base64); express.json limits the whole body to 5 MB
+    const images = Array.isArray(body.images) ? body.images.slice(0, 5).map(i => ({ mimeType: String(i && i.mimeType), data: String(i && i.data) })) : [];
     agentGateway.requireRuntime(req.params.id);
-    agentGateway.prompt(req.params.id, text).catch(e => debugLog('Agent prompt:', e.message));
+    if (!text.trim() && !images.length) return res.status(400).json({ error: 'Mensagem vazia.' });
+    agentGateway.prompt(req.params.id, text, { images }).catch(e => debugLog('Agent prompt:', e.message));
     res.status(202).json({ success: true });
 }));
 
@@ -1014,6 +1035,17 @@ const notifier = new PushNotifier({
     // VAPID contact: the app's HTTPS address (push services only accept https: or mailto:)
     subject: /^https:\/\//.test(BASE_URL) ? BASE_URL : 'mailto:noreply@meuterminal.app',
     log: (...args) => console.warn('[push]', ...args),
+});
+
+// Push (phone/desktop, even with the app closed): an agent is waiting for a permission.
+agentGateway.on('event', (event) => {
+    if (event.type !== 'permission.request') return;
+    const session = agentGateway.get(event.sessionId);
+    notifier.send({
+        title: `${session ? session.agentLabel : 'Agente'} aguardando permissão`,
+        body: event.data.title || 'Aprovar ação',
+        tag: `agent-permission-${event.sessionId}`,
+    }).catch(e => debugLog('Push (agent permission):', e.message));
 });
 
 app.get(BASE_PATH + '/api/push', (req, res) => {
