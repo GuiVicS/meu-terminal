@@ -68,6 +68,8 @@ export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', r
         x = a.right - rect.width;
         y = a.bottom + 4;
         if (x < 8) x = a.left;
+        // No room below (a button at the bottom, like the agent composer): open above it
+        if (y + rect.height > vh - 8 && a.top - rect.height - 4 >= 8) y = a.top - rect.height - 4;
     }
     x = Math.max(8, Math.min(x, vw - rect.width - 8));
     y = Math.max(8, Math.min(y, vh - rect.height - 8));

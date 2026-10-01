@@ -81,6 +81,13 @@ function deriveCapabilities(init, session) {
     };
 }
 
+/** Last meaningful stderr line (the reason an agent failed), without ANSI colors. */
+function lastLine(text) {
+    const lines = String(text || '').replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const line = lines.reverse().find(l => /error|erro|fail|not|unknown|invalid|denied|cannot|missing/i.test(l)) || lines[0] || '';
+    return line.length > 240 ? `${line.slice(0, 240)}…` : line;
+}
+
 class AgentGateway extends EventEmitter {
     /**
      * @param {object} deps
@@ -294,7 +301,7 @@ class AgentGateway extends EventEmitter {
             const missing = /Could not start/.test(error.message);
             const message = missing
                 ? `Não encontrei "${def.command}". Instale com: ${def.install}`
-                : `Falha ao iniciar ${def.label}: ${error.message}`;
+                : `Falha ao iniciar ${def.label}: ${error.message}${lastLine(stderr) ? ` — ${lastLine(stderr)}` : ''}`;
             this.emitEvent(sessionId, 'error', { message, detail: stderr || null });
             runtime.closing = true;
             await client.kill();
