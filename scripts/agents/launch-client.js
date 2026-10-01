@@ -12,6 +12,7 @@ const SUBCOMMANDS = {
         'apply', 'a', 'resume', 'proto', 'cloud', 'help', 'features'],
     opencode: ['run', 'serve', 'auth', 'acp', 'agent', 'upgrade', 'uninstall', 'models', 'stats', 'export', 'import',
         'github', 'mcp', 'web', 'debug', 'attach', 'pr', 'session', 'help'],
+    agy: ['agent', 'agents', 'changelog', 'help', 'install', 'mcp', 'mic-serve', 'models', 'plugin', 'plugins', 'remote-control', 'update'],
 };
 
 const TERMINAL = 3; // exit code: run the real binary

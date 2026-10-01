@@ -3,6 +3,7 @@
  * Which coding agents the agent UI knows about and how to start each one over ACP.
  * Agents with terminalOnly have no usable structured mode and stay in the plain terminal.
  */
+const path = require('path');
 
 /**
  * command/args: how to start the agent speaking ACP on stdio.
@@ -31,11 +32,14 @@ const AGENTS = {
         args: [],
         install: 'npm install -g @agentclientprotocol/codex-acp (e faça login com "codex login")',
     },
-    // agy has no ACP mode and its headless mode cannot ask for permissions (Phase 0 findings)
+    // agy has no ACP mode: agy-acp.js adapts its stream-json headless mode (no permission prompts there)
     agy: {
         label: 'agy',
         uiName: 'agy UI',
-        terminalOnly: true,
+        command: process.execPath,
+        args: [path.join(__dirname, 'agy-acp.js')],
+        requires: 'agy',
+        install: 'instale o Antigravity CLI (agy) e faça login',
     },
 };
 
