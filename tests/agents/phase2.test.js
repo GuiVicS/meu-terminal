@@ -111,19 +111,30 @@ test('history: pages through session/list', async (t) => {
     assert.equal(gateway.runtimes.size, 0, 'the short-lived process is not a session');
 });
 
-test('resume a conversation started elsewhere (session/resume)', async (t) => {
+test('a conversation started elsewhere (terminal) is imported with its history', async (t) => {
     const gateway = setup();
     t.after(() => gateway.shutdown());
     const session = await gateway.startSession({ agent: 'fake', cwd: process.cwd(), resumeAcpSessionId: 'old-1' });
     assert.equal(session.capabilities.resumed, true);
     assert.equal(gateway.store.getSession(session.id).acp_session_id, 'old-1');
+    // session/load replays it: it becomes our events, as a closed turn
+    const events = gateway.events(session.id);
+    const messages = events.filter(e => e.type.startsWith('message.')).map(e => [e.type, e.data.text || e.data.stopReason]);
+    assert.deepEqual(messages, [
+        ['message.user', 'mensagem antiga'],
+        ['message.assistant.delta', 'resposta antiga'],
+        ['message.assistant.done', 'end_turn'],
+    ]);
+    assertValidSequence(events);
 });
 
-test('resume through session/load ignores the replayed history', async (t) => {
+test('resuming our own session through session/load ignores the replayed history', async (t) => {
     const gateway = setup({ FAKE_AGENT_NO_RESUME: '1' });
     t.after(() => gateway.shutdown());
-    const session = await gateway.startSession({ agent: 'fake', cwd: process.cwd(), resumeAcpSessionId: 'old-1' });
-    assert.equal(session.capabilities.resumed, true);
+    const session = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.stopAgent(session.id);
+    const resumed = await gateway.resumeSession(session.id);
+    assert.equal(resumed.capabilities.resumed, true);
     const texts = gateway.events(session.id).filter(e => e.type.startsWith('message.'));
     assert.equal(texts.length, 0, 'replayed messages must not be duplicated in our log');
 });

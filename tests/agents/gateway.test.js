@@ -207,3 +207,35 @@ test('server restart marks running sessions stopped and expires permissions', ()
     assert.equal(store.getSession('s1').status, 'stopped');
     assert.equal(store.pendingPermissions('s1').length, 0);
 });
+
+test('modo fila: messages sent while the agent works wait and go in order', async (t) => {
+    const { gateway } = setup();
+    t.after(() => gateway.shutdown());
+    const session = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+
+    // The fake agent stops at a permission: the turn stays open
+    assert.deepEqual(gateway.enqueue(session.id, 'primeira'), { queued: false });
+    await waitForEvent(gateway, e => e.sessionId === session.id && e.type === 'permission.request');
+    const second = gateway.enqueue(session.id, 'segunda');
+    const third = gateway.enqueue(session.id, 'terceira');
+    assert.equal(second.queued, true);
+    assert.deepEqual(gateway.get(session.id).queue.map(i => i.text), ['segunda', 'terceira']);
+    assert.equal(gateway.dequeue(session.id, third.id), true);
+    assert.deepEqual(gateway.get(session.id).queue.map(i => i.text), ['segunda']);
+
+    autoAnswer(gateway, 'allow');
+    const first = gateway.events(session.id).find(e => e.type === 'permission.request');
+    gateway.respondPermission(session.id, first.data.permissionId, { optionId: 'allow', answeredBy: 'test' });
+    // Turn 1 ends -> "segunda" is sent on its own
+    const deadline = Date.now() + 10000;
+    let users = [];
+    while (Date.now() < deadline) {
+        const events = gateway.events(session.id);
+        users = events.filter(e => e.type === 'message.user').map(e => e.data.text);
+        if (events.filter(e => e.type === 'message.assistant.done').length >= 2) break;
+        await new Promise(r => setTimeout(r, 50));
+    }
+    assert.deepEqual(users, ['primeira', 'segunda']);
+    assert.deepEqual(gateway.get(session.id).queue, []);
+    assertValidSequence(gateway.events(session.id));
+});

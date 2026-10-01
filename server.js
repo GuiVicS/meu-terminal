@@ -191,7 +191,10 @@ function recordAttempt(ip) {
 // Security middleware
 app.set('trust proxy', 1);
 app.use(cors(getCorsOptions(BASE_URL)));
-app.use(express.json({ limit: '5mb' })); // file editor saves text through JSON
+// File editor saves text through JSON (5 MB); agent prompts carry base64 images (up to 40 MB)
+const jsonSmall = express.json({ limit: '5mb' });
+const jsonAgentPrompt = express.json({ limit: '40mb' });
+app.use((req, res, next) => (/\/api\/agent-sessions\/[^/]+\/prompt$/.test(req.path) ? jsonAgentPrompt : jsonSmall)(req, res, next));
 app.use(cookieParser());
 
 // Session configuration with secure settings
@@ -900,12 +903,17 @@ app.get(BASE_PATH + '/api/agent-sessions/:id/history', agentRoute(async (req, re
 app.post(BASE_PATH + '/api/agent-sessions/:id/prompt', agentRoute(async (req, res) => {
     const body = req.body || {};
     const text = String(body.text || '');
-    // Pasted/attached images (base64); express.json limits the whole body to 5 MB
+    // Pasted/attached images (base64); the body of this route may have up to 40 MB
     const images = Array.isArray(body.images) ? body.images.slice(0, 5).map(i => ({ mimeType: String(i && i.mimeType), data: String(i && i.data) })) : [];
     agentGateway.requireRuntime(req.params.id);
     if (!text.trim() && !images.length) return res.status(400).json({ error: 'Mensagem vazia.' });
-    agentGateway.prompt(req.params.id, text, { images }).catch(e => debugLog('Agent prompt:', e.message));
-    res.status(202).json({ success: true });
+    // Agent busy: the message waits in the session queue (sent when the turn ends)
+    const result = agentGateway.enqueue(req.params.id, text, { images });
+    res.status(202).json({ success: true, ...result });
+}));
+
+app.delete(BASE_PATH + '/api/agent-sessions/:id/queue/:item', agentRoute(async (req, res) => {
+    res.json({ removed: agentGateway.dequeue(req.params.id, req.params.item) });
 }));
 
 app.post(BASE_PATH + '/api/agent-sessions/:id/cancel', agentRoute(async (req, res) => {

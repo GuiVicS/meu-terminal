@@ -971,6 +971,21 @@ export default class FilesSession {
             this.el.fileInput.value = '';
             if (files.length) this.upload(files, { source: this.source, path: this.path });
         });
+        // "Enviar pasta": the browser gives every file with its path inside the folder
+        this.folderInput = document.createElement('input');
+        this.folderInput.type = 'file';
+        this.folderInput.hidden = true;
+        this.folderInput.webkitdirectory = true;
+        this.folderInput.multiple = true;
+        this.panel.appendChild(this.folderInput);
+        this.folderInput.addEventListener('change', () => {
+            const items = [...this.folderInput.files].map(file => ({
+                file,
+                dir: (file.webkitRelativePath || file.name).split('/').slice(0, -1),
+            }));
+            this.folderInput.value = '';
+            if (items.length) this.uploadTree(items, { source: this.source, path: this.path });
+        });
 
         this.el.side.addEventListener('click', e => {
             const unfav = e.target.closest('[data-unfav]');
@@ -1308,8 +1323,18 @@ export default class FilesSession {
             }
             if (!hasFiles(e)) return;
             e.preventDefault();
+            const dest = folder || { source: this.source, path: this.path };
+            // Dropped folders: walk them (the entries must be taken now, during the drop event)
+            const entries = [...(e.dataTransfer.items || [])]
+                .filter(it => it.kind === 'file')
+                .map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
+                .filter(Boolean);
+            if (entries.some(en => en.isDirectory)) {
+                this.uploadEntries(entries, dest);
+                return;
+            }
             const files = [...e.dataTransfer.files];
-            if (files.length) this.upload(files, folder || { source: this.source, path: this.path });
+            if (files.length) this.upload(files, dest);
         });
     }
 
@@ -1320,6 +1345,7 @@ export default class FilesSession {
             { label: 'Nova pasta', icon: 'folderPlus', hint: coarse() ? '' : 'Ctrl+Shift+N', run: () => this.newFolder() },
             { label: 'Novo arquivo', icon: 'filePlus', run: () => this.newFile() },
             { label: 'Enviar arquivos do aparelho', icon: 'upload', run: () => this.pickUpload() },
+            { label: 'Enviar pasta do aparelho', icon: 'folderInput', run: () => this.folderInput.click() },
             ...(shared.clipboard ? ['separator', { label: shared.clipboard.op === 'move' ? 'Mover para cá' : 'Colar aqui',
                 icon: 'clipboard', run: () => this.paste() }] : []),
         ], { anchor, label: 'Novo' });
@@ -1337,6 +1363,7 @@ export default class FilesSession {
             { label: 'Nova pasta', icon: 'folderPlus', run: () => this.newFolder() },
             { label: 'Novo arquivo', icon: 'filePlus', run: () => this.newFile() },
             { label: 'Enviar arquivos', icon: 'upload', run: () => this.pickUpload() },
+            { label: 'Enviar pasta', icon: 'folderInput', run: () => this.folderInput.click() },
             ...(shared.clipboard ? [{ label: shared.clipboard.op === 'move' ? 'Mover para cá' : 'Colar aqui', icon: 'clipboard',
                 hint: coarse() ? '' : 'Ctrl+V', run: () => this.paste() }] : []),
             'separator',
@@ -1655,6 +1682,67 @@ export default class FilesSession {
 
     pickUpload() {
         this.el.fileInput.click();
+    }
+
+    /** Dropped files and folders (FileSystemEntry): reads the folders' contents, then uploadTree. */
+    async uploadEntries(entries, dest) {
+        const items = [];
+        const readAll = reader => new Promise((resolve, reject) => {
+            const out = [];
+            // readEntries returns at most ~100 entries per call: call until it returns none
+            const step = () => reader.readEntries(batch => {
+                if (!batch.length) return resolve(out);
+                out.push(...batch);
+                step();
+            }, reject);
+            step();
+        });
+        const walk = async (entry, dir) => {
+            if (entry.isFile) {
+                const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+                items.push({ file, dir });
+            } else if (entry.isDirectory) {
+                const children = await readAll(entry.createReader());
+                const sub = [...dir, entry.name];
+                if (!children.length) items.push({ file: null, dir: sub }); // empty folder: still created
+                for (const child of children) await walk(child, sub);
+            }
+        };
+        try {
+            for (const entry of entries) await walk(entry, []);
+        } catch (e) {
+            toast(`Não foi possível ler a pasta: ${e.message || e}`, { tone: 'error' });
+            return;
+        }
+        this.uploadTree(items, dest);
+    }
+
+    /**
+     * Uploads files keeping their folders: [{ file, dir: ['pasta', 'sub'] }] -> creates the
+     * folders under dest (existing ones are reused), then queues each file into its folder.
+     */
+    async uploadTree(items, dest) {
+        const dirs = new Map(); // 'pasta/sub' -> ['pasta', 'sub']
+        for (const { dir } of items) {
+            for (let i = 1; i <= dir.length; i++) dirs.set(dir.slice(0, i).join('/'), dir.slice(0, i));
+        }
+        const pathOf = parts => parts.reduce((acc, name) => this.join(acc, name), dest.path);
+        if (dirs.size) toast(`Criando ${dirs.size} pasta${dirs.size > 1 ? 's' : ''}…`);
+        // Parents first (shorter paths first); "already exists" is fine
+        for (const parts of [...dirs.values()].sort((a, b) => a.length - b.length)) {
+            try {
+                await request('POST', 'op', { body: { op: 'mkdir', source: dest.source, path: pathOf(parts.slice(0, -1)), name: parts[parts.length - 1] } });
+            } catch { /* exists already (or the upload below will say why) */ }
+        }
+        const groups = new Map();
+        for (const { file, dir } of items) {
+            if (!file) continue;
+            const key = dir.join('/');
+            if (!groups.has(key)) groups.set(key, { dest: { source: dest.source, path: pathOf(dir) }, files: [] });
+            groups.get(key).files.push(file);
+        }
+        for (const { dest: d, files } of groups.values()) this.upload(files, d);
+        this.refresh(); // the new folders show up right away
     }
 
     upload(files, dest) {
