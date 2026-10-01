@@ -64,8 +64,44 @@ function finishTurn(stopReason) {
     promptId = null;
 }
 
+// "markdown" in the prompt: a rich answer (code, table, callout...) streamed in small chunks
+const RICH_ANSWER = [
+    '## Servidor HTTP em Node', '',
+    'Crie o arquivo e rode com `node server.js`:', '',
+    '```js title=server.js',
+    "const http = require('http');",
+    '',
+    '// Responde "ok" em qualquer rota',
+    'const server = http.createServer((req, res) => {',
+    "    res.writeHead(200, { 'Content-Type': 'text/plain' });",
+    "    res.end(`ok ${req.url}`);",
+    '});',
+    '',
+    'server.listen(3000, () => console.log("ouvindo na 3000"));',
+    '```', '',
+    '> [!TIP]', '> Use `PORT=8080 node server.js` para outra porta.', '',
+    '| Rota | Método | Resposta |', '|---|---|---|', '| `/` | GET | ok / |', '| `/saude` | GET | ok /saude |', '',
+    '1. Instale as dependências:', '   ```bash', '   npm install', '   ```', '2. Rode o servidor', '',
+    '```diff', '- const port = 3000;', '+ const port = process.env.PORT || 3000;', '```', '',
+    'Pronto! Veja a [documentação](https://nodejs.org/api/http.html).',
+].join('\n');
+
+function playRich() {
+    const chunks = RICH_ANSWER.match(/[\s\S]{1,24}/g);
+    let i = 0;
+    const timer = setInterval(() => {
+        if (i < chunks.length) {
+            update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunks[i++] }, messageId: 'rich' });
+            return;
+        }
+        clearInterval(timer);
+        finishTurn('end_turn');
+    }, 15);
+}
+
 function playTurn(text) {
     if (text.includes('crash')) process.exit(7);
+    if (text.includes('markdown')) return playRich();
     update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Pensando...' } });
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Vou criar ' }, messageId: 'm1' });
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'o arquivo.' }, messageId: 'm1' });

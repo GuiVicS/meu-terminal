@@ -6,6 +6,9 @@
  */
 import { icon } from '../ui/icons.js';
 import { renderMarkdown, esc } from './markdown.js';
+import { highlightIn, saveState, restoreState, onCodeClick, copyText, flashCopied } from './codeblock.js';
+
+const COPY_TEXT = new WeakMap(); // message actions bar -> the message's Markdown
 import { renderDiff } from './diff.js';
 import { assessRisk, maskSecrets } from './risk.js';
 
@@ -187,7 +190,10 @@ export default class Conversation {
     }
 
     endStreams() {
-        if (this.message) this.renderNow(this.message);
+        if (this.message) {
+            this.renderNow(this.message);
+            this.message.el.classList.remove('streaming');
+        }
         this.message = null;
         this.thought = null;
     }
@@ -208,8 +214,15 @@ export default class Conversation {
 
     renderNow(block) {
         this.pendingRender.delete(block);
-        if (block.kind === 'thought') block.body.textContent = block.text;
-        else block.el.innerHTML = renderMarkdown(block.text);
+        if (block.kind === 'thought') {
+            block.body.textContent = block.text;
+            return;
+        }
+        // Streaming re-renders the whole message: what the user toggled in a code block stays
+        const state = saveState(block.el);
+        block.el.innerHTML = renderMarkdown(block.text);
+        restoreState(block.el, state);
+        highlightIn(block.el);
     }
 
     // ---------- events ----------
@@ -234,7 +247,7 @@ export default class Conversation {
                 }
                 if (!d.text) break;
                 if (!this.message) {
-                    const el = this.add('', 'ag-assistant md');
+                    const el = this.add('', 'ag-assistant md streaming');
                     this.message = { kind: 'message', el, text: '' };
                 }
                 this.message.text += d.text;
@@ -243,6 +256,11 @@ export default class Conversation {
             case 'message.assistant.done': {
                 const last = this.message;
                 this.endStreams();
+                // Under the answer: copy it (as Markdown, like the chat apps)
+                if (last && last.text.trim()) {
+                    const bar = this.add(`<button type="button" class="ag-msg-btn" data-msg-copy aria-label="Copiar resposta" title="Copiar resposta">${icon('copy', 14)}<span>Copiar</span></button>`, 'ag-msg-actions');
+                    COPY_TEXT.set(bar, last.text.trim());
+                }
                 const shown = last ? imagePathsIn(last.text) : [];
                 if (shown.length) this.add(mediaHtml(shown), 'ag-media-row');
                 if (d.stopReason === 'cancelled') this.note('Interrompido.');
@@ -351,7 +369,7 @@ export default class Conversation {
         const parts = [];
         let stats = '';
         if (d.kind === 'bash' && d.input && d.input.command) {
-            parts.push(`<div class="ag-cmd"><span>$</span> ${esc(maskSecrets(d.input.command))}</div>`);
+            parts.push(`<div class="ag-cmd"><span>$</span> <code>${esc(maskSecrets(d.input.command))}</code><button type="button" class="md-code-btn" data-copy-cmd aria-label="Copiar comando" title="Copiar comando">${icon('copy', 13)}</button></div>`);
         } else if (d.kind === 'mcp' || d.kind === 'other' || d.kind === 'fetch') {
             if (d.input && Object.keys(d.input).length) parts.push(`<pre class="ag-input">${esc(maskSecrets(JSON.stringify(d.input, null, 2)))}</pre>`);
         } else if (d.kind === 'task') {
@@ -372,7 +390,7 @@ export default class Conversation {
         if (d.output && !(d.kind === 'task' && d.status !== 'completed' && d.status !== 'failed')) {
             const long = d.output.length > OUTPUT_PREVIEW;
             const text = maskSecrets(long ? d.output.slice(0, OUTPUT_PREVIEW) : d.output);
-            parts.push(`<pre class="ag-output${d.kind === 'task' ? ' md' : ''}">${esc(text)}</pre>`);
+            parts.push(`<div class="pre-box"><button type="button" class="md-code-btn pre-copy" data-copy-output="${esc(d.toolId)}" aria-label="Copiar saída" title="Copiar saída">${icon('copy', 13)}</button><pre class="ag-output${d.kind === 'task' ? ' md' : ''}">${esc(text)}</pre></div>`);
             if (long) parts.push(`<button type="button" class="ag-link" data-show-all="${esc(d.toolId)}">Ver tudo (${d.output.length.toLocaleString('pt-BR')} caracteres)</button>`);
             if (d.truncated) parts.push('<div class="ag-muted">Saída cortada pelo servidor (muito longa).</div>');
         }
@@ -469,6 +487,24 @@ export default class Conversation {
     // ---------- clicks ----------
 
     onClick(e) {
+        if (onCodeClick(e)) return;
+        const msgCopy = e.target.closest('[data-msg-copy]');
+        if (msgCopy) {
+            copyText(COPY_TEXT.get(msgCopy.closest('.ag-msg-actions')) || '').then(ok => flashCopied(msgCopy, ok));
+            return;
+        }
+        const cmdCopy = e.target.closest('[data-copy-cmd]');
+        if (cmdCopy) {
+            copyText(cmdCopy.closest('.ag-cmd').querySelector('code').textContent).then(ok => flashCopied(cmdCopy, ok));
+            return;
+        }
+        const outCopy = e.target.closest('[data-copy-output]');
+        if (outCopy) {
+            const tool = this.tools.get(outCopy.dataset.copyOutput);
+            const text = tool && tool.data.output ? maskSecrets(tool.data.output) : outCopy.parentElement.querySelector('pre').textContent;
+            copyText(text).then(ok => flashCopied(outCopy, ok));
+            return;
+        }
         const view = e.target.closest('[data-media-view]');
         if (view) {
             openLightbox(view.dataset.mediaView, view.dataset.mediaName, view.dataset.mediaDownload);
@@ -483,7 +519,9 @@ export default class Conversation {
         const all = e.target.closest('[data-show-all]');
         if (all) {
             const tool = this.tools.get(all.dataset.showAll);
-            if (tool) all.previousElementSibling.textContent = maskSecrets(tool.data.output);
+            const prev = all.previousElementSibling;
+            const pre = prev && (prev.matches('pre') ? prev : prev.querySelector('pre'));
+            if (tool && pre) pre.textContent = maskSecrets(tool.data.output);
             all.remove();
             return;
         }

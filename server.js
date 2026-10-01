@@ -355,6 +355,7 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         isDemoMode: DEMO_MODE,
         browserAvailable: browsers.available, // Chromium installed: browser tabs enabled
         filesAvailable: FILES_ENABLED, // file manager tabs
+        hljsVersion: HLJS_VERSION, // syntax highlighting in the agent chat (vendor/hljs/<version>/)
         version: APP_VERSION,
         cacheName: CACHE_NAME
     }
@@ -384,6 +385,13 @@ app.get(BASE_PATH + "/asset-manifest.json", (req, res) => {
 app.use('/fonts', express.static(path.join(PUBLIC_DIR, 'fonts')));
 app.use('/node_modules/@xterm/', express.static(
     path.join(__dirname, 'node_modules/@xterm/')
+));
+// Syntax highlighting for code in the agent chat (ES modules, loaded on demand per language).
+// The version is in the URL, so the files can be cached for good.
+const HLJS_VERSION = require('@highlightjs/cdn-assets/package.json').version;
+app.use(`${BASE_PATH}/vendor/hljs/${HLJS_VERSION}/`, express.static(
+    path.join(__dirname, 'node_modules/@highlightjs/cdn-assets/es/'),
+    { immutable: true, maxAge: '365d' },
 ));
 
 // Routes
