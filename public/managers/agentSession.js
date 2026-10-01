@@ -1,0 +1,545 @@
+/**
+ * agentSession.js
+ * Agent UI tab (kind 'agent'): a conversation with a coding agent (Claude, OpenCode, Codex)
+ * through the server's agent gateway. Chat + tool cards (public/agent/conversation.js), message
+ * box (composer.js) and a side panel with plan, subagents, changed files and usage (sidepanel.js).
+ * Same interface as TerminalSession, so tabs, status bar and menus work with it.
+ */
+import { STATE, SESSION_COLORS } from './session.js';
+import { icon } from '../ui/icons.js';
+import { toast } from '../ui/toast.js';
+import { showMenu } from '../ui/contextMenu.js';
+import Conversation from '../agent/conversation.js';
+import Composer from '../agent/composer.js';
+import SidePanel from '../agent/sidepanel.js';
+import { esc } from '../agent/markdown.js';
+
+const MAX_RECONNECT_ATTEMPTS = 8;
+const CLOSE_SESSION_GONE = 4404;
+const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
+const wide = () => window.matchMedia('(min-width: 1100px)').matches;
+
+const STATUS = {
+    starting: { label: 'Iniciando', tone: 'busy' },
+    idle: { label: 'Pronto', tone: 'ok' },
+    thinking: { label: 'Trabalhando', tone: 'busy' },
+    waiting_permission: { label: 'Aguardando você', tone: 'warn' },
+    error: { label: 'Erro', tone: 'bad' },
+    stopped: { label: 'Parado', tone: 'bad' },
+    closed: { label: 'Encerrado', tone: 'bad' },
+};
+
+async function api(method, route, body) {
+    const response = await fetch(`${basePath()}/api/${route}`, {
+        method,
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (response.redirected && /\/login$/.test(new URL(response.url).pathname)) {
+        window.location.href = `${basePath()}/login`;
+        throw new Error('Sua sessão expirou. Entre de novo.');
+    }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Erro ${response.status}`);
+    return data;
+}
+
+export default class AgentSession {
+    /**
+     * @param {object} opts
+     * @param {object} opts.row - tab from /api/sessions (kind 'agent', url = agent session id)
+     * @param {object} opts.settings - SettingsManager
+     * @param {object} opts.hooks - callbacks into the workspace
+     */
+    constructor({ row, settings, hooks }) {
+        this.kind = 'agent';
+        this.id = row.id;
+        this.agentSessionId = row.url;
+        this.name = row.name;
+        this.pinned = !!row.pinned;
+        this.color = SESSION_COLORS.includes(row.color) ? row.color : 'purple';
+        this.settings = settings;
+        this.hooks = hooks;
+
+        // Fields the rest of the app reads from terminal sessions
+        this.state = STATE.CONNECTING;
+        this.shell = 'agente';
+        this.startCwd = row.cwd || '';
+        this.cwd = row.cwd || null;
+        this.process = null;
+        this.branch = null;
+        this.pid = null;
+        this.terminal = null;
+        this.addons = null;
+        this.hasActivity = false;
+
+        this.session = null;      // agent session snapshot (capabilities, mode, status...)
+        this.status = 'starting';
+        this.lastSeq = 0;         // replay point for reconnects
+        this.pending = new Map(); // permissionId -> permission.request data
+        this.active = false;
+        this.ws = null;
+        this.reconnectAttempts = 0;
+        this.disposed = false;
+        this.timers = new Set();
+        this.panelOpen = null;    // null = automatic (open on wide screens)
+
+        this.panel = document.createElement('div');
+        this.panel.className = 'terminal-panel agent-panel';
+        this.panel.id = `panel-${this.id}`;
+        this.panel.setAttribute('role', 'tabpanel');
+        this.panel.setAttribute('aria-labelledby', `tab-${this.id}`);
+    }
+
+    get sizeLabel() {
+        return '';
+    }
+
+    // ---------- view ----------
+
+    mount(parent) {
+        parent.appendChild(this.panel);
+        this.panel.innerHTML = `
+            <header class="ag-head">
+                <span class="ag-head-icon">${icon('bot', 18)}</span>
+                <div class="ag-head-text">
+                    <div class="ag-head-title"></div>
+                    <div class="ag-head-sub"><span class="ag-agent"></span> · <span class="ag-cwd mono"></span></div>
+                </div>
+                <span class="ag-status" role="status"></span>
+                <button type="button" class="icon-btn" data-act="history" aria-label="Conversas">${icon('history', 18)}</button>
+                <button type="button" class="icon-btn" data-act="terminal" aria-label="Abrir terminal nesta pasta">${icon('terminal', 18)}</button>
+                <button type="button" class="icon-btn" data-act="files" aria-label="Abrir os arquivos da pasta">${icon('folder', 18)}</button>
+                <button type="button" class="icon-btn" data-act="panel" aria-label="Painel do agente" aria-expanded="false">${icon('panelLeft', 18)}</button>
+            </header>
+            <div class="ag-banner" role="status" hidden></div>
+            <div class="ag-body">
+                <div class="ag-main">
+                    <div class="ag-log" role="log" aria-label="Conversa com o agente" tabindex="0">
+                        <div class="ag-empty">${icon('bot', 28)}<p>Conectando ao agente…</p></div>
+                    </div>
+                    <button type="button" class="ag-jump" hidden aria-label="Ir para o fim">${icon('chevronDown', 18)}</button>
+                    <div class="ag-pending" hidden></div>
+                    <div class="ag-composer"></div>
+                </div>
+                <aside class="ag-side" aria-label="Painel do agente"></aside>
+            </div>`;
+        const q = sel => this.panel.querySelector(sel);
+        this.el = {
+            title: q('.ag-head-title'), agent: q('.ag-agent'), cwd: q('.ag-cwd'), status: q('.ag-status'),
+            banner: q('.ag-banner'), body: q('.ag-body'), log: q('.ag-log'), jump: q('.ag-jump'),
+            pending: q('.ag-pending'), side: q('.ag-side'), panelBtn: q('[data-act="panel"]'),
+        };
+        this.conversation = new Conversation(this.el.log, {
+            cwd: () => this.cwd,
+            onPermission: (permissionId, optionId) => this.answerPermission(permissionId, optionId),
+            onOpenFile: path => this.openFile(path),
+        });
+        this.composer = new Composer(q('.ag-composer'), {
+            cwd: () => this.cwd,
+            onSend: msg => this.sendPrompt(msg),
+            onCancel: () => this.action('cancel').catch(e => toast(e.message, { tone: 'error' })),
+            onMode: modeId => this.action('mode', { modeId }).then(s => this.applySession(s)).catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
+            onConfig: (configId, value) => this.action('config', { configId, value }).then(s => this.applySession(s)).catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
+            searchFiles: query => this.searchFiles(query),
+        });
+        this.side = new SidePanel(this.el.side, {
+            cwd: () => this.cwd,
+            onOpenFile: path => this.openFile(path),
+            onCommand: name => this.composer.insert(`/${name} `),
+            onShowTool: toolId => this.showTool(toolId),
+        });
+        this.side.render();
+
+        this.panel.querySelector('.ag-head').addEventListener('click', e => {
+            const btn = e.target.closest('[data-act]');
+            if (!btn) return;
+            if (btn.dataset.act === 'panel') this.togglePanel();
+            else if (btn.dataset.act === 'terminal') this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id });
+            else if (btn.dataset.act === 'files') this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id });
+            else if (btn.dataset.act === 'history') this.openHistory(btn);
+        });
+        this.el.banner.addEventListener('click', e => {
+            if (e.target.closest('[data-resume]')) this.resume();
+            if (e.target.closest('[data-reconnect]')) this.reconnectIfDropped();
+        });
+        this.el.pending.addEventListener('click', e => {
+            const b = e.target.closest('[data-option]');
+            if (b) this.answerPermission(b.dataset.perm, b.dataset.option);
+            else if (e.target.closest('[data-goto]')) this.el.log.querySelector('.ag-perm:not(.answered)')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+        this.el.log.addEventListener('scroll', () => {
+            this.el.jump.hidden = this.conversation.nearBottom();
+        }, { passive: true });
+        this.el.jump.addEventListener('click', () => {
+            this.el.log.scrollTop = this.el.log.scrollHeight;
+        });
+        this.mediaQuery = window.matchMedia('(min-width: 1100px)');
+        this.onMedia = () => this.applyPanel();
+        this.mediaQuery.addEventListener('change', this.onMedia);
+        this.applyPanel();
+        this.renderHead();
+        this.connect();
+    }
+
+    setActive(active) {
+        this.active = active;
+        this.panel.classList.toggle('active', active);
+        this.panel.setAttribute('aria-hidden', String(!active));
+        if (active) this.hasActivity = false;
+    }
+
+    focus() {
+        this.composer?.focus();
+    }
+
+    applySettings() { /* uses the app theme */ }
+
+    applyRow(row) {
+        this.name = row.name;
+        this.pinned = !!row.pinned;
+        if (SESSION_COLORS.includes(row.color)) this.color = row.color;
+    }
+
+    displayCwd() {
+        return this.cwd || 'agente';
+    }
+
+    // ---------- side panel ----------
+
+    togglePanel() {
+        this.panelOpen = !this.isPanelOpen();
+        this.applyPanel();
+    }
+
+    isPanelOpen() {
+        return this.panelOpen === null ? wide() : this.panelOpen;
+    }
+
+    applyPanel() {
+        const open = this.isPanelOpen();
+        this.el.body.classList.toggle('side-open', open);
+        this.el.panelBtn.setAttribute('aria-expanded', String(open));
+    }
+
+    // ---------- connection ----------
+
+    connect() {
+        if (this.disposed) return;
+        this.setState(this.reconnectAttempts > 0 ? STATE.RECONNECTING : STATE.CONNECTING);
+        this.renderBanner();
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const query = new URLSearchParams({ session: this.id, since: String(this.lastSeq) });
+        const ws = new WebSocket(`${protocol}//${window.location.host}${basePath()}/?${query}`);
+        this.ws = ws;
+        const timeout = this.later(() => { if (ws.readyState !== WebSocket.OPEN) ws.close(); }, 8000);
+        ws.onopen = () => {
+            clearTimeout(timeout);
+            this.reconnectAttempts = 0;
+            this.setState(STATE.CONNECTED);
+            this.renderBanner();
+        };
+        ws.onmessage = (event) => {
+            let m;
+            try {
+                m = JSON.parse(event.data);
+            } catch {
+                return;
+            }
+            if (m.type === 'agent-session') this.applySession(m.session);
+            else if (m.type === 'agent-event') this.applyEvent(m.event);
+            else if (m.type === 'ready') this.onReady();
+            else if (m.type === 'agent-missing') this.showMissing();
+            else if (m.type === 'workspace') this.hooks.onWorkspaceChanged();
+            else if (m.nonce) this.hooks.onServerMessage(m); // app-wide notices (open-tab, agent-launch...)
+        };
+        ws.onerror = () => ws.close();
+        ws.onclose = (event) => {
+            clearTimeout(timeout);
+            if (this.ws !== ws || this.disposed) return;
+            if (event.code === 1008) {
+                this.setState(STATE.ERROR);
+                this.hooks.onAuthRequired();
+                return;
+            }
+            if (event.code === CLOSE_SESSION_GONE) {
+                this.hooks.onRemoved(this);
+                return;
+            }
+            if (this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                const delay = Math.min(15000, 1000 * Math.pow(2, this.reconnectAttempts++));
+                this.setState(STATE.RECONNECTING);
+                this.later(() => this.connect(), delay);
+            } else {
+                this.setState(STATE.DISCONNECTED);
+            }
+            this.renderBanner();
+        };
+    }
+
+    reconnectIfDropped() {
+        if (this.state === STATE.DISCONNECTED) {
+            this.reconnectAttempts = 0;
+            this.connect();
+        }
+    }
+
+    setState(state) {
+        if (this.state === state) return;
+        this.state = state;
+        this.hooks.onStateChange(this);
+    }
+
+    onReady() {
+        const empty = this.el.log.querySelector('.ag-empty');
+        if (empty && this.lastSeq > 0) empty.remove();
+        else if (empty) empty.querySelector('p').textContent = 'Escreva uma mensagem para começar.';
+        this.el.log.scrollTop = this.el.log.scrollHeight;
+    }
+
+    showMissing() {
+        this.el.log.innerHTML = `<div class="ag-empty">${icon('x', 28)}<p>Esta conversa não existe mais no servidor.</p></div>`;
+        this.composer.setBusy(false, 'stopped');
+    }
+
+    // ---------- session & events ----------
+
+    applySession(session) {
+        this.session = session;
+        this.cwd = session.cwd;
+        this.status = session.status;
+        this.pending = new Map((session.pendingPermissions || []).map(p => [p.id, p.request]));
+        this.composer.setSession(session);
+        this.renderHead();
+        this.renderBanner();
+        this.renderPending();
+        this.hooks.onInfo?.(this);
+    }
+
+    applyEvent(event) {
+        if (event.seq <= this.lastSeq) return; // replay overlap after a reconnect
+        this.lastSeq = event.seq;
+        this.el.log.querySelector('.ag-empty')?.remove();
+        const d = event.data || {};
+        this.conversation.apply(event);
+        this.side.apply(event);
+        this.scheduleSide();
+
+        switch (event.type) {
+            case 'status':
+                this.status = d.state;
+                if (this.session) this.session.status = d.state;
+                this.renderHead();
+                this.renderBanner();
+                break;
+            case 'session.start':
+                if (this.session) Object.assign(this.session, { capabilities: d.capabilities, mode: d.mode });
+                this.composer.setSession(this.session);
+                break;
+            case 'session.info':
+                if (d.title && this.session) {
+                    this.session.title = d.title;
+                    this.renderHead();
+                }
+                break;
+            case 'mode.update':
+                if (this.session) this.session.mode = d.modeId;
+                this.composer.setSession(this.session);
+                this.renderBanner();
+                break;
+            case 'config.update':
+                if (this.session) this.session.capabilities = { ...this.session.capabilities, configOptions: d.options };
+                this.composer.setSession(this.session);
+                break;
+            case 'commands.update':
+                this.composer.setCommands(d.commands);
+                break;
+            case 'permission.request':
+                this.pending.set(d.permissionId, d);
+                this.renderPending();
+                if (!this.active) this.hasActivity = true;
+                break;
+            case 'permission.response':
+                this.pending.delete(d.permissionId);
+                this.renderPending();
+                break;
+            case 'message.user':
+                if (this.session && !this.session.title) {
+                    this.session.title = d.text.slice(0, 60);
+                    this.renderHead();
+                }
+                break;
+            case 'message.assistant.done':
+                if (!this.active) this.hasActivity = true;
+                break;
+            default:
+                break;
+        }
+    }
+
+    scheduleSide() {
+        if (this.sideFrame) return;
+        this.sideFrame = requestAnimationFrame(() => {
+            this.sideFrame = 0;
+            this.side.render();
+            this.el.panelBtn.classList.toggle('has-activity', this.side.hasActivity && !this.isPanelOpen());
+        });
+    }
+
+    renderHead() {
+        const s = this.session;
+        this.el.title.textContent = (s && s.title) || 'Nova conversa';
+        this.el.agent.textContent = (s && s.agentLabel) || this.name;
+        this.el.cwd.textContent = this.cwd || '';
+        this.el.cwd.title = this.cwd || '';
+        const st = STATUS[this.status] || { label: this.status, tone: '' };
+        this.el.status.textContent = st.label;
+        this.el.status.dataset.tone = st.tone;
+        const busy = this.status === 'thinking' || this.status === 'waiting_permission';
+        this.composer.setBusy(busy, this.status);
+        this.process = busy ? 'agente' : null;
+    }
+
+    renderBanner() {
+        const parts = [];
+        if (this.state === STATE.RECONNECTING || this.state === STATE.CONNECTING && this.lastSeq > 0) {
+            parts.push(`<div class="ag-banner-row info">${icon('loader', 14)} Reconectando…</div>`);
+        } else if (this.state === STATE.DISCONNECTED) {
+            parts.push(`<div class="ag-banner-row bad">Conexão perdida. <button type="button" class="ag-link" data-reconnect>Tentar de novo</button></div>`);
+        }
+        if (this.status === 'stopped') {
+            parts.push(`<div class="ag-banner-row bad">O agente está parado (servidor reiniciado, erro ou aba reaberta). <button type="button" class="btn btn-primary" data-resume>Retomar conversa</button></div>`);
+        }
+        // Permanent warning while the agent may act without asking
+        if (this.session && this.session.mode === 'bypassPermissions') {
+            parts.push(`<div class="ag-banner-row bad">${icon('shield', 14)} Modo sem permissões: o agente executa e altera arquivos sem perguntar.</div>`);
+        }
+        this.el.banner.innerHTML = parts.join('');
+        this.el.banner.hidden = !parts.length;
+    }
+
+    /** Sticky bar above the message box: pending permissions never scroll out of sight. */
+    renderPending() {
+        const list = [...this.pending.entries()];
+        this.el.pending.hidden = !list.length;
+        if (!list.length) {
+            this.el.pending.innerHTML = '';
+            return;
+        }
+        const [permissionId, d] = list[0];
+        const options = d.options || [];
+        this.el.pending.innerHTML = `
+            <button type="button" class="ag-pending-title" data-goto>${icon('shield', 15)} <span>${esc(d.title)}</span>${list.length > 1 ? ` <em>+${list.length - 1}</em>` : ''}</button>
+            <div class="ag-pending-actions">${options.map(o => `<button type="button" class="btn ${o.kind === 'allow_once' ? 'btn-primary' : o.kind.startsWith('reject') ? 'btn-ghost' : ''}" data-perm="${esc(permissionId)}" data-option="${esc(o.id)}">${esc(o.name)}</button>`).join('')}</div>`;
+    }
+
+    // ---------- actions ----------
+
+    action(name, body = {}) {
+        return api('POST', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/${name}`, body);
+    }
+
+    async sendPrompt({ text, images }) {
+        try {
+            await this.action('prompt', { text, images });
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+            throw e;
+        }
+    }
+
+    async answerPermission(permissionId, optionId) {
+        try {
+            await this.action('permission', { permissionId, optionId });
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+        }
+    }
+
+    async resume() {
+        try {
+            this.applySession(await this.action('resume'));
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+        }
+    }
+
+    async searchFiles(query) {
+        const params = new URLSearchParams({ source: 'local', path: this.cwd || '~', q: query });
+        const r = await fetch(`${basePath()}/api/files/search?${params}`, { credentials: 'same-origin', cache: 'no-store' });
+        if (!r.ok) return [];
+        return (await r.json()).results || [];
+    }
+
+    /** Opens the file's folder in an "Arquivos" tab. */
+    openFile(path) {
+        const norm = String(path).replace(/\\/g, '/');
+        const folder = norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/')) || '/' : this.cwd;
+        this.hooks.openTab({ kind: 'files', url: 'local', cwd: folder, afterId: this.id });
+    }
+
+    showTool(toolId) {
+        const card = this.el.log.querySelector(`[data-tool-id="${CSS.escape(toolId)}"]`);
+        if (!card) return;
+        card.open = true;
+        card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        card.classList.add('flash');
+        this.later(() => card.classList.remove('flash'), 1200);
+        if (!wide()) {
+            this.panelOpen = false;
+            this.applyPanel();
+        }
+    }
+
+    /** "Conversas": new conversation, or a past one of this agent in this folder (incl. terminal ones). */
+    async openHistory(anchor) {
+        if (!this.session) return;
+        const start = body => api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
+            .then(() => this.hooks.onWorkspaceChanged())
+            .catch(e => toast(e.message, { tone: 'error' }));
+        const items = [{ label: 'Nova conversa', icon: 'plus', run: () => start({}) }];
+        if (this.session.capabilities && this.session.capabilities.history) {
+            showMenu([...items, 'separator', { label: 'Carregando conversas…', icon: 'loader', run: () => {} }], { anchor, label: 'Conversas' });
+            try {
+                const { sessions } = await api('GET', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/history`);
+                const fmt = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+                const past = sessions.slice(0, 20).map(h => ({
+                    label: h.title || 'Sem título',
+                    hint: h.updatedAt ? fmt.format(new Date(h.updatedAt)) : '',
+                    icon: 'history',
+                    run: () => start({ resumeAcpSessionId: h.sessionId, title: h.title }),
+                }));
+                items.push('separator', ...(past.length ? past : [{ label: 'Nenhuma conversa anterior nesta pasta', icon: 'info', run: () => {} }]));
+            } catch (e) {
+                items.push('separator', { label: `Histórico indisponível: ${e.message}`, icon: 'info', run: () => {} });
+            }
+        }
+        showMenu(items, { anchor, label: 'Conversas' });
+    }
+
+    // ---------- lifecycle ----------
+
+    later(fn, ms) {
+        const t = setTimeout(() => {
+            this.timers.delete(t);
+            fn();
+        }, ms);
+        this.timers.add(t);
+        return t;
+    }
+
+    /** Removes the view only; the agent keeps running on the server until the tab is closed. */
+    dispose() {
+        this.disposed = true;
+        this.timers.forEach(clearTimeout);
+        this.timers.clear();
+        this.mediaQuery?.removeEventListener('change', this.onMedia);
+        if (this.ws) {
+            this.ws.onclose = null;
+            this.ws.close();
+        }
+        this.panel.remove();
+    }
+}

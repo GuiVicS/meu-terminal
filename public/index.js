@@ -18,6 +18,7 @@ import { createSettingsDialog, createShortcutsDialog } from './ui/dialogs.js';
 import { showMenu } from './ui/contextMenu.js';
 import { icon } from './ui/icons.js';
 import VibeForm from './ui/vibeForm.js';
+import AgentLaunch from './ui/agentLaunch.js';
 import { toast } from './ui/toast.js';
 
 const STATE_LABELS = {
@@ -240,6 +241,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ---------- dialogs ----------
     settingsDialog = createSettingsDialog(settings, () => workspace?.active, commands);
     const vibeForm = new VibeForm();
+    const agentLaunch = new AgentLaunch();
 
     // ---------- workspace ----------
     workspace = new TerminalManager({
@@ -291,6 +293,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (m.type === 'vibe-form') vibeForm.open({ defaults: m.defaults, requestId: m.requestId });
                 else vibeForm.closeRequest(m.requestId);
             },
+            // "Deseja usar o modo Claude Code UI?" (an agent was typed in a terminal)
+            onAgentLaunch: m => {
+                if (m.type === 'agent-launch') agentLaunch.open(m);
+                else agentLaunch.closeRequest(m.requestId);
+            },
             onAction: action => {
                 if (action === 'fullscreen') toggleFullscreen();
                 else if (action === 'settings') settingsDialog.open();
@@ -331,7 +338,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             ...(config.filesAvailable ? [{ label: 'Gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`,
                 run: () => workspace.createFiles() }] : []),
             { label: 'Nova sessão com opções…', icon: 'terminal', run: () => workspace.openNewSessionPage() },
-            { label: 'Novo projeto (vibecoding)', icon: 'bot', run: () => vibeForm.open() },
+            { label: 'Nova conversa com agente', icon: 'bot', run: () => workspace.openAgentMenu(menuBtn) },
+            { label: 'Novo projeto (vibecoding)', icon: 'zap', run: () => vibeForm.open() },
             ...(workspace.activeId ? [workspace.split && workspace.visiblePair()
                 ? { label: 'Desfazer divisão da tela', icon: 'panelLeft', run: () => workspace.clearSplit({ keep: workspace.activeId }) }
                 : { label: 'Dividir tela…', icon: 'panelLeft', run: () => workspace.openSplitMenu(workspace.activeId, { anchor: menuBtn }) }] : []),

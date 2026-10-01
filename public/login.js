@@ -252,6 +252,30 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('demo-banner').hidden = false;
         }
 
+        // Opened from a QR code ("Conectar outro aparelho"): log in with the one-time code
+        const pair = new URLSearchParams(location.search).get('pair');
+        let pairError = '';
+        if (pair) {
+            history.replaceState(null, '', location.pathname); // the code doesn't stay in the address bar
+            const subtitle = document.getElementById('loginSubtitle');
+            subtitle.textContent = 'Conectando este aparelho…';
+            try {
+                const r = await fetch(joinPath('login/pair'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: pair }),
+                });
+                const data = await r.json().catch(() => ({}));
+                if (r.ok) {
+                    window.location.href = data.redirect || joinPath('');
+                    return;
+                }
+                pairError = data.error || 'Não foi possível conectar. Entre com sua senha.';
+            } catch {
+                pairError = 'Sem conexão. Entre com sua senha.';
+            }
+        }
+
         let mode = window.appConfig?.authMode;
         if (!mode) {
             try {
@@ -268,6 +292,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('pinForm').hidden = false;
             setupPinInputs();
         }
+
+        if (pairError) document.getElementById('loginSubtitle').textContent = pairError;
     }
     
     initialize();

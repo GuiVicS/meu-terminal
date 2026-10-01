@@ -1,6 +1,6 @@
 {
   "name": "meuterminal",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "A stupidly simple web-based terminal emulator, with common tools and Starship enabled (via Docker)! 🚀",
   "main": "server.js",
   "engines": {
@@ -11,7 +11,8 @@
     "dev": "npm run copy-xterm && nodemon server.js",
     "copy-xterm": "node scripts/copy-xterm.js",
     "2fa": "node scripts/totp-setup.js",
-    "icons": "node scripts/build-icons.js"
+    "icons": "node scripts/build-icons.js",
+    "test": "node --test \"tests/**/*.test.js\""
   },
   "dependencies": {
     "@xterm/addon-attach": "^0.11.0",
@@ -33,6 +34,7 @@
     "express": "^5.1.0",
     "express-session": "^1.18.2",
     "node-pty": "^1.0.0",
+    "qrcode": "^1.5.4",
     "web-push": "^3.6.7",
     "ws": "^8.18.3"
   },

@@ -21,6 +21,11 @@ const { FileManager, FileError } = require('./scripts/file-manager');
 const { LiveServers } = require('./scripts/live-server');
 const { Vibe } = require('./scripts/vibe');
 const { PushNotifier } = require('./scripts/push');
+const QRCode = require('qrcode');
+const AgentStore = require('./scripts/agents/agent-store');
+const { AgentGateway, GatewayError } = require('./scripts/agents/gateway');
+const { AgentLauncher } = require('./scripts/agents/launch');
+const { writeShims } = require('./scripts/agents/shims');
 
 const app = express();
 const server = http.createServer(app);
@@ -40,6 +45,9 @@ const ASSETS_DIR = path.join(PUBLIC_DIR, 'assets');
 const CACHE_NAME = `MEUTERMINAL_CACHE_V${APP_VERSION}`;
 // SQLite file with the sessions (tabs). Mount its folder as a volume to keep it across deploys.
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'meuterminal.db');
+// Agent UI: "claude", "codex", "opencode" shims put first on the shells' PATH (bash only)
+const AGENT_UI_ENABLED = !DEMO_MODE && process.platform !== 'win32' && process.env.AGENT_UI !== 'off';
+const AGENT_SHIM_DIR = path.join(path.dirname(DB_PATH), 'agent-bin');
 const SHELL = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash');
 const HOME_DIR = DEMO_MODE ? '/home/demo' : (process.env.HOME || os.homedir());
 
@@ -255,8 +263,37 @@ const authMiddleware = (req, res, next) => {
     return res.redirect(BASE_PATH + '/login');
 };
 
+// ---------- Cross-site protection (CSRF / cross-site WebSocket) ----------
+// Independent of ALLOWED_ORIGINS (often "*"): anything that changes state, and every
+// WebSocket, must come from this app's own pages. Browsers always send Origin on those
+// requests; calls without it (curl, agents on the server) are not browser attacks.
+// Needed because "same-site" is wider than "same-origin": other apps under the same
+// domain (e.g. *.easypanel.host, other subdomains) would otherwise get the login cookie.
+const EXTRA_ORIGINS = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim())
+    .filter(o => o && o !== '*').map(o => { try { return new URL(o).origin; } catch { return null; } }).filter(Boolean));
+function isSameOrigin(req) {
+    const origin = req.headers.origin;
+    if (origin === undefined) return true;
+    let parsed;
+    try {
+        parsed = new URL(origin); // "null" (sandboxed pages, file://) fails here
+    } catch {
+        return false;
+    }
+    const hosts = [req.headers.host, ...String(req.headers['x-forwarded-host'] || '').split(',')]
+        .map(h => String(h || '').trim().toLowerCase()).filter(Boolean);
+    return hosts.includes(parsed.host.toLowerCase()) || EXTRA_ORIGINS.has(parsed.origin);
+}
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 // Global middleware for origin validation and authentication
 app.use(BASE_PATH, (req, res, next) => {
+    // /mcp and /api/agent-launch: server-local + token (and /mcp refuses any Origin)
+    if (!SAFE_METHODS.has(req.method) && req.path !== '/mcp' && req.path !== '/api/agent-launch' && !isSameOrigin(req)) {
+        console.warn('Blocked cross-site request:', req.method, req.path, 'from', req.headers.origin);
+        return res.status(403).json({ error: 'Origem não permitida.' });
+    }
+
     // List of paths that should be publicly accessible
     const publicPaths = [
         '/login',
@@ -279,6 +316,11 @@ app.use(BASE_PATH, (req, res, next) => {
 
     // Check if the current path matches any of the public paths
     if (publicPaths.some(path => req.path.startsWith(path))) {
+        return next();
+    }
+    // Agent shims (terminal "usar o modo UI?"): own check like /mcp (local + bearer token).
+    // Exact match only: /api/agent-launch/answer comes from the app and needs the login.
+    if (req.path === '/api/agent-launch') {
         return next();
     }
 
@@ -417,6 +459,60 @@ app.post(BASE_PATH + '/login', (req, res) => {
         const attemptsLeft = Math.max(0, MAX_ATTEMPTS - loginAttempts.get(ip).count);
         res.status(401).json({ error: 'Email ou senha incorretos.', attemptsLeft });
     }, crypto.randomInt(50, 150));
+});
+
+// ---------- Pairing another device by QR code ----------
+// A logged-in device shows a QR code; the phone scans it and is logged in without typing
+// the password. Codes are random, single-use and expire in 2 minutes. 2FA isn't asked
+// again: the device that created the code already passed it.
+const PAIR_TTL_MS = 2 * 60 * 1000;
+const pairCodes = new Map(); // code -> expiresAt
+
+function cookieOptions(req) {
+    return {
+        httpOnly: true,
+        secure: req.secure || (BASE_URL.startsWith('https') && NODE_ENV === 'production'),
+        sameSite: 'strict',
+        maxAge: MAX_SESSION_AGE,
+    };
+}
+
+/** Logs this browser in (same cookie as a password login). */
+function grantLogin(req, res) {
+    req.session.authenticated = true;
+    if (AUTH_MODE === 'email') res.cookie(AUTH_COOKIE, createAuthToken(), cookieOptions(req));
+    else if (PIN) res.cookie(`${projectName}_PIN`, PIN, cookieOptions(req));
+}
+
+app.post(BASE_PATH + '/api/pair', async (req, res) => {
+    if (!isAuthRequired) return res.status(400).json({ error: 'Sem login configurado: o app já abre direto.' });
+    const now = Date.now();
+    pairCodes.forEach((expiresAt, code) => { if (expiresAt < now) pairCodes.delete(code); });
+    if (pairCodes.size > 20) return res.status(429).json({ error: 'Códigos demais ativos. Espere 2 minutos.' });
+    const code = crypto.randomBytes(24).toString('base64url');
+    pairCodes.set(code, now + PAIR_TTL_MS);
+    // The address this device is using (the phone must reach the same one)
+    const base = (req.headers.origin && isSameOrigin(req) ? req.headers.origin : BASE_URL).replace(/\/+$/, '');
+    const url = `${base}${BASE_PATH}/login?pair=${code}`;
+    const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
+    res.json({ url, svg, expiresIn: PAIR_TTL_MS / 1000 });
+});
+
+// The phone that scanned the QR code redeems it (public route, rate-limited like the login)
+app.post(BASE_PATH + '/login/pair', (req, res) => {
+    const ip = req.ip;
+    if (isLockedOut(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente mais tarde.' });
+    const code = String((req.body || {}).code || '');
+    const expiresAt = pairCodes.get(code);
+    if (!expiresAt || expiresAt < Date.now()) {
+        recordAttempt(ip);
+        return res.status(401).json({ error: 'Código inválido ou expirado. Gere um novo QR code.' });
+    }
+    pairCodes.delete(code); // single use
+    resetAttempts(ip);
+    grantLogin(req, res);
+    debugLog('Device paired by QR code');
+    res.json({ success: true, redirect: BASE_PATH + '/' });
 });
 
 app.get(BASE_PATH + '/pin-length', (req, res) => {
@@ -657,6 +753,200 @@ app.get(BASE_PATH + '/api/mcp-info', (req, res) => {
     });
 });
 
+// ---------- Agent UI (scripts/agents/) ----------
+
+/** Is `command` an executable on the server's PATH (or an absolute path)? */
+function commandExists(command) {
+    if (!command) return false;
+    const candidates = path.isAbsolute(command)
+        ? [command]
+        : (process.env.PATH || '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, command));
+    return candidates.some(file => {
+        try {
+            fs.accessSync(file, fs.constants.X_OK);
+            return fs.statSync(file).isFile();
+        } catch {
+            return false;
+        }
+    });
+}
+
+const agentGateway = new AgentGateway({
+    store: new AgentStore(DB_PATH),
+    // Agents never get the popup themselves (their shells are not TTYs anyway)
+    env: { ...process.env, MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN },
+    // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
+    mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
+    log: debugLog,
+});
+const agentLauncher = new AgentLauncher({
+    gateway: agentGateway,
+    sessions,
+    prefs: { get: key => sessionStore.getMeta(key), set: (key, value) => sessionStore.setMeta(key, value) },
+    commandExists,
+    log: debugLog,
+});
+// The agent UI runs code on this server: it needs a login (AUTH_EMAIL/AUTH_PASSWORD or PIN)
+if (AGENT_UI_ENABLED && isAuthRequired) {
+    try {
+        writeShims(AGENT_SHIM_DIR, agentGateway.listAgents().filter(a => !a.terminalOnly).map(a => a.id));
+    } catch (e) {
+        console.error('Could not write agent shims:', e.message);
+    }
+}
+
+// Without a login anyone reaching the app could run agents: refuse (shims fall back to the terminal)
+app.use(BASE_PATH + '/api', (req, res, next) => {
+    if (isAuthRequired || !/^\/agent/.test(req.path) || req.path === '/agents') return next();
+    res.status(403).json({ error: 'O modo UI de agentes precisa de login: defina AUTH_EMAIL e AUTH_PASSWORD.' });
+});
+
+/** Runs an agent route: GatewayError -> its status; anything else -> 500. */
+function agentRoute(handler) {
+    return async (req, res) => {
+        try {
+            await handler(req, res);
+        } catch (e) {
+            const status = e instanceof GatewayError ? e.status : 500;
+            if (status >= 500) console.error('Agent route error:', e);
+            res.status(status).json({ error: e.message });
+        }
+    };
+}
+
+// The shim in a terminal asks "open this agent in the UI?" (loopback + token, like the MCP).
+// The request stays open until someone answers the popup (or it times out -> terminal).
+app.post(BASE_PATH + '/api/agent-launch', mcpAuth, agentRoute(async (req, res) => {
+    const { agent, cwd, tabId, prompt } = req.body || {};
+    res.json(await agentLauncher.launch({
+        agent: String(agent || ''),
+        cwd: typeof cwd === 'string' ? cwd : '',
+        tabId: typeof tabId === 'string' ? tabId : null,
+        prompt: typeof prompt === 'string' && prompt.trim() ? prompt.slice(0, 20000) : null,
+    }));
+}));
+
+// Popup answered in a window ([Sim] / [Não], optionally "lembrar minha escolha")
+app.post(BASE_PATH + '/api/agent-launch/answer', (req, res) => {
+    const { requestId, choice, remember } = req.body || {};
+    if (!agentLauncher.answer(String(requestId || ''), { choice, remember: !!remember })) {
+        return res.status(410).json({ error: 'Essa pergunta já foi respondida ou expirou.' });
+    }
+    res.json({ success: true });
+});
+
+app.get(BASE_PATH + '/api/agent-prefs', (req, res) => res.json(agentLauncher.getPrefs()));
+app.put(BASE_PATH + '/api/agent-prefs', (req, res) => res.json(agentLauncher.setPrefs(req.body || {})));
+
+app.get(BASE_PATH + '/api/agents', (req, res) => {
+    res.json({
+        enabled: AGENT_UI_ENABLED && isAuthRequired,
+        needsLogin: !isAuthRequired,
+        agents: agentGateway.listAgents().map(a => ({
+            ...a,
+            installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].command),
+        })),
+    });
+});
+
+// New agent conversation in its own tab ("Nova conversa"), or an old one resumed ("Conversas")
+app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
+    const { agent, cwd, resumeAcpSessionId, title, afterId } = req.body || {};
+    if (typeof cwd !== 'string' || !cwd.trim()) return res.status(400).json({ error: 'Pasta inválida.' });
+    const folder = path.resolve(HOME_DIR, cwd.replace(/^~(?=$|[\\/])/, HOME_DIR));
+    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return res.status(400).json({ error: 'Pasta não encontrada.' });
+    const session = await agentGateway.startSession({
+        agent: String(agent || ''),
+        cwd: folder,
+        title: typeof title === 'string' ? title.slice(0, 120) : null,
+        resumeAcpSessionId: typeof resumeAcpSessionId === 'string' ? resumeAcpSessionId : null,
+    });
+    const def = agentGateway.agents[session.agent];
+    const tab = sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName, afterId: typeof afterId === 'string' ? afterId : undefined });
+    res.status(201).json({ tab, session });
+}));
+
+app.get(BASE_PATH + '/api/agent-sessions/:id', agentRoute(async (req, res) => {
+    const session = agentGateway.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
+    res.json(session);
+}));
+
+app.get(BASE_PATH + '/api/agent-sessions/:id/history', agentRoute(async (req, res) => {
+    const session = agentGateway.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
+    res.json({ sessions: await agentGateway.listHistory({ agent: session.agent, cwd: session.cwd }) });
+}));
+
+// The turn runs in the background: its progress arrives as events on the tab's socket
+app.post(BASE_PATH + '/api/agent-sessions/:id/prompt', agentRoute(async (req, res) => {
+    const body = req.body || {};
+    const text = String(body.text || '');
+    // Pasted/attached images (base64); express.json limits the whole body to 5 MB
+    const images = Array.isArray(body.images) ? body.images.slice(0, 5).map(i => ({ mimeType: String(i && i.mimeType), data: String(i && i.data) })) : [];
+    agentGateway.requireRuntime(req.params.id);
+    if (!text.trim() && !images.length) return res.status(400).json({ error: 'Mensagem vazia.' });
+    agentGateway.prompt(req.params.id, text, { images }).catch(e => debugLog('Agent prompt:', e.message));
+    res.status(202).json({ success: true });
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/cancel', agentRoute(async (req, res) => {
+    agentGateway.cancel(req.params.id);
+    res.json({ success: true });
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/mode', agentRoute(async (req, res) => {
+    await agentGateway.setMode(req.params.id, String((req.body || {}).modeId || ''));
+    res.json(agentGateway.get(req.params.id));
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/config', agentRoute(async (req, res) => {
+    const { configId, value } = req.body || {};
+    await agentGateway.setConfigOption(req.params.id, String(configId || ''), value);
+    res.json(agentGateway.get(req.params.id));
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/permission', agentRoute(async (req, res) => {
+    const { permissionId, optionId } = req.body || {};
+    const ok = agentGateway.respondPermission(req.params.id, String(permissionId || ''), {
+        optionId: optionId ? String(optionId) : null,
+        answeredBy: req.ip || null,
+    });
+    if (!ok) return res.status(410).json({ error: 'Essa permissão já foi respondida.' });
+    res.json({ success: true });
+}));
+
+app.post(BASE_PATH + '/api/agent-sessions/:id/resume', agentRoute(async (req, res) => {
+    res.json(await agentGateway.resumeSession(req.params.id));
+}));
+
+/**
+ * Agent tab socket: replays the session's events after ?since=<seq>, then streams new ones.
+ * Actions (prompt, permission...) go through the REST routes above.
+ */
+function attachAgentTab(ws, row, since) {
+    sessions.sockets.add(ws);
+    const send = message => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+    };
+    const onEvent = event => {
+        if (event.sessionId === row.url) send({ type: 'agent-event', event });
+    };
+    agentGateway.on('event', onEvent);
+    ws.on('close', () => {
+        sessions.sockets.delete(ws);
+        agentGateway.off('event', onEvent);
+    });
+    const session = agentGateway.get(row.url);
+    if (!session) {
+        send({ type: 'agent-missing' });
+        return;
+    }
+    send({ type: 'agent-session', session });
+    for (const event of agentGateway.events(row.url, since)) send({ type: 'agent-event', event });
+    send({ type: 'ready' });
+}
+
 // Declared before "/:id" so "order" isn't taken for an id
 app.put(BASE_PATH + '/api/sessions/order', (req, res) => {
     sessions.setOrder((req.body || {}).ids);
@@ -676,6 +966,9 @@ app.delete(BASE_PATH + '/api/sessions/:id', (req, res) => {
         browsers.closePage(row.id);
         liveWatches.get(row.id)?.();
         liveWatches.delete(row.id);
+    }
+    if (row && row.kind === 'agent' && row.url) {
+        agentGateway.stopAgent(row.url).catch(e => debugLog('Stopping agent:', e.message));
     }
     if (!sessions.close(req.params.id)) return res.status(404).json({ error: 'Session not found' });
     res.json({ success: true });
@@ -836,6 +1129,17 @@ const notifier = new PushNotifier({
     log: (...args) => console.warn('[push]', ...args),
 });
 
+// Push (phone/desktop, even with the app closed): an agent is waiting for a permission.
+agentGateway.on('event', (event) => {
+    if (event.type !== 'permission.request') return;
+    const session = agentGateway.get(event.sessionId);
+    notifier.send({
+        title: `${session ? session.agentLabel : 'Agente'} aguardando permissão`,
+        body: event.data.title || 'Aprovar ação',
+        tag: `agent-permission-${event.sessionId}`,
+    }).catch(e => debugLog('Push (agent permission):', e.message));
+});
+
 app.get(BASE_PATH + '/api/push', (req, res) => {
     res.json({ publicKey: notifier.publicKey, devices: notifier.subscriptions().length });
 });
@@ -919,7 +1223,8 @@ const wss = new WebSocketServer({
         debugLog('Verifying WebSocket connection from:', info.req.headers.origin);
         
         const origin = info.req.headers.origin;
-        const isOriginValid = validateOrigin(origin);
+        // Same origin as the app (cross-site WebSocket hijacking) and the configured list
+        const isOriginValid = isSameOrigin(info.req) && validateOrigin(origin);
         if (isOriginValid) callback(true); // allow the connection
         else {
             console.warn("Blocked connection from origin:", {origin});
@@ -969,6 +1274,8 @@ wss.on('connection', (ws, req) => {
                 quality: params.get('quality'),
                 visible: params.get('visible') !== '0',
             });
+        } else if (row && row.status === 'open' && row.kind === 'agent') {
+            attachAgentTab(ws, row, Math.max(0, Number(params.get('since')) || 0));
         } else if (row && row.status === 'open' && row.kind === 'files') {
             // File tabs use HTTP; the socket only carries workspace notices (MCP open-tab...)
             sessions.sockets.add(ws);
@@ -1039,7 +1346,12 @@ function spawnShell({ id, cwd, cols = 80, rows = 24 }) {
             MEUTERMINAL_MCP_URL: MCP_URL,
             MEUTERMINAL_MCP_TOKEN: MCP_TOKEN,
             // Which tab this shell is (agents pass it to the MCP to open things beside it)
-            ...(id ? { MEUTERMINAL_TAB_ID: id } : {})
+            ...(id ? { MEUTERMINAL_TAB_ID: id } : {}),
+            // Agent UI: shims first on PATH + where they ask "usar o modo UI?" (scripts/agents/)
+            ...(AGENT_UI_ENABLED ? {
+                PATH: `${AGENT_SHIM_DIR}${path.delimiter}${process.env.PATH || ''}`,
+                MEUTERMINAL_API_URL: `http://127.0.0.1:${PORT}${BASE_PATH}/api`,
+            } : {})
         }
     });
 }
@@ -1157,7 +1469,9 @@ function shutdown() {
     browsers.shutdown();
     live.shutdown();
     wss.close();
-    process.exit(0);
+    // Give agent processes a moment to exit cleanly (they are resumable after the restart)
+    Promise.race([agentGateway.shutdown(), new Promise(resolve => setTimeout(resolve, 2000))])
+        .finally(() => process.exit(0));
 }
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

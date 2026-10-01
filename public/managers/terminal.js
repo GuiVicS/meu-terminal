@@ -8,6 +8,7 @@ import StorageManager from './storage.js';
 import TerminalSession, { STATE } from './session.js';
 import BrowserSession from './browserSession.js';
 import FilesSession from './filesSession.js';
+import AgentSession from './agentSession.js';
 import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
@@ -133,7 +134,8 @@ export default class TerminalManager {
     /** Creates a tab view for a server session (no request). Idempotent. */
     addSession(row, { index, activate = false } = {}) {
         if (this.sessions.has(row.id)) return this.sessions.get(row.id);
-        const Kind = row.kind === 'browser' ? BrowserSession : row.kind === 'files' ? FilesSession : TerminalSession;
+        const Kind = row.kind === 'browser' ? BrowserSession : row.kind === 'files' ? FilesSession
+            : row.kind === 'agent' ? AgentSession : TerminalSession;
         const session = new Kind({ row, settings: this.settings, hooks: this.hooks });
 
         const at = index ?? this.sessions.size;
@@ -367,6 +369,54 @@ export default class TerminalManager {
         ], { ...pos, label: `Dividir tela com ${s.name}` });
     }
 
+    /** Folder of the active tab (terminal cwd, files folder, agent folder), for new agent conversations. */
+    currentFolder() {
+        const s = this.active;
+        if (!s) return '~';
+        if (s.kind === 'files') return s.source === 'local' && s.path ? s.path : '~';
+        if (s.kind === 'browser') return this.hooks.suggestFolder(s);
+        return s.cwd || s.startCwd || '~';
+    }
+
+    /** "Nova conversa com agente": pick an agent; the conversation opens in the active tab's folder. */
+    async openAgentMenu(anchor) {
+        let info;
+        try {
+            const r = await fetch(joinPath('api/agents'), { credentials: 'same-origin', cache: 'no-store' });
+            info = await r.json();
+        } catch {
+            toast('Não foi possível listar os agentes.', { tone: 'error' });
+            return;
+        }
+        const folder = this.currentFolder();
+        const agents = (info.agents || []).filter(a => !a.terminalOnly);
+        showMenu(agents.length ? agents.map(a => ({
+            label: a.label,
+            icon: 'bot',
+            hint: a.installed ? '' : 'não instalado',
+            disabled: !a.installed,
+            run: () => this.createAgent(a.id, folder),
+        })) : [{ label: 'Nenhum agente com modo UI', icon: 'info', disabled: true }],
+        { anchor, label: `Nova conversa em ${folder}` });
+    }
+
+    async createAgent(agent, cwd) {
+        try {
+            const r = await fetch(joinPath('api/agent-sessions'), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agent, cwd, afterId: this.activeId || undefined }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.error || `Erro ${r.status}`);
+            await this.reconcile();
+            if (this.sessions.has(data.tab.id)) this.activate(data.tab.id, { focus: true });
+        } catch (e) {
+            toast(`Não foi possível abrir o agente: ${e.message}`, { tone: 'error', duration: 6000 });
+        }
+    }
+
     /** Tells the server which terminal the user works in (agents open things beside it). */
     reportFocus(id) {
         clearTimeout(this.focusTimer);
@@ -446,6 +496,11 @@ export default class TerminalManager {
         }
         if (s.kind === 'files') {
             this.create({ kind: 'files', name: s.name, url: s.source, cwd: s.path, afterId: id });
+            return;
+        }
+        // An agent conversation cannot be cloned: open a terminal in its folder instead
+        if (s.kind === 'agent') {
+            this.create({ cwd: s.cwd || undefined, afterId: id });
             return;
         }
         // A duplicate is a new shell in the same directory - processes can't be cloned
@@ -643,7 +698,7 @@ export default class TerminalManager {
             const s = this.sessions.get(id);
             return {
                 label: s.name,
-                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : 'terminal',
+                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : s.kind === 'agent' ? 'bot' : 'terminal',
                 hint: s.displayCwd(),
                 checked: id === this.activeId,
                 run: () => this.activate(id),
@@ -794,6 +849,8 @@ export default class TerminalManager {
             else this.clearSplit({ keep: m.a });
         } else if (m.type === 'vibe-form' || m.type === 'vibe-form-close') {
             this.events.onVibeForm?.(m);
+        } else if (m.type === 'agent-launch' || m.type === 'agent-launch-close') {
+            this.events.onAgentLaunch?.(m);
         }
     }
 

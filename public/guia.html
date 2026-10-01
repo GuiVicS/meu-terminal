@@ -380,7 +380,15 @@ footer { color: var(--text-2); font-size: 0.85rem; margin-top: 56px; text-align:
                 <li>O app cria a pasta (com <code>git init</code>, se marcado) e divide a tela: <strong>terminal do agente</strong> de um lado e <strong>prévia ao vivo</strong> do outro. Os <strong>arquivos do projeto</strong> abrem numa aba separada.</li>
                 <li>O agente recebe o pedido e começa a construir. Em sites HTML a prévia atualiza a cada arquivo salvo; em Vite/Next ela abre sozinha quando o servidor de desenvolvimento sobe.</li>
             </ol>
-            <h3>Notificações no celular</h3>
+            <h3>Modo UI dos agentes</h3>
+            <p>Além do terminal, o Claude Code e o OpenCode podem rodar numa <strong>aba de conversa</strong>: mensagens formatadas, cartões de cada ação (comandos, arquivos lidos, edições com diff), subagentes, plano e um painel com uso e custo.</p>
+            <ul>
+                <li><strong>Pelo terminal:</strong> ao digitar <code>claude</code> (ou <code>opencode</code>), o app pergunta se você quer abrir no modo UI. "Não" segue no terminal, igual a hoje. Em Configurações → "Modo UI dos agentes" dá para escolher "sempre UI", "sempre terminal" ou "perguntar".</li>
+                <li><strong>Pelo menu:</strong> ⋮ → <strong>Nova conversa com agente</strong> abre na pasta da aba atual. O botão de histórico da aba retoma conversas antigas, inclusive as começadas no terminal.</li>
+                <li><strong>Permissões:</strong> quando o agente quer rodar um comando ou editar um arquivo, aparece um cartão com [Permitir] e [Negar]. Ações perigosas (<code>rm -rf</code>, <code>sudo</code>, escrever fora da pasta, mexer em credenciais) vêm com alerta. Se você estiver fora do app, chega uma notificação push.</li>
+                <li>Chaves de API, tokens e senhas que aparecem nos comandos e saídas ficam escondidos (<code>sk-p…••••••</code>).</li>
+                <li>O modo UI só funciona com login configurado (<code>AUTH_EMAIL</code>/<code>AUTH_PASSWORD</code> ou PIN).</li>
+            </ul>            <h3>Notificações no celular</h3>
             <p>Em ⋮ → Configurações → <strong>Notificações</strong>, toque em "Ativar neste aparelho". A partir daí, quando o agente usar <code>notify</code>, você recebe a notificação com som mesmo com o app fechado. No iPhone, primeiro instale o app na tela inicial (Compartilhar → Adicionar à Tela de Início) e ative por ele. Com o app aberto na tela, o aviso aparece dentro dele, também com som.</p>
         </section>
 
@@ -392,7 +400,8 @@ footer { color: var(--text-2); font-size: 0.85rem; margin-top: 56px; text-align:
                 <li><strong>PIN</strong> (<code>MEUTERMINAL_PIN</code>): só vale quando email e senha estão vazios.</li>
                 <li>Depois de 5 tentativas erradas, o login fica bloqueado por 15 minutos (<code>LOCKOUT_TIME</code>).</li>
             </ul>
-            <h3>Ligar o app autenticador (2 etapas)</h3>
+            <h3>Conectar outro aparelho por QR code</h3>
+            <p>Num aparelho já logado, abra ⋮ → Configurações → <strong>Conectar outro aparelho</strong> → "Mostrar QR code" e aponte a câmera do celular: ele entra sem digitar a senha. O código vale uma vez só, por 2 minutos.</p>            <h3>Ligar o app autenticador (2 etapas)</h3>
             <p>Com a verificação ligada, o login pede também um código de 6 dígitos do celular, que muda a cada 30 segundos. Funciona com Google Authenticator, Microsoft Authenticator, Authy, 2FAS, Aegis, Bitwarden, 1Password e outros.</p>
             <ol class="steps">
                 <li>

@@ -1,0 +1,31 @@
+name: Tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # node-pty (native) isn't needed by the tests: skip install scripts
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Syntax check
+        run: |
+          node --check server.js
+          for f in scripts/*.js scripts/agents/*.js; do node --check "$f"; done
+
+      - name: Run tests
+        run: npm test
