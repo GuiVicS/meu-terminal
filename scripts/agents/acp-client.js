@@ -79,7 +79,8 @@ class AcpClient extends EventEmitter {
             });
             // Writing to a dead agent must not crash the server
             child.stdin.on('error', (error) => this.log('ACP stdin error:', error.message));
-            child.once('exit', (code, signal) => this.onExit(code, signal));
+            // 'close' comes after stderr is fully read: the error message keeps the agent's reason
+            child.once('close', (code, signal) => this.onExit(code, signal));
         });
     }
 
@@ -178,7 +179,8 @@ class AcpClient extends EventEmitter {
     /** Stops the agent: polite SIGTERM, then SIGKILL if it does not exit. */
     kill({ graceMs = 3000 } = {}) {
         // pid is undefined when the process never started (ENOENT): no 'exit' will ever come
-        if (!this.child || this.exited || this.child.pid == null) return Promise.resolve();
+        if (!this.child || this.exited || this.child.pid == null
+            || this.child.exitCode !== null || this.child.signalCode !== null) return Promise.resolve();
         return new Promise((resolve) => {
             const timer = setTimeout(() => {
                 try { this.child.kill('SIGKILL'); } catch { /* already gone */ }

@@ -144,6 +144,7 @@ export default class AgentSession {
             onMode: modeId => this.action('mode', { modeId }).then(s => this.applySession(s)).catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
             onConfig: (configId, value) => this.action('config', { configId, value }).then(s => this.applySession(s)).catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
             searchFiles: query => this.searchFiles(query),
+            onLocalCommand: (name, args) => this.runLocalCommand(name, args),
         });
         this.side = new SidePanel(this.el.side, {
             cwd: () => this.cwd,
@@ -493,19 +494,90 @@ export default class AgentSession {
         }
     }
 
+    /** Commands of the agents' terminal UI that the adapters do not run (composer LOCAL_COMMANDS). */
+    runLocalCommand(name, args) {
+        const head = this.panel.querySelector('.ag-head');
+        const caps = (this.session && this.session.capabilities) || {};
+        // Picks an option of a select by name ("/model opus"), or opens it to choose
+        const choose = (select, wanted) => {
+            if (!select) {
+                this.conversation.note('Este agente não oferece essa opção.', 'info');
+                return;
+            }
+            if (wanted) {
+                const w = wanted.toLowerCase();
+                const opt = [...select.options].find(o => o.value.toLowerCase() === w)
+                    || [...select.options].find(o => o.textContent.toLowerCase().includes(w) || o.value.toLowerCase().includes(w));
+                if (!opt) {
+                    this.conversation.note(`"${wanted}" não encontrado. Opções: ${[...select.options].map(o => o.textContent.trim()).join(', ')}`, 'info');
+                    return;
+                }
+                if (select.value !== opt.value) {
+                    select.value = opt.value;
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                return;
+            }
+            const button = select.nextElementSibling?.matches?.('.ui-select') ? select.nextElementSibling : null;
+            if (button) button.click();
+            else select.focus();
+        };
+        const configSelect = category => {
+            const option = (caps.configOptions || []).find(o => o.category === category && o.type !== 'boolean');
+            return option ? this.panel.querySelector(`select[data-config="${CSS.escape(option.id)}"]`) : null;
+        };
+        const modeSelect = () => this.panel.querySelector('select[data-mode]')
+            || (caps.modeSource === 'config' ? configSelect('mode') : null);
+        switch (name) {
+            case 'resume':
+                return this.openHistory(head.querySelector('[data-act="history"]'), { onlyPast: true, query: args });
+            case 'clear':
+                return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id })
+                    .then(() => this.hooks.onWorkspaceChanged())
+                    .catch(e => toast(e.message, { tone: 'error' }));
+            case 'model': return choose(configSelect('model'), args);
+            case 'effort': return choose(configSelect('thought_level'), args);
+            case 'mode': return choose(modeSelect(), args);
+            case 'plan': return choose(modeSelect(), 'plan');
+            case 'cost':
+                this.panelOpen = true;
+                return this.applyPanel();
+            case 'terminal': return this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id });
+            case 'files': return this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id });
+            case 'attach': return this.composer.openAttachMenu();
+            case 'stop': return this.action('cancel').catch(e => toast(e.message, { tone: 'error' }));
+            case 'help': {
+                const list = this.composer.allCommands().map(c => `/${c.name}${c.description ? ` — ${c.description}` : ''}`);
+                return this.conversation.note(`Comandos disponíveis:\n${list.join('\n')}`, 'info help');
+            }
+            default:
+                return undefined;
+        }
+    }
+
     /** "Conversas": new conversation, or a past one of this agent in this folder (incl. terminal ones). */
-    async openHistory(anchor) {
+    async openHistory(anchor, { onlyPast = false, query = '' } = {}) {
         if (!this.session) return;
         const start = body => api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
             .then(() => this.hooks.onWorkspaceChanged())
             .catch(e => toast(e.message, { tone: 'error' }));
         const items = [{ label: 'Nova conversa', icon: 'plus', run: () => start({}) }];
+        if (onlyPast && !(this.session.capabilities && this.session.capabilities.history)) {
+            this.conversation.note('Este agente não lista conversas anteriores.', 'info');
+            return;
+        }
         if (this.session.capabilities && this.session.capabilities.history) {
             showMenu([...items, 'separator', { label: 'Carregando conversas…', icon: 'loader', run: () => {} }], { anchor, label: 'Conversas' });
             try {
                 const { sessions } = await api('GET', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/history`);
                 const fmt = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-                const past = sessions.slice(0, 20).map(h => ({
+                const q = query.toLowerCase();
+                const found = q ? sessions.filter(h => (h.title || '').toLowerCase().includes(q) || h.sessionId === query) : sessions;
+                // "/resume <id>" or a single match: open it directly
+                if (query && found.length === 1) {
+                    return start({ resumeAcpSessionId: found[0].sessionId, title: found[0].title });
+                }
+                const past = found.slice(0, 20).map(h => ({
                     label: h.title || 'Sem título',
                     hint: h.updatedAt ? fmt.format(new Date(h.updatedAt)) : '',
                     icon: 'history',

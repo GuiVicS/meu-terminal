@@ -71,6 +71,7 @@ const ICONS = {
     star: 'star',
     starOff: 'star-off',
     upload: 'upload',
+    paperclip: 'paperclip',
     download: 'download',
     scissors: 'scissors',
     arrowUp: 'arrow-up',
