@@ -4,6 +4,8 @@
  * monotonic seq (replay after reconnect), permission requests that wait for any device to answer.
  */
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { EventEmitter } = require('events');
 const { AcpClient } = require('./acp-client');
 const { AcpMapper, normalizeConfigOptions } = require('./acp-mapping');
@@ -95,7 +97,7 @@ class AgentGateway extends EventEmitter {
      * Emits 'event' with every normalized event envelope ({ sessionId, seq, type, at, data }).
      */
     constructor({ store, agents = loadAgents(), env = process.env, maxSessions = 4, startTimeoutMs = 60000,
-        maxText, validate = false, mcpServers = [], log = () => {} }) {
+        maxText, validate = false, mcpServers = [], mediaDir = null, log = () => {} }) {
         super();
         this.store = store;
         this.agents = agents;
@@ -105,6 +107,7 @@ class AgentGateway extends EventEmitter {
         this.maxText = maxText;
         this.validate = validate;
         this.mcpServers = mcpServers;
+        this.mediaDir = mediaDir; // images/files the agents produce (served by /api/agent-media)
         this.log = log;
         this.runtimes = new Map(); // sessionId -> running agent state
         // Agent processes never survive a server restart
@@ -395,7 +398,8 @@ class AgentGateway extends EventEmitter {
         // The event log keeps only the images' type and size (not the bytes)
         this.emitEvent(sessionId, 'message.user', {
             text,
-            ...(images.length ? { images: images.map(i => ({ mimeType: i.mimeType, bytes: Math.floor(i.data.length * 3 / 4) })) } : {}),
+            // Saved to disk too, so the conversation shows them again after a reload
+            ...(images.length ? { images: images.map(i => this.storeMedia(sessionId, { kind: 'image', mimeType: i.mimeType, data: i.data })) } : {}),
         });
         this.setState(sessionId, 'thinking');
         try {
@@ -547,6 +551,7 @@ class AgentGateway extends EventEmitter {
             if (type === 'session.info' && data.title) this.store.updateSession(sessionId, { title: String(data.title).slice(0, 120) });
             if (type === 'commands.update') this.enableCapability(sessionId, runtime, 'slashCommands');
             if (type === 'usage.update') this.enableCapability(sessionId, runtime, 'usage');
+            if (data && Array.isArray(data.media)) data.media = data.media.map(m => this.storeMedia(sessionId, m));
             this.emitEvent(sessionId, type, data);
         }
     }
@@ -565,6 +570,45 @@ class AgentGateway extends EventEmitter {
         this.store.updateSession(sessionId, { status: state });
         this.emitEvent(sessionId, 'status', { state });
         this.emit('sessions');
+    }
+
+    /**
+     * Media from an agent (or attached by the user): base64 data is written to
+     * <mediaDir>/<sessionId>/ and replaced by a URL, so the event log stays small. Links to
+     * files on this server keep their path (the UI opens them through the files API).
+     */
+    storeMedia(sessionId, media) {
+        if (!media || typeof media !== 'object') return media;
+        const { data, ...rest } = media;
+        if (!data) {
+            const uri = String(media.uri || '');
+            const local = /^file:\/\//i.test(uri) ? decodeURIComponent(uri.replace(/^file:\/\//i, '')).replace(/^\/([a-zA-Z]:)/, '$1')
+                : (uri.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(uri)) ? uri : null;
+            return { ...rest, ...(local ? { path: local } : /^https?:\/\//i.test(uri) ? { url: uri } : {}) };
+        }
+        if (!this.mediaDir) return { ...rest, error: 'sem pasta para guardar' };
+        let bytes;
+        try {
+            bytes = Buffer.from(String(data), 'base64');
+        } catch {
+            return { ...rest, error: 'conteúdo inválido' };
+        }
+        if (bytes.length > 25 * 1024 * 1024) return { ...rest, bytes: bytes.length, error: 'grande demais (máx. 25 MB)' };
+        const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg',
+            'audio/wav': 'wav', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'application/pdf': 'pdf', 'text/plain': 'txt' };
+        const fromName = /\.([a-z0-9]{1,8})$/i.exec(media.name || '');
+        const ext = EXT[media.mimeType] || (fromName ? fromName[1].toLowerCase() : 'bin');
+        const file = `${crypto.createHash('sha1').update(bytes).digest('hex').slice(0, 16)}.${ext}`;
+        const dir = path.join(this.mediaDir, sessionId);
+        try {
+            fs.mkdirSync(dir, { recursive: true });
+            const target = path.join(dir, file);
+            if (!fs.existsSync(target)) fs.writeFileSync(target, bytes);
+        } catch (e) {
+            this.log('Agent media not saved:', e.message);
+            return { ...rest, error: 'não foi possível salvar' };
+        }
+        return { ...rest, bytes: bytes.length, url: `api/agent-media/${encodeURIComponent(sessionId)}/${file}` };
     }
 
     emitEvent(sessionId, type, data) {

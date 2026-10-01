@@ -38,6 +38,94 @@ function mcpName(name) {
     return parts.length >= 3 ? `${parts[1]} · ${parts.slice(2).join('__')}` : name;
 }
 
+// ---------- media (images, audio, files the agent produced) ----------
+
+const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
+const IMAGE_PATH = /(?:^|[\s"'`(])((?:\/|[A-Za-z]:[\\/])[^\s"'`<>()]+\.(?:png|jpe?g|gif|webp|svg|avif))(?=$|[\s"'`).,;:])/gi;
+
+/** URL to show/download a media item: stored by the server, a file on the server, or the web. */
+function mediaSrc(m, download = false) {
+    if (m.url && /^https?:\/\//i.test(m.url)) return m.url;
+    if (m.url) return `${basePath()}/${m.url}${download ? '?download=1' : ''}`;
+    if (m.path) {
+        const q = new URLSearchParams({ source: 'local', path: m.path, ...(download ? { download: '1' } : {}) });
+        return `${basePath()}/api/files/raw?${q}`;
+    }
+    return null;
+}
+
+function formatBytes(n) {
+    if (!n && n !== 0) return '';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${i ? v.toFixed(1).replace('.', ',') : v} ${units[i]}`;
+}
+
+/** Image paths an agent mentions in text ("salvei em /root/x.png") become previews. */
+function imagePathsIn(text) {
+    if (!text || !window.appConfig?.filesAvailable) return [];
+    const found = new Set();
+    for (const match of String(text).matchAll(IMAGE_PATH)) found.add(match[1]);
+    return [...found].slice(0, 6).map(p => ({ kind: 'image', path: p, name: p.split(/[\\/]/).pop(), fromText: true }));
+}
+
+function mediaHtml(list) {
+    const items = (list || []).map(m => {
+        const name = m.name || (m.path ? m.path.split(/[\\/]/).pop() : '') || (m.kind === 'image' ? 'imagem' : 'arquivo');
+        if (m.error) {
+            return `<div class="ag-media-file error">${icon('info', 16)}<span>${esc(name)}: ${esc(m.error)}</span></div>`;
+        }
+        const src = mediaSrc(m);
+        if (!src) return '';
+        if (m.kind === 'image') {
+            return `<figure class="ag-media-img"><button type="button" data-media-view="${esc(src)}" data-media-name="${esc(name)}"
+                data-media-download="${esc(mediaSrc(m, true) || src)}" aria-label="Ampliar ${esc(name)}"><img src="${esc(src)}" alt="${esc(name)}" loading="lazy"
+                onerror="this.closest('figure').classList.add('broken')"></button>
+                <figcaption><span>${esc(name)}</span>${m.bytes ? `<small>${formatBytes(m.bytes)}</small>` : ''}</figcaption></figure>`;
+        }
+        if (m.kind === 'audio') {
+            return `<div class="ag-media-audio"><audio controls preload="none" src="${esc(src)}"></audio></div>`;
+        }
+        return `<div class="ag-media-file">${icon('file', 18)}<span class="ag-media-name">${esc(name)}${m.bytes || m.size ? ` <small>${formatBytes(m.bytes || m.size)}</small>` : ''}</span>
+            <a class="btn btn-ghost btn-sm" href="${esc(mediaSrc(m, true))}" download>${icon('download', 14)} Baixar</a>
+            ${m.path ? `<button type="button" class="btn btn-ghost btn-sm" data-open-file="${esc(m.path)}">${icon('folder', 14)} Pasta</button>` : ''}</div>`;
+    }).filter(Boolean);
+    return items.length ? `<div class="ag-media">${items.join('')}</div>` : '';
+}
+
+/** Full-screen viewer for an image (tap anywhere / Esc to close). */
+function openLightbox(src, name, download) {
+    const box = document.createElement('div');
+    box.className = 'ag-lightbox';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', name);
+    if ('showPopover' in HTMLElement.prototype) box.setAttribute('popover', 'manual');
+    box.innerHTML = `<div class="ag-lightbox-bar"><span>${esc(name)}</span>
+            <a class="icon-btn" href="${esc(download)}" download aria-label="Baixar">${icon('download', 18)}</a>
+            <button type="button" class="icon-btn" data-close aria-label="Fechar">${icon('x', 18)}</button></div>
+        <img src="${esc(src)}" alt="${esc(name)}">`;
+    const close = () => {
+        document.removeEventListener('keydown', onKey, true);
+        box.classList.add('closing');
+        setTimeout(() => box.remove(), 150);
+    };
+    const onKey = e => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            close();
+        }
+    };
+    box.addEventListener('click', e => {
+        if (!e.target.closest('a')) close();
+    });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(box);
+    if (box.showPopover) box.showPopover();
+}
+
 export default class Conversation {
     /**
      * @param {HTMLElement} log - scroll container
@@ -135,11 +223,16 @@ export default class Conversation {
             case 'message.user':
                 this.endStreams();
                 this.turn = null; // each user message starts a new turn
-                this.add(`${d.images && d.images.length ? `<div class="ag-attach">${icon('fileImage', 14)} ${d.images.length} imagem(ns)</div>` : ''}${esc(d.text)}`,
+                this.add(`${d.images && d.images.length ? (d.images.some(i => i.url) ? mediaHtml(d.images) : `<div class="ag-attach">${icon('fileImage', 14)} ${d.images.length} imagem(ns)</div>`) : ''}${esc(d.text)}`,
                     'ag-user');
                 break;
             case 'message.assistant.delta':
                 this.thought = null;
+                if (d.media && d.media.length) {
+                    this.endStreams();
+                    this.add(mediaHtml(d.media), 'ag-media-row');
+                }
+                if (!d.text) break;
                 if (!this.message) {
                     const el = this.add('', 'ag-assistant md');
                     this.message = { kind: 'message', el, text: '' };
@@ -147,11 +240,15 @@ export default class Conversation {
                 this.message.text += d.text;
                 this.schedule(this.message);
                 break;
-            case 'message.assistant.done':
+            case 'message.assistant.done': {
+                const last = this.message;
                 this.endStreams();
+                const shown = last ? imagePathsIn(last.text) : [];
+                if (shown.length) this.add(mediaHtml(shown), 'ag-media-row');
                 if (d.stopReason === 'cancelled') this.note('Interrompido.');
                 else if (d.stopReason && d.stopReason !== 'end_turn') this.note(`Turno encerrado: ${d.stopReason}`);
                 break;
+            }
             case 'thought.delta':
                 if (!this.thought) {
                     this.message = null;
@@ -190,6 +287,8 @@ export default class Conversation {
                 this.note('Sessão encerrada.');
                 break;
             case 'raw':
+                // Agents' own extension notices (ACP methods starting with "_") are internal status
+                if (/^acp:_/.test(d.source || '')) break;
                 // Nothing disappears: anything the adapter could not map is listed here, collapsed
                 this.add(`<details><summary>${icon('info', 13)} Evento bruto · ${esc(d.source)}</summary><pre>${esc(JSON.stringify(d.payload, null, 2))}</pre></details>`, 'ag-raw');
                 break;
@@ -277,6 +376,13 @@ export default class Conversation {
             if (long) parts.push(`<button type="button" class="ag-link" data-show-all="${esc(d.toolId)}">Ver tudo (${d.output.length.toLocaleString('pt-BR')} caracteres)</button>`);
             if (d.truncated) parts.push('<div class="ag-muted">Saída cortada pelo servidor (muito longa).</div>');
         }
+        const media = [...(d.media || [])];
+        const known = new Set(media.map(m => m.path).filter(Boolean));
+        imagePathsIn(d.output).forEach(m => { if (!known.has(m.path)) media.push(m); });
+        if (media.length) {
+            parts.push(mediaHtml(media));
+            if (d.media && d.media.length && d.kind !== 'task') el.open = true; // the result is the image
+        }
         el.querySelector('.ag-tool-stats').innerHTML = stats;
         body.innerHTML = parts.join('');
         body.hidden = !parts.length;
@@ -363,6 +469,11 @@ export default class Conversation {
     // ---------- clicks ----------
 
     onClick(e) {
+        const view = e.target.closest('[data-media-view]');
+        if (view) {
+            openLightbox(view.dataset.mediaView, view.dataset.mediaName, view.dataset.mediaDownload);
+            return;
+        }
         const perm = e.target.closest('[data-perm]');
         if (perm) {
             perm.closest('.ag-perm-actions').querySelectorAll('button').forEach(b => { b.disabled = true; });

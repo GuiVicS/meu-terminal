@@ -18,6 +18,7 @@ import { createSettingsDialog, createShortcutsDialog } from './ui/dialogs.js';
 import { showMenu } from './ui/contextMenu.js';
 import { icon } from './ui/icons.js';
 import VibeForm from './ui/vibeForm.js';
+import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
 import { toast } from './ui/toast.js';
 
@@ -56,6 +57,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const root = document.documentElement;
     const uiStorage = new StorageManager('meuterminal-');
 
+    // Every <select> in the app gets the themed list (now and when rendered later)
+    autoEnhanceSelects();
     const settings = new SettingsManager();
     const viewport = new ViewportManager();
 
