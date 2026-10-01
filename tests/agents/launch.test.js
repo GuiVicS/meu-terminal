@@ -164,7 +164,9 @@ test('shim client: only bare starts or a single prompt are offered to the UI', (
     assert.equal(classify('codex', ['login']).intercept, false);
     assert.equal(classify('opencode', ['run']).intercept, false);
     assert.equal(classify('opencode', ['serve']).intercept, false);
-    assert.equal(classify('agy', []).intercept, false);
+    assert.equal(classify('agy', []).intercept, true, 'agy has the agent UI now');
+    assert.equal(classify('agy', ['models']).intercept, false);
+    assert.equal(classify('agy', ['--continue']).intercept, false);
 });
 
 /** Tiny HTTP server standing in for MeuTerminal's /api/agent-launch. */

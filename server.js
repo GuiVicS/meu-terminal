@@ -861,7 +861,7 @@ app.get(BASE_PATH + '/api/agents', (req, res) => {
         needsLogin: !isAuthRequired,
         agents: agentGateway.listAgents().map(a => ({
             ...a,
-            installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].command),
+            installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].requires || agentGateway.agents[a.id].command),
         })),
     });
 });
