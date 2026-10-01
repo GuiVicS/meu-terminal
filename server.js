@@ -25,7 +25,7 @@ const QRCode = require('qrcode');
 const AgentStore = require('./scripts/agents/agent-store');
 const { AgentGateway, GatewayError } = require('./scripts/agents/gateway');
 const { AgentLauncher } = require('./scripts/agents/launch');
-const { writeShims } = require('./scripts/agents/shims');
+const { writeShims, writeRcFile } = require('./scripts/agents/shims');
 
 const app = express();
 const server = http.createServer(app);
@@ -771,8 +771,11 @@ function commandExists(command) {
     });
 }
 
+const AGENT_MEDIA_DIR = path.join(path.dirname(DB_PATH), 'agent-media');
 const agentGateway = new AgentGateway({
     store: new AgentStore(DB_PATH),
+    // Images/files produced by agents (or attached to prompts), next to the database (same volume)
+    mediaDir: AGENT_MEDIA_DIR,
     // Agents never get the popup themselves (their shells are not TTYs anyway)
     env: { ...process.env, MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN },
     // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
@@ -786,10 +789,13 @@ const agentLauncher = new AgentLauncher({
     commandExists,
     log: debugLog,
 });
+let agentRcFile = null; // bash --rcfile for MeuTerminal shells (scripts/agents/shims.js)
 // The agent UI runs code on this server: it needs a login (AUTH_EMAIL/AUTH_PASSWORD or PIN)
 if (AGENT_UI_ENABLED && isAuthRequired) {
     try {
         writeShims(AGENT_SHIM_DIR, agentGateway.listAgents().filter(a => !a.terminalOnly).map(a => a.id));
+        // bash reads ~/.bashrc, which may put another folder before the shims: fix PATH after it
+        if (path.basename(SHELL) === 'bash') agentRcFile = writeRcFile(AGENT_SHIM_DIR);
     } catch (e) {
         console.error('Could not write agent shims:', e.message);
     }
@@ -849,6 +855,18 @@ app.get(BASE_PATH + '/api/agents', (req, res) => {
     });
 });
 
+// Images/files an agent produced (or the user attached): /api/agent-media/<session>/<file>
+app.get(BASE_PATH + '/api/agent-media/:session/:file', (req, res) => {
+    const { session, file } = req.params;
+    if (!/^[\w-]{1,80}$/.test(session) || !/^[a-f0-9]{16}\.[a-z0-9]{1,8}$/.test(file)) return res.status(404).end();
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Content-Security-Policy', 'sandbox'); // an SVG/HTML from an agent never runs as the app
+    res.set('Cache-Control', 'private, max-age=31536000, immutable'); // name = content hash
+    if (req.query.download === '1') res.attachment(file);
+    res.sendFile(path.join(AGENT_MEDIA_DIR, session, file), err => {
+        if (err && !res.headersSent) res.status(404).end();
+    });
+});
 // New agent conversation in its own tab ("Nova conversa"), or an old one resumed ("Conversas")
 app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
     const { agent, cwd, resumeAcpSessionId, title, afterId } = req.body || {};
@@ -1328,7 +1346,7 @@ wss.on('connection', (ws, req) => {
 
 /** Spawns a shell process (real PTY, or the simulated one in demo mode). */
 function spawnShell({ id, cwd, cols = 80, rows = 24 }) {
-    return ptyModule.spawn(SHELL, [], {
+    return ptyModule.spawn(SHELL, agentRcFile && !DEMO_MODE ? ['--rcfile', agentRcFile] : [], {
         name: 'xterm-256color',
         cols,
         rows,

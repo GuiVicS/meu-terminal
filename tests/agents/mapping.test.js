@@ -76,3 +76,49 @@ test('permission requests keep the agent option ids', () => {
     assert.deepEqual(data.input, { command: 'rm -rf x' });
     assert.deepEqual(data.options, [{ id: 'ok', name: 'Allow', kind: 'allow_once' }]);
 });
+
+test('media: image, audio, embedded file and file link blocks become media items', () => {
+    const { blockMedia, AcpMapper } = require('../../scripts/agents/acp-mapping');
+    assert.equal(blockMedia({ type: 'text', text: 'oi' }), null);
+    assert.deepEqual(
+        { ...blockMedia({ type: 'image', mimeType: 'image/png', data: 'AAAA' }) },
+        { kind: 'image', mimeType: 'image/png', data: 'AAAA', uri: null, name: null },
+    );
+    assert.equal(blockMedia({ type: 'audio', mimeType: 'audio/wav', data: 'AA' }).kind, 'audio');
+    assert.equal(blockMedia({ type: 'resource', resource: { uri: 'file:///x/a.png', mimeType: 'image/png', blob: 'AA' } }).kind, 'image');
+    const link = blockMedia({ type: 'resource_link', uri: 'file:///tmp/foto.jpg', name: 'foto.jpg' });
+    assert.equal(link.kind, 'image');
+    assert.equal(blockMedia({ type: 'resource_link', uri: 'file:///tmp/r.pdf', name: 'r.pdf' }).kind, 'file');
+
+    const mapper = new AcpMapper();
+    const [tool] = mapper.mapUpdate({
+        sessionUpdate: 'tool_call_update', toolCallId: 'x', status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'feito' } },
+            { type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'AAAA' } }],
+    });
+    assert.equal(tool.data.output, 'feito');
+    assert.equal(tool.data.media.length, 1);
+    const [msg] = mapper.mapUpdate({ sessionUpdate: 'agent_message_chunk', content: { type: 'image', mimeType: 'image/png', data: 'AAAA' } });
+    assert.equal(msg.type, 'message.assistant.delta');
+    assert.equal(msg.data.text, '');
+    assert.equal(msg.data.media[0].kind, 'image');
+});
+
+test('media: the gateway stores base64 on disk and keeps only a URL; file links keep their path', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const pathMod = require('path');
+    const { AgentGateway } = require('../../scripts/agents/gateway');
+    const dir = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'mt-media-'));
+    const gw = Object.create(AgentGateway.prototype);
+    gw.mediaDir = dir;
+    gw.log = () => {};
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const stored = gw.storeMedia('sess-1', { kind: 'image', mimeType: 'image/png', data: png });
+    assert.equal(stored.data, undefined);
+    assert.match(stored.url, /^api\/agent-media\/sess-1\/[a-f0-9]{16}\.png$/);
+    assert.ok(fs.existsSync(pathMod.join(dir, 'sess-1', stored.url.split('/').pop())));
+    assert.equal(gw.storeMedia('sess-1', { kind: 'file', uri: 'file:///tmp/r.pdf', name: 'r.pdf' }).path, '/tmp/r.pdf');
+    assert.equal(gw.storeMedia('sess-1', { kind: 'image', uri: 'https://x.com/a.png' }).url, 'https://x.com/a.png');
+    fs.rmSync(dir, { recursive: true, force: true });
+});

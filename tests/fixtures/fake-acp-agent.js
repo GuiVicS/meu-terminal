@@ -122,6 +122,24 @@ function afterPermission(outcome) {
         _meta: { claudeCode: { toolName: 'Agent', toolResponse: { agentId: 'ag1', agentType: 'Explore', totalTokens: 500, totalDurationMs: 1200, totalToolUseCount: 1, content: [{ type: 'text', text: 'Só ola.txt.' }] } } },
     });
     update({ sessionUpdate: 'tool_call_update', toolCallId: 'sub1', status: 'completed', _meta: agentMeta });
+    // FAKE_AGENT_MEDIA=1: an image generation tool (image block + link to a saved file), an
+    // image in the answer itself and an internal "_auth" notice (like Codex/agy send)
+    if (process.env.FAKE_AGENT_MEDIA) {
+        const png = process.env.FAKE_AGENT_IMAGE
+            ? require('fs').readFileSync(process.env.FAKE_AGENT_IMAGE).toString('base64')
+            : 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+        process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: '_auth/status_update', params: { status: 'ok' } })}\n`);
+        update({ sessionUpdate: 'tool_call', toolCallId: 'img1', title: 'Image generation', kind: 'other', status: 'pending', rawInput: { id: 'exec-1' } });
+        update({
+            sessionUpdate: 'tool_call_update', toolCallId: 'img1', status: 'completed',
+            content: [
+                { type: 'content', content: { type: 'text', text: 'Revised prompt: logo roxo' } },
+                { type: 'content', content: { type: 'image', mimeType: 'image/png', data: png } },
+                { type: 'content', content: { type: 'resource_link', uri: 'file:///tmp/relatorio.pdf', name: 'relatorio.pdf', mimeType: 'application/pdf', size: 2048 } },
+            ],
+        });
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'image', mimeType: 'image/png', data: png }, messageId: 'm2' });
+    }
     update({ sessionUpdate: 'session_info_update', title: 'Criar ola.txt' });
     update({ sessionUpdate: 'usage_update', used: 1234, size: 200000, cost: { amount: 0.01, currency: 'USD' } });
     update({ sessionUpdate: 'something_new_from_the_future', value: 42 });

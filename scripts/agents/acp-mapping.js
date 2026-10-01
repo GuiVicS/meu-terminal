@@ -84,6 +84,35 @@ function blockText(block) {
     return '';
 }
 
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i;
+
+/**
+ * Media of an ACP ContentBlock: images, audio, embedded files (base64) and links to files the
+ * agent created. Returns null for plain text. The gateway stores base64 data on disk and keeps
+ * only a URL in the event log.
+ */
+function blockMedia(block) {
+    if (!block || typeof block !== 'object') return null;
+    const nameOf = uri => (uri ? decodeURIComponent(String(uri).split(/[\\/]/).pop() || '') : '');
+    if (block.type === 'image' && (block.data || block.uri)) {
+        return { kind: 'image', mimeType: block.mimeType || 'image/png', data: block.data || null, uri: block.uri || null, name: nameOf(block.uri) || null };
+    }
+    if (block.type === 'audio' && block.data) {
+        return { kind: 'audio', mimeType: block.mimeType || 'audio/wav', data: block.data, uri: null, name: null };
+    }
+    if (block.type === 'resource' && block.resource && block.resource.blob) {
+        const r = block.resource;
+        const mime = r.mimeType || 'application/octet-stream';
+        return { kind: mime.startsWith('image/') ? 'image' : 'file', mimeType: mime, data: r.blob, uri: r.uri || null, name: nameOf(r.uri) || null };
+    }
+    if (block.type === 'resource_link' && block.uri) {
+        const mime = block.mimeType || '';
+        const isImage = mime.startsWith('image/') || IMAGE_EXT.test(block.uri);
+        return { kind: isImage ? 'image' : 'file', mimeType: mime || null, data: null, uri: block.uri, name: block.name || nameOf(block.uri), size: block.size ?? null };
+    }
+    return null;
+}
+
 class AcpMapper {
     /** @param {{ maxText?: number }} [opts] */
     constructor({ maxText = DEFAULT_MAX_TEXT } = {}) {
@@ -98,11 +127,16 @@ class AcpMapper {
      */
     toolContent(content, rawOutput, toolResponse) {
         const texts = [];
+        const media = [];
         const diffs = [];
         const terminals = [];
         let truncated = false;
         for (const item of Array.isArray(content) ? content : []) {
-            if (item.type === 'content') texts.push(blockText(item.content));
+            if (item.type === 'content') {
+                const m = blockMedia(item.content);
+                if (m) media.push(m);
+                else texts.push(blockText(item.content));
+            }
             else if (item.type === 'diff') {
                 const oldText = truncate(item.oldText ?? '', this.maxText);
                 const newText = truncate(item.newText ?? '', this.maxText);
@@ -118,10 +152,16 @@ class AcpMapper {
         if (!texts.length && toolResponse && typeof toolResponse === 'object') {
             if (typeof toolResponse.stdout === 'string') texts.push(toolResponse.stdout);
             if (toolResponse.stderr) texts.push(toolResponse.stderr);
-            if (Array.isArray(toolResponse.content)) texts.push(...toolResponse.content.map(blockText));
+            if (Array.isArray(toolResponse.content)) {
+                for (const block of toolResponse.content) {
+                    const m = blockMedia(block);
+                    if (m) media.push(m);
+                    else texts.push(blockText(block));
+                }
+            }
         }
         const output = truncate(texts.filter(Boolean).join('\n'), this.maxText);
-        return { output: output.text, diffs, terminals, truncated: truncated || output.truncated };
+        return { output: output.text, diffs, terminals, truncated: truncated || output.truncated, ...(media.length ? { media } : {}) };
     }
 
     toolDetails(update) {
@@ -148,7 +188,11 @@ class AcpMapper {
         if (!update || typeof update !== 'object') return [{ type: 'raw', data: { source: 'acp', payload: update } }];
         switch (update.sessionUpdate) {
             case 'agent_message_chunk':
-                return [{ type: 'message.assistant.delta', data: { text: blockText(update.content), messageId: update.messageId || null } }];
+            {
+                // Agents can answer with an image/file instead of (or besides) text
+                const m = blockMedia(update.content);
+                return [{ type: 'message.assistant.delta', data: { text: m ? '' : blockText(update.content), messageId: update.messageId || null, ...(m ? { media: [m] } : {}) } }];
+            }
             case 'agent_thought_chunk':
                 return [{ type: 'thought.delta', data: { text: blockText(update.content), messageId: update.messageId || null } }];
             case 'user_message_chunk':
@@ -320,4 +364,4 @@ class AcpMapper {
     }
 }
 
-module.exports = { AcpMapper, toolKind, blockText, truncate, normalizeConfigOptions };
+module.exports = { blockMedia, AcpMapper, toolKind, blockText, truncate, normalizeConfigOptions };
