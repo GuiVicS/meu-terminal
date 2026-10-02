@@ -45,6 +45,19 @@ function parseTags(json) {
     }
 }
 
+const TASK_LINE = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\[([ xX])\][ \t]/gm;
+
+/** Checklist progress for the note card's progress bar; null when the note has no task list. */
+function taskStats(body) {
+    let total = 0;
+    let done = 0;
+    for (const m of body.matchAll(TASK_LINE)) {
+        total++;
+        if (m[1] !== ' ') done++;
+    }
+    return total ? { total, done } : null;
+}
+
 function toNote(row) {
     return {
         id: row.id,
@@ -96,12 +109,12 @@ class NotesStore {
             args.push(tag.trim());
         }
         const order = trash ? 'deleted_at DESC' : 'pinned DESC, updated_at DESC';
-        return this.db.prepare(`SELECT id, title, substr(body, 1, ${PREVIEW}) AS preview, tags, pinned,
+        return this.db.prepare(`SELECT id, title, body, tags, pinned,
                 created_at, updated_at, deleted_at FROM notes WHERE ${where.join(' AND ')} ORDER BY ${order}`)
             .all(...args)
             .map(r => ({
-                id: r.id, title: r.title, preview: r.preview, tags: parseTags(r.tags), pinned: !!r.pinned,
-                createdAt: r.created_at, updatedAt: r.updated_at, deletedAt: r.deleted_at,
+                id: r.id, title: r.title, preview: r.body.slice(0, PREVIEW), tags: parseTags(r.tags), pinned: !!r.pinned,
+                createdAt: r.created_at, updatedAt: r.updated_at, deletedAt: r.deleted_at, tasks: taskStats(r.body),
             }));
     }
 

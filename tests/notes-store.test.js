@@ -36,6 +36,16 @@ test('list: pinned first, then most recently updated; body is cut to a preview',
     assert.ok(b && c);
 });
 
+test('list: tasks counts the checklist, or null when the note has none', () => {
+    const s = make();
+    s.create({ title: 'sem checklist', body: 'só texto' });
+    s.create({ title: 'com checklist', body: '- [ ] a\n- [x] b\n- [X] c\n* [ ] d\n1. [x] e' });
+    const rows = s.list();
+    const byTitle = Object.fromEntries(rows.map(r => [r.title, r.tasks]));
+    assert.equal(byTitle['sem checklist'], null);
+    assert.deepEqual(byTitle['com checklist'], { total: 5, done: 3 });
+});
+
 test('search matches title, body and tags, and treats % and _ literally', () => {
     const s = make();
     s.create({ title: 'Compras', body: 'leite e pão' });
