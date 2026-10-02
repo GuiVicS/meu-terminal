@@ -36,6 +36,9 @@ services:
       FILES_HOME: ${FILES_HOME:-}
       # Notes tab (on unless set to false)
       NOTES_ENABLED: ${NOTES_ENABLED:-}
+      # Webhooks that run a server-side script (off by default - see /admin → Webhooks)
+      WEBHOOKS_ENABLED: ${WEBHOOKS_ENABLED:-}
+      WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:-}
 
       # (OPTIONAL) Comma-separated list of allowed origins, e.g.
       # https://terminal.example.com,http://192.168.0.10:3000 (unset = allow all)

@@ -18,6 +18,11 @@ const CommandStore = require('./scripts/command-store');
 const NotesStore = require('./scripts/notes-store');
 const BackupStore = require('./scripts/backup-store');
 const BackupRunner = require('./scripts/backup-runner');
+const WebhookStore = require('./scripts/webhook-store');
+const WebhookRunner = require('./scripts/webhook-runner');
+const webhookPresets = require('./scripts/webhook-presets');
+const { resolveInputs } = require('./scripts/webhook-inputs');
+const { verifyHmacSignature } = require('./scripts/webhook-crypto');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
 const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
 const { FileManager, FileError } = require('./scripts/file-manager');
@@ -191,13 +196,46 @@ function recordAttempt(ip) {
     debugLog('Login attempt recorded for IP:', ip, 'Count:', attempts.count);
 }
 
+// ---- Step-up re-authentication ----
+// A handful of actions (creating a webhook, editing its script, issuing a token - see
+// docs/PLANO-WEBHOOKS.md section 3.6.2) ask for the password/PIN again even from an already
+// logged-in session, so a device left unlocked isn't enough to do them. POST /api/reauth (below,
+// next to /verify-pin) checks the credential for whichever AUTH_MODE is active and stamps
+// req.session.reauthAt; requireReauth() here is what the sensitive routes check.
+const REAUTH_MAX_AGE = 5 * 60 * 1000; // how long a step-up check is good for
+function hasRecentReauth(req) {
+    return !isAuthRequired || (!!req.session.reauthAt && Date.now() - req.session.reauthAt < REAUTH_MAX_AGE);
+}
+function requireReauth(req, res) {
+    if (hasRecentReauth(req)) return true;
+    res.status(401).json({ error: 'reauth_necessario' });
+    return false;
+}
+
 // Security middleware
 app.set('trust proxy', 1);
 app.use(cors(getCorsOptions(BASE_URL)));
 // File editor saves text through JSON (5 MB); agent prompts carry base64 images (up to 40 MB)
 const jsonSmall = express.json({ limit: '5mb' });
 const jsonAgentPrompt = express.json({ limit: '40mb' });
-app.use((req, res, next) => (/\/api\/agent-sessions\/[^/]+\/prompt$/.test(req.path) ? jsonAgentPrompt : jsonSmall)(req, res, next));
+// Public webhook triggers (section 3.6.6 of the plan): capped at 64 KB, and the exact raw bytes
+// are kept on req.rawBody - needed to verify an HMAC signature (phase 5), which is computed over
+// the body as sent, not a re-serialization of the parsed JSON.
+const captureRawBody = (req, res, buf) => { req.rawBody = buf; };
+const jsonWebhook = express.json({ limit: '64kb', verify: captureRawBody });
+const urlencodedWebhook = express.urlencoded({ extended: false, limit: '64kb', verify: captureRawBody });
+const HOOK_PATH_RE = /\/hooks\/[^/]+$/;
+app.use((req, res, next) => {
+    if (/\/api\/agent-sessions\/[^/]+\/prompt$/.test(req.path)) return jsonAgentPrompt(req, res, next);
+    if (req.method === 'POST' && HOOK_PATH_RE.test(req.path)) {
+        const parser = String(req.headers['content-type'] || '').includes('urlencoded') ? urlencodedWebhook : jsonWebhook;
+        return parser(req, res, err => {
+            if (!err) return next();
+            res.status(400).json({ error: 'corpo_invalido' });
+        });
+    }
+    return jsonSmall(req, res, next);
+});
 app.use(cookieParser());
 
 // Session configuration with secure settings
@@ -295,7 +333,7 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // Global middleware for origin validation and authentication
 app.use(BASE_PATH, (req, res, next) => {
     // /mcp and /api/agent-launch: server-local + token (and /mcp refuses any Origin)
-    if (!SAFE_METHODS.has(req.method) && req.path !== '/mcp' && req.path !== '/api/agent-launch' && !isSameOrigin(req)) {
+    if (!SAFE_METHODS.has(req.method) && req.path !== '/mcp' && req.path !== '/api/agent-launch' && !req.path.startsWith('/hooks/') && !isSameOrigin(req)) {
         console.warn('Blocked cross-site request:', req.method, req.path, 'from', req.headers.origin);
         return res.status(403).json({ error: 'Origem não permitida.' });
     }
@@ -318,6 +356,8 @@ app.use(BASE_PATH, (req, res, next) => {
         '/service-worker.js',
         // Agents' MCP endpoint: has its own check (local only + bearer token)
         '/mcp',
+        // Public webhook triggers: own check (bearer token or HMAC signature), not the app login
+        '/hooks/',
     ];
 
     // Check if the current path matches any of the public paths
@@ -365,6 +405,7 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         browserAvailable: browsers.available, // Chromium installed: browser tabs enabled
         filesAvailable: FILES_ENABLED, // file manager tabs
         notesAvailable: NOTES_ENABLED, // notes tabs
+        webhooksAvailable: WEBHOOKS_ENABLED, // /admin/webhooks
         hljsVersion: HLJS_VERSION, // syntax highlighting in the agent chat (vendor/hljs/<version>/)
         version: APP_VERSION,
         cacheName: CACHE_NAME
@@ -620,6 +661,46 @@ app.post(BASE_PATH + '/verify-pin', (req, res) => {
     }
 });
 
+// Step-up check: same credential as the normal login (password+2FA code, or PIN), but only
+// stamps req.session.reauthAt instead of logging in - the session was already authenticated to
+// even reach this route. Shares the login's brute-force counters (same risk, same protection).
+app.post(BASE_PATH + '/api/reauth', (req, res) => {
+    if (!isAuthRequired) return res.json({ success: true });
+    const ip = req.ip;
+    if (isLockedOut(ip)) {
+        const attempts = loginAttempts.get(ip);
+        const timeLeft = Math.ceil((LOCKOUT_TIME - (Date.now() - attempts.lastAttempt)) / 1000 / 60);
+        return res.status(429).json({ error: `Muitas tentativas. Tente de novo em ${timeLeft} minuto(s).` });
+    }
+
+    if (AUTH_MODE === 'email') {
+        const { password, code } = req.body || {};
+        if (typeof password !== 'string') return res.status(400).json({ error: 'Informe a senha.' });
+        const passwordOk = safeEqual(password, AUTH_PASSWORD);
+        if (passwordOk && totp) {
+            if (typeof code !== 'string' || !code.trim()) return res.status(401).json({ needCode: true });
+            if (!totp.verify(code)) {
+                recordAttempt(ip);
+                return res.status(401).json({ needCode: true, error: 'Código inválido ou já usado.' });
+            }
+        }
+        if (!passwordOk) {
+            recordAttempt(ip);
+            return res.status(401).json({ error: 'Senha incorreta.' });
+        }
+    } else if (AUTH_MODE === 'pin') {
+        const { pin } = req.body || {};
+        if (typeof pin !== 'string' || !verifyPin(PIN, pin)) {
+            recordAttempt(ip);
+            return res.status(401).json({ error: 'PIN incorreto.' });
+        }
+    }
+
+    resetAttempts(ip);
+    req.session.reauthAt = Date.now();
+    res.json({ success: true });
+});
+
 app.get(BASE_PATH + '/api/require-pin', (req, res) => {
     // No login configured
     if (!isAuthRequired) {
@@ -658,6 +739,10 @@ const browsers = new BrowserManager({
 // Off in the public demo (it would expose the host); DEMO_FILES=true turns it on for tests.
 const FILES_ENABLED = !DEMO_MODE || process.env.DEMO_FILES === 'true';
 const NOTES_ENABLED = process.env.NOTES_ENABLED !== 'false'; // notes tabs (on by default)
+// Webhooks that run a script on the server: off by default (see docs/PLANO-WEBHOOKS.md). The
+// public /hooks/:slug route doesn't exist yet (phases 4-5) - this only gates /admin/webhooks
+// and its API, same as every other optional feature here.
+const WEBHOOKS_ENABLED = process.env.WEBHOOKS_ENABLED === 'true';
 // FILES_HOME: the folder the file manager opens at (default: the shell's home)
 const files = new FileManager({ home: process.env.FILES_HOME || (DEMO_MODE ? os.homedir() : HOME_DIR), log: debugLog });
 
@@ -1325,6 +1410,252 @@ app.delete(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
     res.json({ success: true });
 }));
 
+// ---------- Webhooks (internal CRUD + manual run; the public /hooks/:slug route is phase 4-5) ----------
+const webhooks = new WebhookStore(sessionStore.db);
+const webhookRunner = new WebhookRunner({ store: webhooks, log: debugLog });
+
+const webhooksRoute = handler => (req, res) => {
+    if (!WEBHOOKS_ENABLED) return res.status(404).json({ error: 'Webhooks desligados.' });
+    return handler(req, res);
+};
+
+app.get(BASE_PATH + '/api/webhooks/presets', webhooksRoute((req, res) => {
+    res.json(webhookPresets.list());
+}));
+
+app.get(BASE_PATH + '/api/webhooks', webhooksRoute((req, res) => {
+    res.json(webhooks.list());
+}));
+
+app.post(BASE_PATH + '/api/webhooks', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
+    let body = req.body || {};
+    if (body.preset) {
+        const p = webhookPresets.get(body.preset);
+        if (p) body = { name: p.label, script: p.script, inputs: p.inputs, ...body };
+    }
+    const r = webhooks.create(body);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.status(201).json(r.webhook);
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id', webhooksRoute((req, res) => {
+    const wh = webhooks.get(req.params.id);
+    if (!wh) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    res.json(wh);
+}));
+
+app.put(BASE_PATH + '/api/webhooks/:id', webhooksRoute((req, res) => {
+    // Only editing the script/inputs needs the step-up check (section 3.6.2) - toggling
+    // enabled, renaming, changing the timeout etc. doesn't touch what the webhook runs.
+    const touchesScript = req.body?.script !== undefined || req.body?.inputs !== undefined;
+    if (touchesScript && !requireReauth(req, res)) return;
+    const r = webhooks.update(req.params.id, req.body || {});
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json(r.webhook);
+}));
+
+app.delete(BASE_PATH + '/api/webhooks/:id', webhooksRoute((req, res) => {
+    if (!webhooks.remove(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    res.json({ success: true });
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/duplicate', webhooksRoute((req, res) => {
+    const r = webhooks.duplicate(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.status(201).json(r.webhook);
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/preview', webhooksRoute((req, res) => {
+    const wh = webhooks.get(req.params.id);
+    if (!wh) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    const result = resolveInputs(wh.inputs, { manual: req.body?.values || {} });
+    if (!result.ok) return res.status(400).json({ error: result.error, input: result.input });
+    const secretResult = webhooks.resolveSecrets(wh.id, wh.inputs, result.values);
+    if (!secretResult.ok) return res.status(400).json({ error: secretResult.error, input: secretResult.input });
+    res.json({ script: wh.script, cwd: wh.cwd, env: { ...result.values, MT_WEBHOOK_ID: wh.id, MT_TRIGGER: 'manual' } });
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/run', webhooksRoute(async (req, res) => {
+    const wh = webhooks.get(req.params.id);
+    if (!wh) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    const result = resolveInputs(wh.inputs, { manual: req.body?.values || {} });
+    if (!result.ok) return res.status(400).json({ error: result.error, input: result.input });
+    const secretResult = webhooks.resolveSecrets(wh.id, wh.inputs, result.values);
+    if (!secretResult.ok) return res.status(400).json({ error: secretResult.error, input: secretResult.input });
+    const secretValues = wh.inputs.filter(i => i.type === 'secret').map(i => result.values[i.name]).filter(Boolean);
+    try {
+        res.json(await webhookRunner.run(wh, { trigger: 'manual', values: result.values, secretValues }));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id/runs', webhooksRoute((req, res) => {
+    res.json(webhooks.runs(req.params.id, Number(req.query.limit) || 20));
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id/runs/:run', webhooksRoute((req, res) => {
+    const run = webhooks.getRun(req.params.id, req.params.run);
+    if (!run) return res.status(404).json({ error: 'Execução não encontrada.' });
+    res.json(run);
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/runs/:run/cancel', webhooksRoute((req, res) => {
+    res.json({ success: webhookRunner.cancelActive(req.params.id) });
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id/tokens', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
+    if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    res.json(webhooks.listTokens(req.params.id));
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/tokens', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
+    if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    res.status(201).json(webhooks.createToken(req.params.id, req.body?.name));
+}));
+
+app.delete(BASE_PATH + '/api/webhooks/:id/tokens/:tokenId', webhooksRoute((req, res) => {
+    if (!webhooks.revokeToken(req.params.id, req.params.tokenId)) return res.status(404).json({ error: 'Token não encontrado.' });
+    res.json({ success: true });
+}));
+
+app.put(BASE_PATH + '/api/webhooks/:id/hmac', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
+    if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    try {
+        webhooks.setHmacSecret(req.params.id, req.body?.secret ? String(req.body.secret).slice(0, 500) : null);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+}));
+
+app.put(BASE_PATH + '/api/webhooks/:id/secrets/:name', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
+    if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(req.params.name)) return res.status(400).json({ error: 'Nome de input inválido.' });
+    try {
+        webhooks.setSecretInput(req.params.id, req.params.name, String(req.body?.value ?? '').slice(0, 1000));
+        res.json({ success: true });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id/versions', webhooksRoute((req, res) => {
+    res.json(webhooks.versions(req.params.id));
+}));
+
+// ---------- Webhooks: public trigger route (phases 4-5) ----------
+// Bearer token (default) or HMAC signature (opt-in per webhook, section 3.5). Everything here
+// answers the same generic 404 for "wrong token" and "webhook doesn't exist" (section 3.7), so a
+// failed call can't be used to discover which slugs are registered.
+const webhookAuthAttempts = new Map(); // ip -> { count, lastAttempt } - separate from loginAttempts, same shape
+const WEBHOOK_MAX_ATTEMPTS = 5;
+function isWebhookLockedOut(ip) {
+    const a = webhookAuthAttempts.get(ip);
+    if (!a) return false;
+    if (a.count >= WEBHOOK_MAX_ATTEMPTS && Date.now() - a.lastAttempt < LOCKOUT_TIME) return true;
+    if (a.count >= WEBHOOK_MAX_ATTEMPTS) webhookAuthAttempts.delete(ip);
+    return false;
+}
+function recordWebhookAttempt(ip) {
+    const a = webhookAuthAttempts.get(ip) || { count: 0, lastAttempt: 0 };
+    a.count += 1;
+    a.lastAttempt = Date.now();
+    webhookAuthAttempts.set(ip, a);
+}
+
+// HMAC mode replay protection (section 3.5): an X-Request-Id/Idempotency-Key seen in the last
+// 24h is treated as a repeat and ignored (still answered 202, so retries by the sender are safe).
+const webhookSeenRequestIds = new Map(); // id -> firstSeenAt
+const REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// Per-webhook rate limit (ratePerMin). Checked and recorded synchronously here, in memory - not
+// via webhook_runs/recentRunCount(), because a run is only written to that table once its turn in
+// webhookRunner's queue comes up (webhookRunner.enqueue() defers the actual store.createRun() call
+// to a microtask), so two requests arriving close together could both read the same stale count
+// before either one's run had landed. A plain timestamp array has no such lag.
+const webhookRunWindows = new Map(); // webhookId -> timestamps (ms) of triggers in the last 60s
+function checkAndRecordRate(webhookId, limit) {
+    const windowStart = Date.now() - 60000;
+    const arr = (webhookRunWindows.get(webhookId) || []).filter(t => t > windowStart);
+    if (arr.length >= limit) {
+        webhookRunWindows.set(webhookId, arr);
+        return false;
+    }
+    arr.push(Date.now());
+    webhookRunWindows.set(webhookId, arr);
+    return true;
+}
+
+function tailLines(text, n = 20) {
+    return String(text || '').split('\n').slice(-n).join('\n');
+}
+
+app.post(BASE_PATH + '/hooks/:slug', async (req, res) => {
+    if (!WEBHOOKS_ENABLED) return res.status(404).json({ error: 'nao_encontrado' });
+    const ip = req.ip;
+    if (isWebhookLockedOut(ip)) return res.status(429).json({ error: 'limite' });
+
+    const fail = () => { recordWebhookAttempt(ip); return res.status(404).json({ error: 'nao_encontrado' }); };
+
+    const wh = webhooks.getBySlug(String(req.params.slug || '').toLowerCase());
+    if (!wh || !wh.enabled) return fail();
+
+    if (wh.allowedIps?.length && !wh.allowedIps.includes(ip)) return fail();
+
+    let tokenId = null;
+    if (wh.authMode === 'hmac') {
+        const secret = webhooks.getHmacSecret(wh.id);
+        const sigHeader = req.get('X-Hub-Signature-256') || req.get('X-Signature-256');
+        if (!secret || !req.rawBody || !verifyHmacSignature(req.rawBody, sigHeader, secret)) return fail();
+        const requestId = req.get('X-Request-Id') || req.get('Idempotency-Key');
+        if (requestId) {
+            const now = Date.now();
+            const seenAt = webhookSeenRequestIds.get(requestId);
+            if (seenAt && now - seenAt < REPLAY_WINDOW_MS) return res.status(202).json({ run_id: null, status: 'duplicado' });
+            webhookSeenRequestIds.set(requestId, now);
+        }
+    } else {
+        const m = /^Bearer\s+(\S+)$/.exec(req.get('Authorization') || '');
+        if (!m) return fail();
+        const found = webhooks.findByToken(wh.slug, m[1]);
+        if (!found) return fail();
+        tokenId = found.tokenId;
+    }
+    webhookAuthAttempts.delete(ip);
+
+    if (!checkAndRecordRate(wh.id, wh.ratePerMin || 6)) return res.status(429).json({ error: 'limite' });
+
+    const result = resolveInputs(wh.inputs, { body: req.body || {}, query: req.query, headers: req.headers });
+    if (!result.ok) return res.status(400).json({ error: 'input_invalido', input: result.input });
+    const secretResult = webhooks.resolveSecrets(wh.id, wh.inputs, result.values);
+    if (!secretResult.ok) return res.status(500).json({ error: 'webhook_mal_configurado' });
+    const secretValues = wh.inputs.filter(i => i.type === 'secret').map(i => result.values[i.name]).filter(Boolean);
+
+    let queued;
+    try {
+        queued = webhookRunner.enqueue(wh, { trigger: 'http', sourceIp: ip, tokenId, values: result.values, secretValues });
+    } catch (e) {
+        return res.status(429).json({ error: 'limite' });
+    }
+
+    const waitSec = Math.min(Math.max(0, Number(req.query.wait) || 0), 30);
+    if (waitSec > 0) {
+        const timeout = new Promise(resolve => setTimeout(() => resolve(null), waitSec * 1000));
+        const finished = await Promise.race([queued.done, timeout]).catch(() => null);
+        if (finished) {
+            return res.json({ run_id: queued.runId, status: finished.status, exit_code: finished.exitCode, output: tailLines(finished.output) });
+        }
+    }
+    res.status(202).json({ run_id: queued.runId, status: 'queued' });
+});
+
 // Logout endpoint
 app.post(BASE_PATH + '/logout', (req, res) => {
     debugLog('Logout request received');
@@ -1677,6 +2008,21 @@ setInterval(() => {
         if (now - attempts.lastAttempt >= LOCKOUT_TIME) {
             loginAttempts.delete(ip);
         }
+    }
+    for (const [ip, attempts] of webhookAuthAttempts.entries()) {
+        if (now - attempts.lastAttempt >= LOCKOUT_TIME) {
+            webhookAuthAttempts.delete(ip);
+        }
+    }
+    for (const [id, seenAt] of webhookSeenRequestIds.entries()) {
+        if (now - seenAt >= REPLAY_WINDOW_MS) {
+            webhookSeenRequestIds.delete(id);
+        }
+    }
+    for (const [webhookId, timestamps] of webhookRunWindows.entries()) {
+        const fresh = timestamps.filter(t => now - t < 60000);
+        if (fresh.length) webhookRunWindows.set(webhookId, fresh);
+        else webhookRunWindows.delete(webhookId);
     }
 }, 60000); // Clean up every minute
 

@@ -110,6 +110,7 @@ const ICONS = {
     arrowLeft: 'arrow-left',
     // /admin page
     bell: 'bell',
+    webhook: 'webhook',
     cloudUpload: 'cloud-upload',
     // Notes editor formatting bar
     bold: 'bold',
