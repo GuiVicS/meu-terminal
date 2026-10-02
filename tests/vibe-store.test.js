@@ -98,6 +98,16 @@ test('list: newest-touched project first', async () => {
     assert.equal(s.list()[0].id, b.id);
 });
 
+test('setDeploy: records the last published URL and when', () => {
+    const s = make();
+    const p = s.create({ name: 'X', folder: '/f/x', kind: 'static', description: '', git: true });
+    assert.equal(p.deployUrl, null);
+    s.setDeploy(p.id, 'https://x.vercel.app');
+    const reloaded = s.get(p.id);
+    assert.equal(reloaded.deployUrl, 'https://x.vercel.app');
+    assert.ok(reloaded.deployedAt > 0);
+});
+
 test('remove: deletes the project; byFolder and byTab stop finding it', () => {
     const s = make();
     const p = s.create({ name: 'X', folder: '/f/x', kind: 'static', description: '', git: true });

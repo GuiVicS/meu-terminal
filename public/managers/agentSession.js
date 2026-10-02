@@ -109,6 +109,7 @@ export default class AgentSession {
                     <div class="ag-head-sub"><span class="ag-agent"></span> · <span class="ag-cwd mono"></span></div>
                 </div>
                 <span class="ag-status" role="status"></span>
+                <button type="button" class="btn btn-ghost btn-sm ag-publish" data-act="vibe-publish" aria-label="Publicar no Vercel" title="Publicar no Vercel" hidden>${icon('cloudUpload', 16)} <span class="ag-publish-label">Publicar</span></button>
                 <button type="button" class="icon-btn" data-act="vibe-agent" aria-label="Trocar agente" title="Trocar agente (vibecoding)" hidden>${icon('swap', 18)}</button>
                 <button type="button" class="icon-btn" data-act="history" aria-label="Conversas">${icon('history', 18)}</button>
                 <button type="button" class="icon-btn" data-act="terminal" aria-label="Abrir terminal nesta pasta">${icon('terminal', 18)}</button>
@@ -132,7 +133,7 @@ export default class AgentSession {
             title: q('.ag-head-title'), agent: q('.ag-agent'), cwd: q('.ag-cwd'), status: q('.ag-status'),
             banner: q('.ag-banner'), body: q('.ag-body'), log: q('.ag-log'), jump: q('.ag-jump'),
             pending: q('.ag-pending'), side: q('.ag-side'), panelBtn: q('[data-act="panel"]'),
-            vibeBtn: q('[data-act="vibe-agent"]'),
+            vibeBtn: q('[data-act="vibe-agent"]'), publishBtn: q('[data-act="vibe-publish"]'),
         };
         this.vibeProject = null; // set once checkVibeProject() resolves, if this tab belongs to one
         this.conversation = new Conversation(this.el.log, {
@@ -167,6 +168,7 @@ export default class AgentSession {
             else if (btn.dataset.act === 'files') this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id });
             else if (btn.dataset.act === 'history') this.openHistory(btn);
             else if (btn.dataset.act === 'vibe-agent') this.openVibeAgentMenu(btn);
+            else if (btn.dataset.act === 'vibe-publish') this.publishVibeProject();
         });
         this.el.banner.addEventListener('click', e => {
             if (e.target.closest('[data-resume]')) this.resume();
@@ -192,11 +194,12 @@ export default class AgentSession {
         void this.checkVibeProject();
     }
 
-    /** Only vibecoding tabs get the agent switcher - a plain agent conversation has no project to switch within. */
+    /** Only vibecoding tabs get the agent switcher and "Publicar" - a plain agent conversation has no project. */
     async checkVibeProject() {
         try {
             this.vibeProject = await api('GET', `vibe/tab/${encodeURIComponent(this.id)}`);
             this.el.vibeBtn.hidden = false;
+            this.el.publishBtn.hidden = !this.vibeProject.can_publish;
         } catch {
             this.vibeProject = null;
         }
@@ -230,6 +233,27 @@ export default class AgentSession {
             await api('POST', `vibe/${encodeURIComponent(this.vibeProject.id)}/open`, { agent });
         } catch (e) {
             toast(e.message, { tone: 'error' });
+        }
+    }
+
+    async publishVibeProject() {
+        if (!this.vibeProject) return;
+        const btn = this.el.publishBtn;
+        if (btn.classList.contains('loading')) return;
+        const label = btn.querySelector('.ag-publish-label');
+        btn.classList.add('loading');
+        btn.disabled = true;
+        label.textContent = 'Publicando…';
+        toast('Publicando no Vercel… pode levar alguns minutos.');
+        try {
+            const { url } = await api('POST', `vibe/${encodeURIComponent(this.vibeProject.id)}/publish`);
+            toast('Publicado no Vercel!', { action: { label: 'Abrir', run: () => window.open(url, '_blank', 'noopener') } });
+        } catch (e) {
+            toast(`Falha ao publicar: ${e.message}`, { tone: 'error', duration: 8000 });
+        } finally {
+            btn.classList.remove('loading');
+            btn.disabled = false;
+            label.textContent = 'Publicar';
         }
     }
 

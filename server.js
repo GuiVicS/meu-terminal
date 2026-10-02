@@ -30,6 +30,7 @@ const { FileManager, FileError } = require('./scripts/file-manager');
 const { LiveServers } = require('./scripts/live-server');
 const { Vibe } = require('./scripts/vibe');
 const VibeStore = require('./scripts/vibe-store');
+const { VercelDeploy } = require('./scripts/vercel-deploy');
 const { PushNotifier } = require('./scripts/push');
 const QRCode = require('qrcode');
 const AgentStore = require('./scripts/agents/agent-store');
@@ -848,7 +849,8 @@ const agentLauncher = new AgentLauncher({
 // UI (never a typed shell command).
 const vibe = new Vibe({
     sessions, store: sessionStore, live, setLiveReload, home: files.home,
-    gateway: agentGateway, commandExists, vibeStore: new VibeStore(sessionStore.db), log: debugLog,
+    gateway: agentGateway, commandExists, vibeStore: new VibeStore(sessionStore.db),
+    deployer: new VercelDeploy({ token: process.env.VERCEL_TOKEN }), log: debugLog,
 });
 
 const mcpHandler = createMcpHandler({
@@ -1228,7 +1230,7 @@ app.put(BASE_PATH + '/api/files/favorites', filesRoute(async (req, res) => {
 
 // ---------- Vibecoding (project form -> split agent UI | preview + files tab) ----------
 app.get(BASE_PATH + '/api/vibe/kinds', (req, res) => {
-    res.json({ kinds: vibe.kinds(), agents: vibe.agentOptions(), defaults: vibe.defaults() });
+    res.json({ kinds: vibe.kinds(), agents: vibe.agentOptions(), defaults: vibe.defaults(), vercelConfigured: vibe.deployer.configured });
 });
 
 // "Abrir projeto anterior": every vibecoding project created so far, newest first
@@ -1257,6 +1259,15 @@ app.post(BASE_PATH + '/api/vibe', async (req, res) => {
 app.post(BASE_PATH + '/api/vibe/:id/open', async (req, res) => {
     try {
         res.json(await vibe.openProject(req.params.id, { agent: (req.body || {}).agent || null }));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// "Publicar": deploys the project to Vercel (production). Can take a few minutes.
+app.post(BASE_PATH + '/api/vibe/:id/publish', async (req, res) => {
+    try {
+        res.json(await vibe.publish(req.params.id));
     } catch (e) {
         res.status(400).json({ error: e.message });
     }

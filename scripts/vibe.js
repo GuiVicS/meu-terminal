@@ -78,9 +78,10 @@ class Vibe {
      * @param {import('./agents/gateway').AgentGateway} deps.gateway - starts agents in UI mode
      * @param {(command: string) => boolean} deps.commandExists
      * @param {import('./vibe-store')} deps.vibeStore - persisted projects (previous projects, agent switcher)
+     * @param {import('./vercel-deploy').VercelDeploy} deps.deployer - "Publicar" (Vercel)
      * @param {Function} [deps.log]
      */
-    constructor({ sessions, store, live, setLiveReload, home, gateway, commandExists, vibeStore, log = () => {} }) {
+    constructor({ sessions, store, live, setLiveReload, home, gateway, commandExists, vibeStore, deployer, log = () => {} }) {
         this.sessions = sessions;
         this.store = store;
         this.live = live;
@@ -89,6 +90,7 @@ class Vibe {
         this.gateway = gateway;
         this.commandExists = commandExists;
         this.vibeStore = vibeStore;
+        this.deployer = deployer;
         this.log = log;
         this.pending = new Map(); // requestId -> { resolve, reject, timer }
     }
@@ -269,6 +271,8 @@ class Vibe {
             updated_at: p.updatedAt,
             agents: Object.keys(p.agents),
             last_agent: this.vibeStore.lastAgent(p.id),
+            deploy_url: p.deployUrl,
+            deployed_at: p.deployedAt,
         }));
     }
 
@@ -279,6 +283,9 @@ class Vibe {
         return {
             id: p.id,
             name: p.name,
+            deploy_url: p.deployUrl,
+            deployed_at: p.deployedAt,
+            can_publish: this.deployer.configured,
             agents: Object.entries(p.agents)
                 .filter(([, info]) => info.kind === 'agent') // the MCP flow's terminal entry can't be "switched to"
                 .map(([agent, info]) => ({ agent, tab_id: info.tabId, last_used_at: info.lastUsedAt })),
@@ -322,6 +329,16 @@ class Vibe {
         this.sessions.broadcast({ type: 'split', a: primaryId, b: browserTabId, focus: primaryId });
         this.log(`Vibecoding: reabriu ${project.name} (${chosenAgent})`);
         return { project_id: project.id, agent: chosenAgent, terminal_tab_id: primaryId, browser_tab_id: browserTabId, files_tab_id: filesTabId };
+    }
+
+    /** "Publicar": deploys the project to Vercel (production) and remembers the resulting URL. */
+    async publish(id) {
+        const project = this.vibeStore.get(id);
+        if (!project) throw new Error('Projeto não encontrado.');
+        const url = await this.deployer.deploy(project.folder);
+        this.vibeStore.setDeploy(id, url);
+        this.log(`Vibecoding: ${project.name} publicado em ${url}`);
+        return { url };
     }
 
     // ---------- form round-trip (MCP flow) ----------

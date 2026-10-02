@@ -54,6 +54,9 @@ RUN npm install -g --prefix /usr/local @anthropic-ai/claude-code && npm cache cl
 # OpenCode speaks ACP natively; Codex needs @agentclientprotocol/codex-acp (installed by the user).
 RUN npm install -g --prefix /usr/local @agentclientprotocol/claude-agent-acp && npm cache clean --force
 
+# Vibecoding "Publicar": deploys the project with the Vercel CLI (needs VERCEL_TOKEN set by the user).
+RUN npm install -g --prefix /usr/local vercel && npm cache clean --force
+
 WORKDIR /app
 
 # Copy package files first for better layer caching

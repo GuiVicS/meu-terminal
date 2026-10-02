@@ -26,6 +26,8 @@ class VibeStore {
                 browser_tab_id TEXT,
                 files_tab_id   TEXT,
                 agents_json    TEXT NOT NULL DEFAULT '{}', -- { "<agent>": { tabId, kind, lastUsedAt } }
+                deploy_url     TEXT,
+                deployed_at    INTEGER,
                 created_at     INTEGER NOT NULL,
                 updated_at     INTEGER NOT NULL
             );
@@ -42,7 +44,8 @@ class VibeStore {
         return {
             id: r.id, name: r.name, folder: r.folder, kind: r.kind, description: r.description,
             git: !!r.git, browserTabId: r.browser_tab_id || null, filesTabId: r.files_tab_id || null,
-            agents, createdAt: r.created_at, updatedAt: r.updated_at,
+            agents, deployUrl: r.deploy_url || null, deployedAt: r.deployed_at || null,
+            createdAt: r.created_at, updatedAt: r.updated_at,
         };
     }
 
@@ -92,6 +95,13 @@ class VibeStore {
         if (!p) return null;
         this.db.prepare('UPDATE vibe_projects SET browser_tab_id = COALESCE(?, browser_tab_id), files_tab_id = COALESCE(?, files_tab_id), updated_at = ? WHERE id = ?')
             .run(browserTabId || null, filesTabId || null, Date.now(), id);
+        return this.get(id);
+    }
+
+    /** Remembers the project's last successful "Publicar" (Vercel) deployment. */
+    setDeploy(id, url) {
+        this.db.prepare('UPDATE vibe_projects SET deploy_url = ?, deployed_at = ?, updated_at = ? WHERE id = ?')
+            .run(url, Date.now(), Date.now(), id);
         return this.get(id);
     }
 

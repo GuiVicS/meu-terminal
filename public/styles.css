@@ -1811,6 +1811,8 @@ audio.fm-media { width: min(520px, 90%); }
 .ag-status[data-tone="busy"] { background: var(--accent-soft); color: var(--accent); }
 .ag-status[data-tone="warn"] { background: color-mix(in srgb, var(--c-orange) 18%, transparent); color: var(--c-orange); }
 .ag-status[data-tone="bad"] { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+.ag-publish { flex-shrink: 0; gap: 6px; white-space: nowrap; }
+.ag-publish.loading .icon { animation: ag-spin 0.9s linear infinite; }
 .ag-head .icon-btn { width: 40px; height: 40px; flex-shrink: 0; position: relative; }
 .ag-head .icon-btn.has-activity::after {
     content: ""; position: absolute; top: 9px; right: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
@@ -2038,6 +2040,8 @@ audio.fm-media { width: min(520px, 90%); }
 @media (max-width: 719px), (pointer: coarse) {
     .ag-head { padding-left: 10px; gap: 0; }
     .ag-head [data-act="files"] { display: none; }
+    .ag-publish-label { display: none; }
+    .ag-publish { width: 36px; padding: 0; justify-content: center; }
     .ag-status { padding: 3px 8px; }
     .ag-log { padding: 12px 12px 24px; }
     .ag-user { max-width: 92%; }
