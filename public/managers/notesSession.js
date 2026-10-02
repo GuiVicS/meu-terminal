@@ -55,6 +55,53 @@ async function request(method, route = '', { params, body } = {}) {
 
 const parseTags = text => text.split(',').map(t => t.trim()).filter(Boolean);
 
+// Floating formatting bar: inline wraps (**bold**) or line prefixes (> quote).
+const FORMAT_ACTIONS = [
+    { key: 'bold', icon: 'bold', label: 'Negrito', wrap: ['**', '**'] },
+    { key: 'italic', icon: 'italic', label: 'Itálico', wrap: ['*', '*'] },
+    { key: 'code', icon: 'code', label: 'Código', wrap: ['`', '`'] },
+    { key: 'link', icon: 'link', label: 'Link', wrap: ['[', '](url)'] },
+    { key: 'heading', icon: 'heading', label: 'Título', prefix: '## ' },
+    { key: 'quote', icon: 'quote', label: 'Citação', prefix: '> ' },
+    { key: 'list', icon: 'list', label: 'Lista', prefix: '- ' },
+    { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', prefix: '1. ' },
+    { key: 'check', icon: 'squareCheck', label: 'Checklist', prefix: '- [ ] ' },
+];
+
+// "/" command palette (Notion-style): replaces "/query" with a block snippet.
+const SLASH_BLOCKS = [
+    { key: 'h1', icon: 'heading', label: 'Título 1', snippet: '# ' },
+    { key: 'h2', icon: 'heading', label: 'Título 2', snippet: '## ' },
+    { key: 'h3', icon: 'heading', label: 'Título 3', snippet: '### ' },
+    { key: 'list', icon: 'list', label: 'Lista', snippet: '- ' },
+    { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', snippet: '1. ' },
+    { key: 'check', icon: 'squareCheck', label: 'Checklist', snippet: '- [ ] ' },
+    { key: 'quote', icon: 'quote', label: 'Citação', snippet: '> ' },
+    { key: 'code', icon: 'codeXml', label: 'Bloco de código', snippet: '```\n\n```', caretOffset: 4 },
+    { key: 'hr', icon: 'minus', label: 'Divisória', snippet: '---\n' },
+];
+
+/** Replaces the selection (or inserts a placeholder) wrapped in markers, via execCommand so undo keeps working. */
+function wrapSelection(textarea, before, after) {
+    const { selectionStart: start, selectionEnd: end, value } = textarea;
+    const selected = value.slice(start, end);
+    const placeholder = selected || 'texto';
+    textarea.focus();
+    textarea.setSelectionRange(start, end);
+    document.execCommand('insertText', false, `${before}${placeholder}${after}`);
+    if (!selected) textarea.setSelectionRange(start + before.length, start + before.length + placeholder.length);
+}
+
+/** Prepends a prefix to the current line (not the selection: lists/quotes/headings work on whole lines). */
+function prefixLine(textarea, prefix) {
+    const { selectionStart: start, value } = textarea;
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = value.indexOf('\n', start) === -1 ? value.length : value.indexOf('\n', start);
+    textarea.focus();
+    textarea.setSelectionRange(lineStart, lineEnd);
+    document.execCommand('insertText', false, prefix + value.slice(lineStart, lineEnd));
+}
+
 export default class NotesSession {
     /**
      * @param {object} opts
@@ -94,8 +141,11 @@ export default class NotesSession {
         this.saving = false;
         this.conflict = null; // the other device's version, while the user decides
         this.pendingRemote = false;
-        this.preview = false;
         this.listSeq = 0;
+        this.slashStart = null; // caret position of "/" while the command palette is open
+        this.slashQuery = '';
+        this.slashIndex = 0;
+        this.slashItems = [];
 
         this.active = false;
         this.disposed = false;
@@ -155,7 +205,6 @@ export default class NotesSession {
                             <span class="nt-status" role="status" aria-live="polite"></span>
                             <button type="button" class="btn btn-ghost btn-sm" data-act="restore" hidden>Restaurar</button>
                             <button type="button" class="icon-btn" data-act="pin" aria-label="Fixar no topo" aria-pressed="false" title="Fixar no topo">${icon('pin', 18)}</button>
-                            <button type="button" class="icon-btn" data-act="preview" aria-label="Visualizar" aria-pressed="false" title="Editar / Visualizar">${icon('eye', 18)}</button>
                             <button type="button" class="icon-btn" data-act="more" aria-label="Mais ações">${icon('more', 18)}</button>
                         </div>
                         <div class="nt-conflict" role="alert" hidden>
@@ -168,8 +217,16 @@ export default class NotesSession {
                             ${icon('tag', 14)}
                             <input class="nt-tags-input" type="text" placeholder="Tags separadas por vírgula" aria-label="Tags" autocomplete="off" autocapitalize="off">
                         </div>
-                        <textarea class="nt-body" placeholder="Escreva em Markdown…" aria-label="Texto da anotação" spellcheck="true"></textarea>
-                        <div class="nt-preview md" hidden></div>
+                        <div class="nt-write">
+                            <textarea class="nt-body" placeholder="Escreva em Markdown… (digite / para inserir um bloco)" aria-label="Texto da anotação" spellcheck="true"></textarea>
+                            <div class="nt-preview md"></div>
+                        </div>
+                        <div class="nt-fbar" hidden>
+                            <ul class="nt-slash" role="listbox" aria-label="Inserir bloco" hidden></ul>
+                            <div class="nt-fbar-row" role="toolbar" aria-label="Formatação">
+                                ${FORMAT_ACTIONS.map(a => `<button type="button" class="nt-fbtn" data-fmt="${a.key}" aria-label="${a.label}" title="${a.label}">${icon(a.icon, 17)}</button>`).join('')}
+                            </div>
+                        </div>
                     </div>
                 </section>
                 <button type="button" class="nt-fab" data-act="new" aria-label="Nova anotação">${icon('plus', 22)}</button>
@@ -180,7 +237,8 @@ export default class NotesSession {
             trashbar: q('.nt-trashbar'), listEl: q('.nt-list'), empty: q('.nt-empty'), editor: q('.nt-editor'),
             status: q('.nt-status'), conflict: q('.nt-conflict'), title: q('.nt-title'), tagsInput: q('.nt-tags-input'),
             body: q('.nt-body'), previewEl: q('.nt-preview'), trashBtn: q('[data-act="trash"]'),
-            restoreBtn: q('[data-act="restore"]'), pinBtn: q('[data-act="pin"]'), previewBtn: q('[data-act="preview"]'),
+            restoreBtn: q('[data-act="restore"]'), pinBtn: q('[data-act="pin"]'),
+            fbar: q('.nt-fbar'), slashEl: q('.nt-slash'),
         };
         this.bind();
         this.load();
@@ -200,9 +258,26 @@ export default class NotesSession {
                 return this.load();
             }
             const item = e.target.closest('.nt-item');
-            if (item) this.openNote(item.dataset.id);
+            if (item) return this.openNote(item.dataset.id);
+            const fmt = e.target.closest('[data-fmt]');
+            if (fmt) return this.applyFormat(fmt.dataset.fmt);
+            const slash = e.target.closest('[data-slash]');
+            if (slash) this.pickSlash(slash.dataset.slash);
         });
-        el.previewEl.addEventListener('click', e => onCodeClick(e));
+        el.previewEl.addEventListener('click', e => {
+            const task = e.target.closest('[data-task-index]');
+            if (task) return this.toggleTaskAt(Number(task.dataset.taskIndex));
+            onCodeClick(e);
+        });
+        el.previewEl.addEventListener('keydown', e => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const task = e.target.closest('[data-task-index]');
+            if (!task) return;
+            e.preventDefault();
+            this.toggleTaskAt(Number(task.dataset.taskIndex));
+        });
+        // Clicking a toolbar/slash button must not blur the textarea (that would close the bar first)
+        el.fbar.addEventListener('mousedown', e => e.preventDefault());
         el.searchForm.addEventListener('submit', e => e.preventDefault());
         el.search.addEventListener('input', () => {
             clearTimeout(this.searchTimer);
@@ -211,8 +286,29 @@ export default class NotesSession {
                 this.load();
             }, SEARCH_DELAY);
         });
-        [el.title, el.tagsInput, el.body].forEach(input => input.addEventListener('input', () => this.edited()));
+        [el.title, el.tagsInput].forEach(input => input.addEventListener('input', () => this.edited()));
+        el.body.addEventListener('input', () => {
+            this.edited();
+            this.renderPreview();
+            this.handleSlashInput();
+        });
+        el.body.addEventListener('focus', () => this.showFormatBar());
+        el.body.addEventListener('blur', () => this.hideFormatBar());
+        this.onViewportChange = () => { if (!el.fbar.hidden) this.positionFormatBar(); };
+        window.visualViewport?.addEventListener('resize', this.onViewportChange);
+        window.visualViewport?.addEventListener('scroll', this.onViewportChange);
         this.panel.addEventListener('keydown', e => {
+            if (this.slashStart !== null && e.target === el.body) {
+                if (e.key === 'ArrowDown') { e.preventDefault(); return this.moveSlash(1); }
+                if (e.key === 'ArrowUp') { e.preventDefault(); return this.moveSlash(-1); }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    const block = this.slashItems[this.slashIndex];
+                    if (block) this.pickSlash(block.key);
+                    return;
+                }
+                if (e.key === 'Escape') { e.preventDefault(); return this.closeSlash(); }
+            }
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
                 e.preventDefault();
                 e.stopPropagation();
@@ -230,7 +326,6 @@ export default class NotesSession {
             case 'trash': return this.toggleTrash();
             case 'empty-trash': return this.emptyTrash();
             case 'pin': return this.togglePin();
-            case 'preview': return this.togglePreview();
             case 'restore': return this.restore(this.current?.id);
             case 'more': return this.openEditorMenu(button);
             case 'take-theirs': return this.takeTheirs();
@@ -284,10 +379,12 @@ export default class NotesSession {
         el.listEl.innerHTML = this.list.map(n => {
             const selected = n.id === this.current?.id;
             const preview = n.preview.replace(/```[a-z]*|[#*_`>~]/gi, '').replace(/\s+/g, ' ').trim(); // Markdown marks are noise in a one-line preview
+            const progress = n.tasks ? `<span class="nt-item-progress"><span class="nt-item-bar"><span style="width:${Math.round(n.tasks.done / n.tasks.total * 100)}%"></span></span><small>${n.tasks.done}/${n.tasks.total}</small></span>` : '';
             return `<li class="nt-row${selected ? ' selected' : ''}">
                 <button type="button" class="nt-item" role="option" aria-selected="${selected}" data-id="${esc(n.id)}">
                     <span class="nt-item-title">${n.pinned ? `<span class="nt-pin">${icon('pin', 12)}</span>` : ''}${esc(n.title) || '<em>Sem título</em>'}</span>
                     <span class="nt-item-preview">${esc(preview) || '&nbsp;'}</span>
+                    ${progress}
                     <span class="nt-item-meta">${esc(formatDate(n.deletedAt || n.updatedAt))}${n.tags.length ? ` · ${esc(n.tags.join(', '))}` : ''}</span>
                 </button>
                 <button type="button" class="icon-btn nt-more" data-more="${esc(n.id)}" aria-label="Ações da anotação">${icon('more', 16)}</button>
@@ -348,8 +445,6 @@ export default class NotesSession {
         try {
             this.fill(await request('GET', `/${encodeURIComponent(id)}`));
             this.el.root.dataset.pane = 'editor';
-            this.preview = !!this.current.deletedAt;
-            this.applyPreview();
             this.renderList();
             if (!coarse() && !this.current.deletedAt && !this.current.title && !this.current.body) this.el.title.focus();
         } catch (error) {
@@ -368,8 +463,6 @@ export default class NotesSession {
         try {
             const note = await request('POST', '', { body: { tags: this.tag ? [this.tag] : [] } });
             this.fill(note);
-            this.preview = false;
-            this.applyPreview();
             this.el.root.dataset.pane = 'editor';
             await this.load({ quiet: true });
             if (!coarse()) this.el.title.focus();
@@ -378,26 +471,133 @@ export default class NotesSession {
         }
     }
 
-    togglePreview() {
-        this.preview = !this.preview;
-        this.applyPreview();
-    }
-
-    applyPreview() {
-        const { el } = this;
-        el.body.hidden = this.preview;
-        el.previewEl.hidden = !this.preview;
-        el.previewBtn.setAttribute('aria-pressed', String(this.preview));
-        el.previewBtn.innerHTML = icon(this.preview ? 'edit' : 'eye', 18);
-        el.previewBtn.setAttribute('aria-label', this.preview ? 'Editar' : 'Visualizar');
-        if (this.preview) this.renderPreview();
-    }
-
     renderPreview() {
-        if (!this.preview || !this.current) return;
+        if (!this.current) return;
         const { previewEl } = this.el;
         previewEl.innerHTML = renderMarkdown(this.el.body.value) || '<p class="nt-none">Nada para mostrar ainda.</p>';
         void highlightIn(previewEl);
+    }
+
+    /** Toggles the Nth "- [ ]" line in the raw body (N = the clicked checkbox's data-task-index). */
+    toggleTaskAt(index) {
+        const note = this.current;
+        if (!note || note.deletedAt) return;
+        const lines = this.el.body.value.split('\n');
+        let seen = -1;
+        for (let li = 0; li < lines.length; li++) {
+            const m = lines[li].match(/^\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\]/);
+            if (!m) continue;
+            seen++;
+            if (seen === index) {
+                lines[li] = lines[li].replace(/\[[ xX]\]/, m[1] === ' ' ? '[x]' : '[ ]');
+                break;
+            }
+        }
+        this.el.body.value = lines.join('\n');
+        this.edited();
+        this.renderPreview();
+    }
+
+    // ---------- formatting bar & "/" command palette ----------
+
+    applyFormat(key) {
+        if (!this.current || this.current.deletedAt) return;
+        const action = FORMAT_ACTIONS.find(a => a.key === key);
+        if (!action) return;
+        if (action.wrap) wrapSelection(this.el.body, action.wrap[0], action.wrap[1]);
+        else prefixLine(this.el.body, action.prefix);
+        this.edited();
+        this.renderPreview();
+    }
+
+    showFormatBar() {
+        if (!this.current || this.current.deletedAt) return;
+        this.el.fbar.hidden = false;
+        this.positionFormatBar();
+    }
+
+    hideFormatBar() {
+        this.el.fbar.hidden = true;
+        this.closeSlash();
+    }
+
+    /** Mobile: keeps the bar sitting right above the on-screen keyboard. Desktop uses CSS (sticky). */
+    positionFormatBar() {
+        const vv = window.visualViewport;
+        if (!coarse() || !vv) {
+            this.el.fbar.style.bottom = '';
+            return;
+        }
+        const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        this.el.fbar.style.bottom = `${kb}px`;
+    }
+
+    /** Detects "/" typed at the start of a line (or after a space) and opens/filters the block palette. */
+    handleSlashInput() {
+        const { body } = this.el;
+        const { selectionStart: caret, value } = body;
+        if (this.slashStart !== null) {
+            const sinceSlash = value.slice(this.slashStart, caret);
+            if (caret <= this.slashStart || /[\n ]/.test(sinceSlash.slice(1))) {
+                this.closeSlash();
+            } else {
+                this.slashQuery = sinceSlash.slice(1);
+                this.renderSlashMenu();
+                return;
+            }
+        }
+        const before = caret >= 2 ? value[caret - 2] : undefined;
+        if (value[caret - 1] === '/' && (before === undefined || before === '\n' || before === ' ')) {
+            this.slashStart = caret - 1;
+            this.slashQuery = '';
+            this.slashIndex = 0;
+            this.renderSlashMenu();
+        }
+    }
+
+    renderSlashMenu() {
+        const q = this.slashQuery.toLowerCase();
+        this.slashItems = SLASH_BLOCKS.filter(b => !q || b.label.toLowerCase().includes(q));
+        const { slashEl } = this.el;
+        if (!this.slashItems.length) {
+            slashEl.hidden = true;
+            return;
+        }
+        this.slashIndex = Math.min(this.slashIndex, this.slashItems.length - 1);
+        slashEl.innerHTML = this.slashItems.map((b, i) => `
+            <li role="option" aria-selected="${i === this.slashIndex}" class="${i === this.slashIndex ? 'active' : ''}" data-slash="${b.key}">
+                ${icon(b.icon, 15)}<span>${b.label}</span>
+            </li>`).join('');
+        slashEl.hidden = false;
+    }
+
+    moveSlash(delta) {
+        if (!this.slashItems.length) return;
+        this.slashIndex = (this.slashIndex + delta + this.slashItems.length) % this.slashItems.length;
+        this.renderSlashMenu();
+    }
+
+    closeSlash() {
+        this.slashStart = null;
+        this.slashQuery = '';
+        this.slashIndex = 0;
+        this.slashItems = [];
+        this.el.slashEl.hidden = true;
+    }
+
+    pickSlash(key) {
+        const block = this.slashItems.find(b => b.key === key) || SLASH_BLOCKS.find(b => b.key === key);
+        if (!block || this.slashStart === null) return;
+        const { body } = this.el;
+        const start = this.slashStart; // execCommand below fires 'input' synchronously, which closes the
+        const caret = body.selectionStart; // palette and resets this.slashStart - capture it first
+        body.focus();
+        body.setSelectionRange(start, Math.max(caret, start));
+        document.execCommand('insertText', false, block.snippet);
+        if (block.caretOffset) body.setSelectionRange(start + block.caretOffset, start + block.caretOffset);
+        this.closeSlash();
+        this.edited();
+        this.renderPreview();
     }
 
     setStatus(text) {
@@ -636,7 +836,7 @@ export default class NotesSession {
 
     focus() {
         if (coarse() || !this.el) return;
-        (this.current && !this.current.deletedAt && !this.preview ? this.el.body : this.el.search).focus({ preventScroll: true });
+        (this.current && !this.current.deletedAt ? this.el.body : this.el.search).focus({ preventScroll: true });
     }
 
     applySettings() { /* uses the app theme via CSS */ }
@@ -759,6 +959,10 @@ export default class NotesSession {
         clearTimeout(this.searchTimer);
         this.timers.forEach(clearTimeout);
         this.timers.clear();
+        if (this.onViewportChange) {
+            window.visualViewport?.removeEventListener('resize', this.onViewportChange);
+            window.visualViewport?.removeEventListener('scroll', this.onViewportChange);
+        }
         if (this.ws) {
             this.ws.onclose = null;
             this.ws.close();

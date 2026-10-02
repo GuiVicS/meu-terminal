@@ -91,11 +91,18 @@ function tableRow(line) {
     return line.trim().replace(/^\||\|$/g, '').split('|').map(cell => cell.trim());
 }
 
+// Task list items get a sequential data-task-index, so a caller (e.g. the notes editor) can map
+// a click back to the Nth "- [ ]" line in the source. Reset once per top-level render; the two
+// recursive renderMarkdown() calls below (blockquotes, callouts) keep counting instead of restarting.
+let taskCounter = 0;
+
 /**
  * Markdown -> HTML string (safe to assign to innerHTML).
  * @param {string} source
+ * @param {boolean} [_nested] - internal: true for the recursive calls made from within a render
  */
-export function renderMarkdown(source) {
+export function renderMarkdown(source, _nested) {
+    if (!_nested) taskCounter = 0;
     const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
     const out = [];
     let i = 0;
@@ -159,10 +166,10 @@ export function renderMarkdown(source) {
                 const kind = callout[1].toUpperCase();
                 const def = CALLOUTS[kind];
                 const rest = [callout[2], ...quote.slice(1)].join('\n').trim();
-                out.push(`<div class="md-callout ${kind.toLowerCase()}"><div class="md-callout-title">${icon(def.icon, 15)} ${def.label}</div>${renderMarkdown(rest)}</div>`);
+                out.push(`<div class="md-callout ${kind.toLowerCase()}"><div class="md-callout-title">${icon(def.icon, 15)} ${def.label}</div>${renderMarkdown(rest, true)}</div>`);
                 continue;
             }
-            out.push(`<blockquote>${renderMarkdown(quote.join('\n'))}</blockquote>`);
+            out.push(`<blockquote>${renderMarkdown(quote.join('\n'), true)}</blockquote>`);
             continue;
         }
 
@@ -188,9 +195,12 @@ export function renderMarkdown(source) {
                 const m = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
                 if (m) {
                     const task = m[3].match(/^\[([ xX])\]\s+(.*)$/);
+                    const checked = task && task[1] !== ' ';
                     items.push({
                         indent: m[1].length,
-                        html: task ? `<span class="md-task${task[1] !== ' ' ? ' done' : ''}">${task[1] !== ' ' ? '✓' : '○'}</span> ${inline(esc(task[2]))}` : inline(esc(m[3])),
+                        html: task
+                            ? `<span class="md-task${checked ? ' done' : ''}" data-task-index="${taskCounter++}" role="checkbox" aria-checked="${checked}" tabindex="0">${checked ? '✓' : '○'}</span> ${inline(esc(task[2]))}`
+                            : inline(esc(m[3])),
                     });
                     i++;
                 } else if (/^\s*(`{3,}|~{3,})/.test(lines[i])) {
