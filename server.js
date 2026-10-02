@@ -196,6 +196,22 @@ function recordAttempt(ip) {
     debugLog('Login attempt recorded for IP:', ip, 'Count:', attempts.count);
 }
 
+// ---- Step-up re-authentication ----
+// A handful of actions (creating a webhook, editing its script, issuing a token - see
+// docs/PLANO-WEBHOOKS.md section 3.6.2) ask for the password/PIN again even from an already
+// logged-in session, so a device left unlocked isn't enough to do them. POST /api/reauth (below,
+// next to /verify-pin) checks the credential for whichever AUTH_MODE is active and stamps
+// req.session.reauthAt; requireReauth() here is what the sensitive routes check.
+const REAUTH_MAX_AGE = 5 * 60 * 1000; // how long a step-up check is good for
+function hasRecentReauth(req) {
+    return !isAuthRequired || (!!req.session.reauthAt && Date.now() - req.session.reauthAt < REAUTH_MAX_AGE);
+}
+function requireReauth(req, res) {
+    if (hasRecentReauth(req)) return true;
+    res.status(401).json({ error: 'reauth_necessario' });
+    return false;
+}
+
 // Security middleware
 app.set('trust proxy', 1);
 app.use(cors(getCorsOptions(BASE_URL)));
@@ -643,6 +659,46 @@ app.post(BASE_PATH + '/verify-pin', (req, res) => {
             });
         }, crypto.randomInt(50, 150));
     }
+});
+
+// Step-up check: same credential as the normal login (password+2FA code, or PIN), but only
+// stamps req.session.reauthAt instead of logging in - the session was already authenticated to
+// even reach this route. Shares the login's brute-force counters (same risk, same protection).
+app.post(BASE_PATH + '/api/reauth', (req, res) => {
+    if (!isAuthRequired) return res.json({ success: true });
+    const ip = req.ip;
+    if (isLockedOut(ip)) {
+        const attempts = loginAttempts.get(ip);
+        const timeLeft = Math.ceil((LOCKOUT_TIME - (Date.now() - attempts.lastAttempt)) / 1000 / 60);
+        return res.status(429).json({ error: `Muitas tentativas. Tente de novo em ${timeLeft} minuto(s).` });
+    }
+
+    if (AUTH_MODE === 'email') {
+        const { password, code } = req.body || {};
+        if (typeof password !== 'string') return res.status(400).json({ error: 'Informe a senha.' });
+        const passwordOk = safeEqual(password, AUTH_PASSWORD);
+        if (passwordOk && totp) {
+            if (typeof code !== 'string' || !code.trim()) return res.status(401).json({ needCode: true });
+            if (!totp.verify(code)) {
+                recordAttempt(ip);
+                return res.status(401).json({ needCode: true, error: 'Código inválido ou já usado.' });
+            }
+        }
+        if (!passwordOk) {
+            recordAttempt(ip);
+            return res.status(401).json({ error: 'Senha incorreta.' });
+        }
+    } else if (AUTH_MODE === 'pin') {
+        const { pin } = req.body || {};
+        if (typeof pin !== 'string' || !verifyPin(PIN, pin)) {
+            recordAttempt(ip);
+            return res.status(401).json({ error: 'PIN incorreto.' });
+        }
+    }
+
+    resetAttempts(ip);
+    req.session.reauthAt = Date.now();
+    res.json({ success: true });
 });
 
 app.get(BASE_PATH + '/api/require-pin', (req, res) => {
@@ -1371,6 +1427,7 @@ app.get(BASE_PATH + '/api/webhooks', webhooksRoute((req, res) => {
 }));
 
 app.post(BASE_PATH + '/api/webhooks', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
     let body = req.body || {};
     if (body.preset) {
         const p = webhookPresets.get(body.preset);
@@ -1388,6 +1445,10 @@ app.get(BASE_PATH + '/api/webhooks/:id', webhooksRoute((req, res) => {
 }));
 
 app.put(BASE_PATH + '/api/webhooks/:id', webhooksRoute((req, res) => {
+    // Only editing the script/inputs needs the step-up check (section 3.6.2) - toggling
+    // enabled, renaming, changing the timeout etc. doesn't touch what the webhook runs.
+    const touchesScript = req.body?.script !== undefined || req.body?.inputs !== undefined;
+    if (touchesScript && !requireReauth(req, res)) return;
     const r = webhooks.update(req.params.id, req.body || {});
     if (!r.ok) return res.status(400).json({ error: r.error });
     res.json(r.webhook);
@@ -1445,11 +1506,13 @@ app.post(BASE_PATH + '/api/webhooks/:id/runs/:run/cancel', webhooksRoute((req, r
 }));
 
 app.get(BASE_PATH + '/api/webhooks/:id/tokens', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
     if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
     res.json(webhooks.listTokens(req.params.id));
 }));
 
 app.post(BASE_PATH + '/api/webhooks/:id/tokens', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
     if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
     res.status(201).json(webhooks.createToken(req.params.id, req.body?.name));
 }));
@@ -1460,6 +1523,7 @@ app.delete(BASE_PATH + '/api/webhooks/:id/tokens/:tokenId', webhooksRoute((req, 
 }));
 
 app.put(BASE_PATH + '/api/webhooks/:id/hmac', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
     if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
     try {
         webhooks.setHmacSecret(req.params.id, req.body?.secret ? String(req.body.secret).slice(0, 500) : null);
@@ -1470,6 +1534,7 @@ app.put(BASE_PATH + '/api/webhooks/:id/hmac', webhooksRoute((req, res) => {
 }));
 
 app.put(BASE_PATH + '/api/webhooks/:id/secrets/:name', webhooksRoute((req, res) => {
+    if (!requireReauth(req, res)) return;
     if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
     if (!/^[A-Z_][A-Z0-9_]*$/.test(req.params.name)) return res.status(400).json({ error: 'Nome de input inválido.' });
     try {

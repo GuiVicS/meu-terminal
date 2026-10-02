@@ -61,7 +61,7 @@ function actions(dialog, { confirm, danger = false, cancel = 'Cancelar' }) {
  * Asks for a text (a name). Selects the part before the extension, like file managers.
  * @returns {Promise<string|null>}
  */
-export function askText({ title, label, value = '', confirm = 'OK', placeholder = '', selectStem = false, validate }) {
+export function askText({ title, label, value = '', confirm = 'OK', placeholder = '', selectStem = false, validate, type = 'text' }) {
     const dialog = build(title);
     const body = dialog.querySelector('.dialog-body');
     body.innerHTML = `
@@ -72,6 +72,7 @@ export function askText({ title, label, value = '', confirm = 'OK', placeholder 
         <p class="prompt-error" role="alert"></p>`;
     body.querySelector('.field-label').textContent = label;
     const input = body.querySelector('input');
+    input.type = type;
     input.value = value;
     input.placeholder = placeholder;
     actions(dialog, { confirm });
