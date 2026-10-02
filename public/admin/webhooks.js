@@ -8,12 +8,13 @@
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
 import { askConfirm } from '../ui/prompt.js';
+import { reauthenticate } from '../ui/reauth.js';
 
 function basePath() {
     return (window.appConfig?.basePath || '').replace(/\/+$/, '');
 }
 
-async function api(method, route, body) {
+async function api(method, route, body, { retried = false } = {}) {
     const response = await fetch(`${basePath()}${route}`, {
         method,
         credentials: 'same-origin',
@@ -27,6 +28,14 @@ async function api(method, route, body) {
     }
     const data = await response.json().catch(() => null);
     if (!response.ok) {
+        // Some actions (create a webhook, edit its script, issue a token) ask for the
+        // password/PIN again even in an already logged-in session - see requireReauth() in
+        // server.js. Prompt once and retry the exact same request; give up on a second 401.
+        if (response.status === 401 && data?.error === 'reauth_necessario' && !retried) {
+            const ok = await reauthenticate();
+            if (ok) return api(method, route, body, { retried: true });
+            throw new Error('Ação cancelada.');
+        }
         const err = new Error(data?.error || `Erro ${response.status}`);
         err.input = data?.input;
         throw err;
