@@ -79,6 +79,8 @@ export default class TerminalManager {
         this.search = new SearchBar(workspace, { getSession: () => this.active });
         this.newSessionPage = new NewSessionPage(workspace, {
             onCreate: opts => this.createFromPage(opts),
+            onAgent: anchor => this.openAgentMenu(anchor),
+            onVibecode: () => this.events.onAction('vibecode'),
             onCancel: () => this.closeNewSessionPage(),
             onForget: index => this.forgetRecent(index),
         });
@@ -458,7 +460,7 @@ export default class TerminalManager {
             this.activeId = null;
             if (neighbor !== undefined) this.activate(neighbor, { focus: !isCoarse() });
         }
-        if (this.sessions.size === 0) this.create();
+        if (this.sessions.size === 0) this.openNewSessionPage();
     }
 
     /** Closing a tab is what ends its shell on the server. */
@@ -596,11 +598,13 @@ export default class TerminalManager {
 
     // ---------- new session page & recents ----------
 
-    async openNewSessionPage() {
+    async openNewSessionPage({ advanced = false } = {}) {
         const open = () => this.newSessionPage.open({
             defaultName: 'Automático (Term N)',
             defaultCwd: this.settings.get('defaultCwd'),
             recents: this.recents,
+            closable: this.sessions.size > 0,
+            advanced,
         });
         open();
         this.workspaceEl.classList.add('showing-new-session');
@@ -948,7 +952,7 @@ export default class TerminalManager {
         ['workspace', 'sessionState', 'recent'].forEach(key => this.storage.remove(key));
 
         if (!rows.length) {
-            await this.create();
+            this.openNewSessionPage();
             return;
         }
         rows.forEach(row => this.addSession(row));

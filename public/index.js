@@ -305,6 +305,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             onAction: action => {
                 if (action === 'fullscreen') toggleFullscreen();
                 else if (action === 'settings') settingsDialog.open();
+                else if (action === 'vibecode') vibeForm.open();
             },
         },
     });
@@ -343,7 +344,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 run: () => workspace.createFiles() }] : []),
             ...(config.notesAvailable ? [{ label: 'Anotações', icon: 'notes', hint: `${k.mod}+O`,
                 run: () => workspace.createNotes() }] : []),
-            { label: 'Nova sessão com opções…', icon: 'terminal', run: () => workspace.openNewSessionPage() },
+            { label: 'Nova sessão com opções…', icon: 'terminal', run: () => workspace.openNewSessionPage({ advanced: true }) },
             { label: 'Nova conversa com agente', icon: 'bot', run: () => workspace.openAgentMenu(menuBtn) },
             { label: 'Novo projeto (vibecoding)', icon: 'zap', run: () => vibeForm.open() },
             ...(workspace.activeId ? [workspace.split && workspace.visiblePair()
