@@ -94,6 +94,11 @@ function resolveInputs(defs, ctx) {
     const values = {};
     const files = {};
     for (const def of defs) {
+        // Secret-type inputs never come from the caller (body/query/header) or a manual form -
+        // their value is configured once in /admin and stored server-side. See resolveSecrets()
+        // in webhook-store.js, called after this to fill them in; skipping here means a caller
+        // can never override a script's own API key/password by just naming it in the request.
+        if (def.type === 'secret') continue;
         if (def.type === 'file') {
             const file = ctx.files?.[def.name];
             if (!file) {
@@ -119,8 +124,14 @@ function resolveInputs(defs, ctx) {
         }
         raw = String(raw);
 
-        if (def._extract) {
-            const m = def._extract.exec(raw);
+        // def._extract/_pattern are the RegExps validateDefs() compiles, but they only exist on
+        // the in-memory object it returns - once a webhook round-trips through storage (its JSON
+        // only keeps the source strings, on purpose: see serializeDefs() in webhook-store.js) that
+        // object is gone. Recompile from the string here instead of trusting _extract/_pattern to
+        // survive a reload - every caller of resolveInputs() uses a webhook loaded from storage.
+        const extractRe = def._extract || (def.extract ? new RegExp(def.extract) : null);
+        if (extractRe) {
+            const m = extractRe.exec(raw);
             if (!m) return { ok: false, error: 'Não combina com o padrão esperado.', input: def.name };
             raw = m[1] !== undefined ? m[1] : m[0];
         }
@@ -138,7 +149,8 @@ function resolveInputs(defs, ctx) {
         if (def.maxLength && raw.length > def.maxLength) return { ok: false, error: 'Muito longo.', input: def.name };
         const shapeOk = DEFAULT_PATTERN[def.type] ? DEFAULT_PATTERN[def.type].test(raw) : true;
         if (!shapeOk) return { ok: false, error: 'Formato inválido.', input: def.name };
-        if (def._pattern && !def._pattern.test(raw)) return { ok: false, error: 'Formato inválido.', input: def.name };
+        const patternRe = def._pattern || (def.pattern ? new RegExp(def.pattern) : null);
+        if (patternRe && !patternRe.test(raw)) return { ok: false, error: 'Formato inválido.', input: def.name };
         values[def.name] = raw;
     }
     return { ok: true, values, files };

@@ -287,6 +287,25 @@ class WebhookStore {
         return row ? decrypt(row.value_enc) : undefined;
     }
 
+    /**
+     * Fills in every 'secret'-type input's value from storage (resolveInputs() skips them on
+     * purpose - see the comment there). Call after resolveInputs() succeeds, before running.
+     * @returns {{ok:true}|{ok:false, error:string, input:string}}
+     */
+    resolveSecrets(webhookId, defs, values) {
+        for (const def of defs) {
+            if (def.type !== 'secret') continue;
+            const stored = this.getSecretInput(webhookId, def.name);
+            if (stored === undefined) {
+                if (def.required) return { ok: false, error: 'Segredo não configurado.', input: def.name };
+                if (def.default !== undefined) values[def.name] = def.default;
+                continue;
+            }
+            values[def.name] = stored;
+        }
+        return { ok: true };
+    }
+
     setHmacSecret(webhookId, secret) {
         this.db.prepare('UPDATE webhooks SET auth_mode = ?, hmac_secret = ?, updated_at = ? WHERE id = ?')
             .run(secret ? 'hmac' : 'bearer', secret ? encrypt(secret) : null, Date.now(), webhookId);

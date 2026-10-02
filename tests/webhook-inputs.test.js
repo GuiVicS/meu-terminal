@@ -67,6 +67,27 @@ test('resolveInputs: extract pulls a capture group out of the raw value (e.g. Gi
     assert.equal(bad.ok, false);
 });
 
+test('resolveInputs: extract/pattern still work after a storage round-trip (no _extract/_pattern on the defs, only the strings)', () => {
+    // webhook-store.js only ever keeps `extract`/`pattern` (strings) in the DB - never the compiled
+    // _extract/_pattern validateDefs() attaches (serializeDefs() in webhook-store.js strips them
+    // before every write, on purpose - see the leak it fixed). Simulate a webhook loaded back from
+    // storage: the same strip, then a JSON round-trip (storage is JSON text either way).
+    const stripped = validateDefs([
+        { name: 'BRANCH', type: 'text', source: 'body.ref', extract: '^refs/heads/(.+)$' },
+        { name: 'X', type: 'text', pattern: '^[a-z]+$' },
+    ]).defs.map(({ _pattern, _extract, ...rest }) => rest);
+    const saved = JSON.parse(JSON.stringify(stripped));
+    assert.equal('_extract' in saved[0], false);
+    assert.equal('_pattern' in saved[1], false);
+
+    const ok = resolveInputs(saved, { body: { ref: 'refs/heads/main', x: 'abc' } });
+    assert.equal(ok.ok, true);
+    assert.equal(ok.values.BRANCH, 'main');
+    assert.equal(ok.values.X, 'abc');
+
+    assert.equal(resolveInputs(saved, { body: { ref: 'refs/heads/main', x: 'ABC' } }).ok, false);
+});
+
 test('resolveInputs: a shell metacharacter value is treated as a plain string (never special)', () => {
     const defs = validateDefs([{ name: 'X', type: 'text' }]).defs;
     const malicious = 'main; rm -rf ~ && echo $(whoami) `id`';
@@ -90,6 +111,14 @@ test('resolveInputs: file type checks size and accept list, never touches the co
     const ok = resolveInputs(defs, { files: { ANEXO: { path: '/tmp/x', size: 10, originalName: 'a.pdf' } } });
     assert.equal(ok.ok, true);
     assert.equal(ok.files.ANEXO, '/tmp/x');
+});
+
+test('resolveInputs: secret-type inputs are never read from the caller (webhook-store.js\'s resolveSecrets() fills them in afterwards)', () => {
+    const defs = validateDefs([{ name: 'API_KEY', type: 'secret', required: true }, { name: 'X', type: 'text' }]).defs;
+    const r = resolveInputs(defs, { body: { api_key: 'attacker-supplied', x: 'ok' } });
+    assert.equal(r.ok, true); // "required" is not enforced here for secrets - see resolveSecrets()
+    assert.equal('API_KEY' in r.values, false);
+    assert.equal(r.values.X, 'ok');
 });
 
 test('normalizeScript: converts {{VAR}} to a quoted $VAR, once, at save time', () => {
