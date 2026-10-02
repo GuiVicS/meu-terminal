@@ -823,6 +823,34 @@ app.get(BASE_PATH + '/api/ports', async (req, res) => {
 // Every shell gets MEUTERMINAL_MCP_URL / MEUTERMINAL_MCP_TOKEN (see spawnShell).
 const MCP_TOKEN = mcpToken(sessionStore);
 const MCP_URL = `http://127.0.0.1:${PORT}${BASE_PATH}/mcp`;
+
+// Agent UI gateway and vibecoding both need MCP_URL/MCP_TOKEN above, and the MCP handler just
+// below needs vibe - all three have to sit in this exact order.
+const AGENT_MEDIA_DIR = path.join(path.dirname(DB_PATH), 'agent-media');
+const agentGateway = new AgentGateway({
+    store: new AgentStore(DB_PATH),
+    // Images/files produced by agents (or attached to prompts), next to the database (same volume)
+    mediaDir: AGENT_MEDIA_DIR,
+    // Agents never get the popup themselves (their shells are not TTYs anyway)
+    env: { ...process.env, MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN },
+    // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
+    mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
+    log: debugLog,
+});
+const agentLauncher = new AgentLauncher({
+    gateway: agentGateway,
+    sessions,
+    prefs: { get: key => sessionStore.getMeta(key), set: (key, value) => sessionStore.setMeta(key, value) },
+    commandExists,
+    log: debugLog,
+});
+// Vibecoding: project form -> agent UI tab | live preview (split) + files tab, always the agent
+// UI (never a typed shell command).
+const vibe = new Vibe({
+    sessions, store: sessionStore, live, setLiveReload, home: files.home,
+    gateway: agentGateway, commandExists, vibeStore: new VibeStore(sessionStore.db), log: debugLog,
+});
+
 const mcpHandler = createMcpHandler({
     sessions, store: sessionStore, browsers, files: FILES_ENABLED ? files : null,
     listPorts: exclude => listPorts([...exclude, ...live.ports]), normalizeUrl, port: Number(PORT),
@@ -880,31 +908,6 @@ function commandExists(command) {
     });
 }
 
-const AGENT_MEDIA_DIR = path.join(path.dirname(DB_PATH), 'agent-media');
-const agentGateway = new AgentGateway({
-    store: new AgentStore(DB_PATH),
-    // Images/files produced by agents (or attached to prompts), next to the database (same volume)
-    mediaDir: AGENT_MEDIA_DIR,
-    // Agents never get the popup themselves (their shells are not TTYs anyway)
-    env: { ...process.env, MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN },
-    // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
-    mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
-    log: debugLog,
-});
-const agentLauncher = new AgentLauncher({
-    gateway: agentGateway,
-    sessions,
-    prefs: { get: key => sessionStore.getMeta(key), set: (key, value) => sessionStore.setMeta(key, value) },
-    commandExists,
-    log: debugLog,
-});
-
-// Vibecoding: project form -> agent UI tab | live preview (split) + files tab, always the agent
-// UI (never a typed shell command) - needs the gateway, so this comes after it above.
-const vibe = new Vibe({
-    sessions, store: sessionStore, live, setLiveReload, home: files.home,
-    gateway: agentGateway, commandExists, vibeStore: new VibeStore(sessionStore.db), log: debugLog,
-});
 let agentRcFile = null; // bash --rcfile for MeuTerminal shells (scripts/agents/shims.js)
 // The agent UI runs code on this server: it needs a login (AUTH_EMAIL/AUTH_PASSWORD or PIN)
 if (AGENT_UI_ENABLED && isAuthRequired) {
