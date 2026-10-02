@@ -60,6 +60,7 @@ A lista completa está no `.env.example` e no guia.
 - `npm run dev`: inicia com recarga automática (nodemon)
 - `npm run 2fa`: gera a chave do app autenticador
 - `npm run icons`: gera o conjunto de ícones (Lucide) usado pela interface
+- `npm run build-tiptap`: gera `public/vendor/tiptap.bundle.js` (editor das Anotações) após mudar `scripts/tiptap-entry.js` ou atualizar algum pacote `@tiptap/*` - o arquivo gerado é commitado
 
 ## Licença
 

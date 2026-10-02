@@ -7,8 +7,8 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "start": "npm run copy-xterm && npm run build-tiptap && node server.js",
-    "dev": "npm run copy-xterm && npm run build-tiptap && nodemon server.js",
+    "start": "npm run copy-xterm && node server.js",
+    "dev": "npm run copy-xterm && nodemon server.js",
     "copy-xterm": "node scripts/copy-xterm.js",
     "build-tiptap": "node scripts/build-tiptap.js",
     "2fa": "node scripts/totp-setup.js",
