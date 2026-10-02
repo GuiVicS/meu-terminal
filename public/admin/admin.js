@@ -8,6 +8,7 @@
 import SettingsManager from '../managers/settings.js';
 import CommandsManager from '../managers/commands.js';
 import { mountSettingsSections } from '../ui/dialogs.js';
+import { mountWebhooksSection } from './webhooks.js';
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
 
@@ -17,6 +18,7 @@ const NAV = [
     { slug: 'interface', label: 'Interface', icon: 'monitor' },
     { slug: 'sessoes', label: 'Sessão', icon: 'history' },
     { slug: 'backup', label: 'Backup', icon: 'cloudUpload' },
+    { slug: 'webhooks', label: 'Webhooks', icon: 'webhook', flag: 'webhooksAvailable' },
     { slug: 'aparelhos', label: 'Aparelhos', icon: 'smartphone' },
     { slug: 'notificacoes', label: 'Notificações', icon: 'bell' },
     { slug: 'agentes', label: 'Agentes', icon: 'bot' },
@@ -207,14 +209,19 @@ function mountBackupSection(section) {
 
 // ---------- Page shell: nav + router ----------
 
+function visibleNav() {
+    return NAV.filter(n => !n.flag || window.appConfig?.[n.flag]);
+}
+
 function buildNav(host) {
-    host.innerHTML = NAV.map(n => `
+    host.innerHTML = visibleNav().map(n => `
         <li><a href="#${n.slug}" data-slug="${n.slug}">${icon(n.icon, 17)}<span>${n.label}</span></a></li>`).join('');
 }
 
 function currentSlug() {
     const slug = location.hash.replace('#', '');
-    return NAV.some(n => n.slug === slug) ? slug : NAV[0].slug;
+    const visible = visibleNav();
+    return visible.some(n => n.slug === slug) ? slug : visible[0].slug;
 }
 
 function applyRoute(navToggle, nav) {
@@ -245,6 +252,11 @@ async function main() {
 
     sections.refresh();
     backup.refresh();
+
+    if (window.appConfig?.webhooksAvailable) {
+        page.insertAdjacentHTML('beforeend', '<section class="settings-section wh-section" data-page="webhooks"></section>');
+        mountWebhooksSection(page.querySelector('[data-page="webhooks"]'));
+    }
 
     navList.addEventListener('click', e => {
         const a = e.target.closest('a[data-slug]');

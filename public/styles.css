@@ -2607,3 +2607,44 @@ audio.fm-media { width: min(520px, 90%); }
 .backup-history-row.error span:last-child { color: var(--danger); }
 .backup-history-row.ok span:last-child { color: var(--success); }
 .backup-history-empty { padding: 10px; color: var(--text-3); font-size: 13px; list-style: none; }
+
+/* Webhooks section (admin-only: scripts/webhook-*.js, public/admin/webhooks.js) */
+.wh-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.wh-rows { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wh-row { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-md); }
+.wh-row:hover { background: var(--surface-2); }
+.wh-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 10px; text-align: left; }
+.wh-row-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.wh-off { display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 999px; background: var(--surface-3); color: var(--text-3); font-size: 10.5px; font-weight: 700; text-transform: uppercase; }
+.wh-row-meta { font-size: 12px; color: var(--text-3); }
+.wh-preset-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.wh-preset { width: 100%; text-align: left; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface); border: 1.5px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.wh-preset:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.wh-preset b { font-size: 13.5px; }
+.wh-preset small { color: var(--text-3); font-size: 12px; }
+
+/* .ns-back is already styled (public/ui/newSession.js's "home" link) - reused here as-is */
+.wh-tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--divider); margin-bottom: 18px; }
+.wh-tabs::-webkit-scrollbar { display: none; }
+.wh-tabs button { flex-shrink: 0; padding: 9px 12px; font-size: 13px; font-weight: 600; color: var(--text-3); border-bottom: 2px solid transparent; }
+.wh-tabs button:hover { color: var(--text-2); }
+.wh-tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+
+.wh-input-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.wh-input-row { padding: 10px; border-radius: var(--radius-md); background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; }
+.wh-input-grid { display: grid; grid-template-columns: 1fr 1fr 110px 140px auto auto; gap: 6px; align-items: center; }
+.wh-input-grid input, .wh-input-grid select { height: 34px; padding: 0 8px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--input-bg); color: var(--text); font-size: 12.5px; }
+.wh-input-check { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.wh-input-row > input[data-wi="default"], .wh-input-row > input[data-wi="options"] {
+    height: 32px; padding: 0 8px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--input-bg); color: var(--text); font-size: 12.5px;
+}
+@media (max-width: 719px) { .wh-input-grid { grid-template-columns: 1fr 1fr; } }
+
+.wh-token-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.wh-hmac-row { display: flex; gap: 8px; margin-top: 8px; }
+.wh-hmac-row input { flex: 1; height: 36px; padding: 0 10px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--input-bg); color: var(--text); }
+
+.wh-output {
+    margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface-2);
+    font: 12.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow-y: auto;
+}
