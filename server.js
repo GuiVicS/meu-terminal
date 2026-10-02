@@ -18,6 +18,10 @@ const CommandStore = require('./scripts/command-store');
 const NotesStore = require('./scripts/notes-store');
 const BackupStore = require('./scripts/backup-store');
 const BackupRunner = require('./scripts/backup-runner');
+const WebhookStore = require('./scripts/webhook-store');
+const WebhookRunner = require('./scripts/webhook-runner');
+const webhookPresets = require('./scripts/webhook-presets');
+const { resolveInputs } = require('./scripts/webhook-inputs');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
 const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
 const { FileManager, FileError } = require('./scripts/file-manager');
@@ -365,6 +369,7 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         browserAvailable: browsers.available, // Chromium installed: browser tabs enabled
         filesAvailable: FILES_ENABLED, // file manager tabs
         notesAvailable: NOTES_ENABLED, // notes tabs
+        webhooksAvailable: WEBHOOKS_ENABLED, // /admin/webhooks
         hljsVersion: HLJS_VERSION, // syntax highlighting in the agent chat (vendor/hljs/<version>/)
         version: APP_VERSION,
         cacheName: CACHE_NAME
@@ -658,6 +663,10 @@ const browsers = new BrowserManager({
 // Off in the public demo (it would expose the host); DEMO_FILES=true turns it on for tests.
 const FILES_ENABLED = !DEMO_MODE || process.env.DEMO_FILES === 'true';
 const NOTES_ENABLED = process.env.NOTES_ENABLED !== 'false'; // notes tabs (on by default)
+// Webhooks that run a script on the server: off by default (see docs/PLANO-WEBHOOKS.md). The
+// public /hooks/:slug route doesn't exist yet (phases 4-5) - this only gates /admin/webhooks
+// and its API, same as every other optional feature here.
+const WEBHOOKS_ENABLED = process.env.WEBHOOKS_ENABLED === 'true';
 // FILES_HOME: the folder the file manager opens at (default: the shell's home)
 const files = new FileManager({ home: process.env.FILES_HOME || (DEMO_MODE ? os.homedir() : HOME_DIR), log: debugLog });
 
@@ -1322,6 +1331,133 @@ app.delete(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
     if (!notes.trash(id) && !notes.purge(id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
     notesChanged(id);
     res.json({ success: true });
+}));
+
+// ---------- Webhooks (internal CRUD + manual run; the public /hooks/:slug route is phase 4-5) ----------
+const webhooks = new WebhookStore(sessionStore.db);
+const webhookRunner = new WebhookRunner({ store: webhooks, log: debugLog });
+
+const webhooksRoute = handler => (req, res) => {
+    if (!WEBHOOKS_ENABLED) return res.status(404).json({ error: 'Webhooks desligados.' });
+    return handler(req, res);
+};
+
+app.get(BASE_PATH + '/api/webhooks/presets', webhooksRoute((req, res) => {
+    res.json(webhookPresets.list());
+}));
+
+app.get(BASE_PATH + '/api/webhooks', webhooksRoute((req, res) => {
+    res.json(webhooks.list());
+}));
+
+app.post(BASE_PATH + '/api/webhooks', webhooksRoute((req, res) => {
+    let body = req.body || {};
+    if (body.preset) {
+        const p = webhookPresets.get(body.preset);
+        if (p) body = { name: p.label, script: p.script, inputs: p.inputs, ...body };
+    }
+    const r = webhooks.create(body);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.status(201).json(r.webhook);
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id', webhooksRoute((req, res) => {
+    const wh = webhooks.get(req.params.id);
+    if (!wh) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    res.json(wh);
+}));
+
+app.put(BASE_PATH + '/api/webhooks/:id', webhooksRoute((req, res) => {
+    const r = webhooks.update(req.params.id, req.body || {});
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json(r.webhook);
+}));
+
+app.delete(BASE_PATH + '/api/webhooks/:id', webhooksRoute((req, res) => {
+    if (!webhooks.remove(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    res.json({ success: true });
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/duplicate', webhooksRoute((req, res) => {
+    const r = webhooks.duplicate(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.status(201).json(r.webhook);
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/preview', webhooksRoute((req, res) => {
+    const wh = webhooks.get(req.params.id);
+    if (!wh) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    const result = resolveInputs(wh.inputs, { manual: req.body?.values || {} });
+    if (!result.ok) return res.status(400).json({ error: result.error, input: result.input });
+    res.json({ script: wh.script, cwd: wh.cwd, env: { ...result.values, MT_WEBHOOK_ID: wh.id, MT_TRIGGER: 'manual' } });
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/run', webhooksRoute(async (req, res) => {
+    const wh = webhooks.get(req.params.id);
+    if (!wh) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    const result = resolveInputs(wh.inputs, { manual: req.body?.values || {} });
+    if (!result.ok) return res.status(400).json({ error: result.error, input: result.input });
+    const secretValues = wh.inputs.filter(i => i.type === 'secret').map(i => result.values[i.name]).filter(Boolean);
+    try {
+        res.json(await webhookRunner.run(wh, { trigger: 'manual', values: result.values, secretValues }));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id/runs', webhooksRoute((req, res) => {
+    res.json(webhooks.runs(req.params.id, Number(req.query.limit) || 20));
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id/runs/:run', webhooksRoute((req, res) => {
+    const run = webhooks.getRun(req.params.id, req.params.run);
+    if (!run) return res.status(404).json({ error: 'Execução não encontrada.' });
+    res.json(run);
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/runs/:run/cancel', webhooksRoute((req, res) => {
+    res.json({ success: webhookRunner.cancelActive(req.params.id) });
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id/tokens', webhooksRoute((req, res) => {
+    if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    res.json(webhooks.listTokens(req.params.id));
+}));
+
+app.post(BASE_PATH + '/api/webhooks/:id/tokens', webhooksRoute((req, res) => {
+    if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    res.status(201).json(webhooks.createToken(req.params.id, req.body?.name));
+}));
+
+app.delete(BASE_PATH + '/api/webhooks/:id/tokens/:tokenId', webhooksRoute((req, res) => {
+    if (!webhooks.revokeToken(req.params.id, req.params.tokenId)) return res.status(404).json({ error: 'Token não encontrado.' });
+    res.json({ success: true });
+}));
+
+app.put(BASE_PATH + '/api/webhooks/:id/hmac', webhooksRoute((req, res) => {
+    if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    try {
+        webhooks.setHmacSecret(req.params.id, req.body?.secret ? String(req.body.secret).slice(0, 500) : null);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+}));
+
+app.put(BASE_PATH + '/api/webhooks/:id/secrets/:name', webhooksRoute((req, res) => {
+    if (!webhooks.get(req.params.id)) return res.status(404).json({ error: 'Webhook não encontrado.' });
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(req.params.name)) return res.status(400).json({ error: 'Nome de input inválido.' });
+    try {
+        webhooks.setSecretInput(req.params.id, req.params.name, String(req.body?.value ?? '').slice(0, 1000));
+        res.json({ success: true });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+}));
+
+app.get(BASE_PATH + '/api/webhooks/:id/versions', webhooksRoute((req, res) => {
+    res.json(webhooks.versions(req.params.id));
 }));
 
 // Logout endpoint

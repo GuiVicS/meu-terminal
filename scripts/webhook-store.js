@@ -16,6 +16,11 @@ function cleanSlug(raw) {
     return String(raw || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 }
 
+/** validateDefs() attaches compiled _pattern/_extract RegExps for its own use; never store or serve those. */
+function serializeDefs(defs) {
+    return JSON.stringify(defs.map(({ _pattern, _extract, ...rest }) => rest));
+}
+
 function maskValues(values, defs) {
     const secretNames = new Set(defs.filter(d => d.type === 'secret').map(d => d.name));
     const out = {};
@@ -148,14 +153,14 @@ class WebhookStore {
                 cwd, run_mode, concurrency, timeout_sec, rate_per_min, allowed_ips, created_at, updated_at)
             VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
             .run(id, cleanedSlug, String(name || cleanedSlug).slice(0, MAX_NAME), String(description || '').slice(0, 500),
-                preset || null, cleanScript, JSON.stringify(defsResult.defs), cwd || null,
+                preset || null, cleanScript, serializeDefs(defsResult.defs), cwd || null,
                 ['background', 'tab'].includes(runMode) ? runMode : 'background',
                 ['queue', 'skip', 'cancel'].includes(concurrency) ? concurrency : 'queue',
                 Math.min(Math.max(5, Number(timeoutSec) || 300), 3600),
                 Math.min(Math.max(1, Number(ratePerMin) || 6), 120),
                 JSON.stringify(Array.isArray(allowedIps) ? allowedIps.slice(0, 50) : []), now, now);
         this.db.prepare('INSERT INTO webhook_versions (webhook_id, version, script, inputs, changed_at) VALUES (?, 1, ?, ?, ?)')
-            .run(id, cleanScript, JSON.stringify(defsResult.defs), now);
+            .run(id, cleanScript, serializeDefs(defsResult.defs), now);
         return { ok: true, webhook: this.get(id) };
     }
 
@@ -174,7 +179,7 @@ class WebhookStore {
         if (patch.inputs !== undefined) {
             const defsResult = validateDefs(patch.inputs);
             if (!defsResult.ok) return { ok: false, error: defsResult.error };
-            inputs = JSON.stringify(defsResult.defs);
+            inputs = serializeDefs(defsResult.defs);
             scriptChanged = scriptChanged || inputs !== current.inputs;
         }
         let slug = current.slug;
