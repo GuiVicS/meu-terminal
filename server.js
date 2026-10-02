@@ -9,7 +9,6 @@ const { WebSocketServer } = require('ws');
 const http = require('http');
 const os = require('os');
 const fs = require('fs');
-const fsp = fs.promises;
 const { generatePWAManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
 const { TotpVerifier } = require('./scripts/totp');
@@ -1323,65 +1322,6 @@ app.delete(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
     if (!notes.trash(id) && !notes.purge(id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
     notesChanged(id);
     res.json({ success: true });
-}));
-
-// ---------- Notes media (pasted images, attached files - the editor's "/" image and file blocks) ----------
-const NOTES_MEDIA_DIR = path.join(path.dirname(DB_PATH), 'notes-media');
-const NOTES_MEDIA_MAX_BYTES = 25 * 1024 * 1024;
-
-/** Raw request body -> Buffer, capped so a huge upload can't exhaust memory. */
-function readBody(req, maxBytes) {
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        let total = 0;
-        req.on('data', chunk => {
-            total += chunk.length;
-            if (total > maxBytes) {
-                reject(Object.assign(new Error('Arquivo muito grande.'), { status: 413 }));
-                req.destroy();
-                return;
-            }
-            chunks.push(chunk);
-        });
-        req.on('end', () => resolve(Buffer.concat(chunks)));
-        req.on('aborted', () => reject(Object.assign(new Error('Envio cancelado.'), { status: 499 })));
-        req.on('error', reject);
-    });
-}
-
-app.post(BASE_PATH + '/api/notes/:id/media', notesRoute(async (req, res) => {
-    const noteId = req.params.id;
-    if (!notes.get(noteId)) return res.status(404).json({ error: 'Anotação não encontrada.' });
-    let bytes;
-    try {
-        bytes = await readBody(req, NOTES_MEDIA_MAX_BYTES);
-    } catch (e) {
-        return res.status(e.status || 400).json({ error: e.message });
-    }
-    if (!bytes.length) return res.status(400).json({ error: 'Arquivo vazio.' });
-    const name = typeof req.query.name === 'string' ? req.query.name : 'arquivo';
-    const ext = (path.extname(name).slice(1) || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'bin';
-    const file = `${crypto.createHash('sha1').update(bytes).digest('hex').slice(0, 16)}.${ext}`;
-    const dir = path.join(NOTES_MEDIA_DIR, noteId);
-    await fsp.mkdir(dir, { recursive: true });
-    await fsp.writeFile(path.join(dir, file), bytes);
-    res.status(201).json({
-        url: `${BASE_PATH}/api/notes-media/${noteId}/${file}`,
-        name: name.slice(0, 200),
-        size: bytes.length,
-    });
-}));
-
-app.get(BASE_PATH + '/api/notes-media/:note/:file', notesRoute((req, res) => {
-    const { note, file } = req.params;
-    if (!/^[\w-]{1,80}$/.test(note) || !/^[a-f0-9]{16}\.[a-z0-9]{1,8}$/.test(file)) return res.status(404).end();
-    res.set('X-Content-Type-Options', 'nosniff');
-    res.set('Content-Security-Policy', 'sandbox'); // an uploaded SVG/HTML never runs as the app
-    res.set('Cache-Control', 'private, max-age=31536000, immutable'); // name = content hash
-    if (req.query.download === '1') res.attachment(req.query.as || file);
-    res.sendFile(path.join(NOTES_MEDIA_DIR, note, file), err => {
-        if (err && !res.headersSent) res.status(404).end();
-    });
 }));
 
 // Logout endpoint

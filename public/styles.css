@@ -2294,6 +2294,9 @@ audio.fm-media { width: min(520px, 90%); }
 .md hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin: 18px 0; }
 .md-task { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-right: 4px; border-radius: 5px; border: 1.5px solid var(--border); font-size: 11px; vertical-align: -3px; color: transparent; cursor: default; }
 .md-task.done { background: var(--c-green); border-color: var(--c-green); color: var(--bg, #000); }
+.nt-preview .md-task { cursor: pointer; }
+.nt-preview .md-task:hover { border-color: var(--accent); }
+.nt-preview .md-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* streaming caret */
 .ag-assistant.streaming > :last-child:not(.md-code):not(.md-table)::after,
@@ -2488,71 +2491,41 @@ audio.fm-media { width: min(520px, 90%); }
     flex-shrink: 0; width: 100%; padding: 16px 20px 6px; border: 0; background: transparent; color: var(--text);
     font-size: 22px; font-weight: 700; outline: none;
 }
-.nt-title::placeholder, .nt-tags-input::placeholder { color: var(--text-3); font-weight: 400; }
+.nt-title::placeholder, .nt-body::placeholder, .nt-tags-input::placeholder { color: var(--text-3); font-weight: 400; }
 .nt-tagsline { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 20px 10px; color: var(--text-3); border-bottom: 1px solid var(--divider); }
 .nt-tags-input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text-2); font-size: 13.5px; outline: none; padding: 4px 0; }
-.nt-title:read-only { opacity: 0.75; }
 
-/* Single editing surface (editor/notes-editor-entry.js, Tiptap/ProseMirror) - no write/preview
-   split: this *is* the formatted note, editable in place, like Notion. */
-.nt-surface { flex: 1; min-height: 0; overflow-y: auto; }
-.nt-surface .ProseMirror {
-    min-height: 100%; padding: 10px 20px 120px; font-size: 15.5px; line-height: 1.65;
-    color: var(--text); outline: none; overflow-wrap: anywhere;
+/* Write + preview side by side, both live (no edit/preview toggle) */
+.nt-write { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.nt-write .nt-body { flex: 1 1 50%; min-width: 0; border-right: 1px solid var(--divider); }
+.nt-write .nt-preview { flex: 1 1 50%; min-width: 0; }
+.nt-body {
+    resize: none; border: 0; background: transparent; color: var(--text);
+    padding: 14px 20px 24px; font: 15px/1.65 var(--font-mono); outline: none; tab-size: 4;
 }
-.nt-surface .ProseMirror[contenteditable="false"] { opacity: 0.75; }
-.nt-surface .ProseMirror p.is-editor-empty:first-child::before {
-    content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--text-3);
+.nt-preview { overflow-y: auto; padding: 14px 20px 24px; font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.nt-title:read-only, .nt-body:read-only { opacity: 0.75; }
+
+/* Floating formatting bar: a card docked under the write area (desktop), or pinned above the
+   on-screen keyboard on mobile (positioned in JS from visualViewport). */
+.nt-fbar {
+    flex-shrink: 0; margin: 0 20px 14px; padding: 8px; border-radius: var(--radius-md);
+    background: var(--surface); border: 1.5px solid var(--border-strong); box-shadow: var(--shadow);
 }
-.nt-surface .ProseMirror > * + * { margin-top: 0.65em; }
-.nt-surface .ProseMirror h1, .nt-surface .ProseMirror h2, .nt-surface .ProseMirror h3 { line-height: 1.25; font-weight: 700; margin-top: 1.1em; }
-.nt-surface .ProseMirror h1 { font-size: 1.7em; }
-.nt-surface .ProseMirror h2 { font-size: 1.4em; }
-.nt-surface .ProseMirror h3 { font-size: 1.18em; }
-.nt-surface .ProseMirror ul, .nt-surface .ProseMirror ol { padding-left: 1.4em; }
-.nt-surface .ProseMirror li > p { margin: 0; }
-.nt-surface .ProseMirror blockquote { padding-left: 14px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
-.nt-surface .ProseMirror pre { background: var(--surface-2); border-radius: var(--radius-md); padding: 12px 14px; overflow-x: auto; font: 13px/1.55 var(--font-mono); }
-.nt-surface .ProseMirror pre code { background: none; padding: 0; }
-.nt-surface .ProseMirror code { background: var(--surface-2); border-radius: 5px; padding: .15em .4em; font: 13px var(--font-mono); }
-.nt-surface .ProseMirror hr { border: 0; border-top: 1px solid var(--divider); margin: 1.2em 0; }
-.nt-surface .ProseMirror a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-.nt-surface .ProseMirror img { max-width: 100%; border-radius: var(--radius-md); }
+.nt-fbar[hidden] { display: none; }
+.nt-fbar-row { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.nt-fbar-row::-webkit-scrollbar { display: none; }
+.nt-fbtn { flex-shrink: 0; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--text-2); }
+.nt-fbtn:hover, .nt-fbtn:focus-visible { background: var(--surface-2); color: var(--text); }
+.nt-fbtn:active { background: var(--accent-soft); color: var(--accent); }
 
-/* Checklist (TaskList/TaskItem): real checkboxes, click to toggle, no custom JS needed */
-.nt-surface .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 0; }
-.nt-surface .ProseMirror li[data-type="taskItem"] { display: flex; align-items: flex-start; gap: 8px; }
-.nt-surface .ProseMirror li[data-type="taskItem"] > label { flex-shrink: 0; margin-top: 3px; }
-.nt-surface .ProseMirror li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
-.nt-surface .ProseMirror li[data-type="taskItem"] input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
-.nt-surface .ProseMirror li[data-type="taskItem"][data-checked="true"] > div { color: var(--text-3); text-decoration: line-through; }
-
-.nt-surface .ProseMirror table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
-.nt-surface .ProseMirror th, .nt-surface .ProseMirror td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
-.nt-surface .ProseMirror th { background: var(--surface-2); font-weight: 600; }
-
-.nt-attachment {
-    display: inline-flex; align-items: center; gap: 6px; margin: 4px 0; padding: 8px 12px; border-radius: var(--radius-md);
-    background: var(--surface-2); border: 1px solid var(--border); color: var(--text); text-decoration: none !important; font-size: 13.5px;
-}
-.nt-attachment-name::before { content: '📎 '; }
-.nt-attachment:hover { border-color: var(--border-strong); background: var(--surface-3); }
-
-/* "/" command palette: a floating card positioned in JS, near the cursor */
-.nt-slash-menu {
-    position: fixed; z-index: 40; width: 300px; max-height: 360px; overflow-y: auto;
-    background: var(--surface); border: 1.5px solid var(--border-strong); border-radius: var(--radius-md);
-    box-shadow: var(--shadow); padding: 6px;
-}
-.nt-slash-group { padding: 8px 10px 4px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
-.nt-slash-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 10px; color: var(--text); text-align: left; }
-.nt-slash-icon { flex-shrink: 0; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: var(--surface-2); color: var(--text-2); }
-.nt-slash-text { min-width: 0; display: flex; flex-direction: column; }
-.nt-slash-text b { font-size: 13.5px; font-weight: 600; }
-.nt-slash-text small { font-size: 11.5px; color: var(--text-3); }
-.nt-slash-item.active, .nt-slash-item:hover { background: var(--accent-soft); }
-.nt-slash-item.active .nt-slash-icon, .nt-slash-item:hover .nt-slash-icon { background: var(--accent); color: var(--accent-fg); }
-.nt-slash-empty { padding: 14px; text-align: center; color: var(--text-3); font-size: 13px; }
+/* "/" command palette, shown above the toolbar row inside the same floating card */
+.nt-slash { list-style: none; margin: 0 0 6px; padding: 4px; max-height: 240px; overflow-y: auto; border-bottom: 1px solid var(--divider); }
+.nt-slash[hidden] { display: none; }
+.nt-slash li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.nt-slash li .icon { color: var(--text-3); flex-shrink: 0; }
+.nt-slash li.active, .nt-slash li:hover { background: var(--accent-soft); color: var(--accent); }
+.nt-slash li.active .icon, .nt-slash li:hover .icon { color: var(--accent); }
 
 .nt-fab {
     position: absolute; right: 18px; bottom: 18px; z-index: 5; width: 56px; height: 56px; display: none; place-items: center;
@@ -2575,8 +2548,12 @@ audio.fm-media { width: min(520px, 90%); }
     .nt-title { font-size: 20px; padding: 14px 16px 6px; }
     .nt-tagsline { padding: 0 16px 10px; }
     .nt-tags-input { font-size: 16px; }
-    .nt-surface .ProseMirror { padding: 10px 16px 120px; font-size: 16px; }
-    .nt-slash-menu { width: calc(100vw - 32px); max-width: 340px; }
+    .nt-write { flex-direction: column; }
+    .nt-write .nt-body { border-right: 0; border-bottom: 1px solid var(--divider); flex: 1 1 45%; }
+    .nt-write .nt-preview { flex: 1 1 55%; }
+    .nt-body, .nt-preview { padding: 12px 16px 16px; }
+    .nt-body { font-size: 16px; }
+    .nt-fbar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; border-width: 1.5px 0 0; border-radius: var(--radius-md) var(--radius-md) 0 0; z-index: 30; }
 }
 
 /* =========================================================
