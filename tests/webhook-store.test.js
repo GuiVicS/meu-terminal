@@ -79,6 +79,25 @@ test('secrets: an input\'s "fixed" secret value round-trips encrypted, decrypted
     assert.equal(s.getSecretInput(webhook.id, 'NOPE'), undefined);
 });
 
+test('resolveSecrets: fills in stored secret values, never what the caller sent; rejects a required-but-unset secret', () => {
+    const s = make();
+    const { webhook } = s.create({
+        name: 'Webhook A', inputs: [{ name: 'API_KEY', type: 'secret', required: true }, { name: 'OPT', type: 'secret' }],
+    });
+    s.setSecretInput(webhook.id, 'API_KEY', 'sk-real');
+
+    const values = { API_KEY: 'attacker-supplied-via-body' }; // what resolveInputs() would have left untouched
+    const r = s.resolveSecrets(webhook.id, webhook.inputs, values);
+    assert.equal(r.ok, true);
+    assert.equal(values.API_KEY, 'sk-real'); // overwritten by the stored value, not the caller's
+    assert.equal(values.OPT, undefined); // not set and not required: left alone
+
+    const { webhook: webhook2 } = s.create({ name: 'Webhook B', inputs: [{ name: 'MISSING', type: 'secret', required: true }] });
+    const bad = s.resolveSecrets(webhook2.id, webhook2.inputs, {});
+    assert.equal(bad.ok, false);
+    assert.equal(bad.input, 'MISSING');
+});
+
 test('runs: createRun masks "secret" input values, finishRun records the result, history is newest first', () => {
     const s = make();
     const { webhook } = s.create({

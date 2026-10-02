@@ -97,3 +97,19 @@ test('run: a disabled webhook refuses to run outside a "test" trigger', async ()
     const runner = new WebhookRunner({ store: fakeStore() });
     await assert.rejects(runner.run(webhook('true', { enabled: false }), { trigger: 'http', values: {} }), /desativado/);
 });
+
+test('enqueue: returns a run id immediately (before the script finishes); `done` resolves to the same result run() would give', async () => {
+    const runner = new WebhookRunner({ store: fakeStore() });
+    const { runId, status, done } = runner.enqueue(webhook('sleep 0.2 && echo oi'), { trigger: 'http', values: {} });
+    assert.equal(status, 'queued');
+    assert.match(runId, /^[0-9a-f-]{36}$/);
+    const result = await done;
+    assert.equal(result.runId, runId);
+    assert.equal(result.status, 'ok');
+    assert.match(result.output, /oi/);
+});
+
+test('enqueue: a disabled webhook throws synchronously, nothing is queued', () => {
+    const runner = new WebhookRunner({ store: fakeStore() });
+    assert.throws(() => runner.enqueue(webhook('true', { enabled: false }), { trigger: 'http', values: {} }), /desativado/);
+});

@@ -59,6 +59,28 @@ class WebhookRunner {
         return next;
     }
 
+    /**
+     * Same queueing as run(), but returns the run id immediately instead of waiting for the
+     * script to finish - what the public /hooks/:slug route needs (202 Accepted + run_id).
+     * `done` is included for the route's optional sync mode (`?wait=`): it may race `done`
+     * against a timeout, or just ignore it and respond right away.
+     * @returns {{runId: string, status: 'queued', done: Promise}}
+     */
+    enqueue(webhook, ctx) {
+        if (!webhook.enabled) throw new Error('Webhook desativado.');
+        const concurrency = webhook.concurrency || 'queue';
+        if (this.active.has(webhook.id)) {
+            if (concurrency === 'skip') throw new Error('Já existe uma execução em andamento.');
+            if (concurrency === 'cancel') this.cancelActive(webhook.id);
+        }
+        const runId = crypto.randomUUID();
+        const prev = this.chains.get(webhook.id) || Promise.resolve();
+        const done = prev.catch(() => {}).then(() => this.execute(webhook, ctx, runId));
+        this.chains.set(webhook.id, done);
+        done.catch(() => {}); // the caller (route) decides whether to await `done` - this just avoids an unhandled-rejection warning when it doesn't
+        return { runId, status: 'queued', done };
+    }
+
     cancelActive(webhookId) {
         const entry = this.active.get(webhookId);
         if (!entry) return false;
@@ -78,8 +100,7 @@ class WebhookRunner {
         } catch { /* already gone */ }
     }
 
-    async execute(webhook, ctx) {
-        const runId = crypto.randomUUID();
+    async execute(webhook, ctx, runId = crypto.randomUUID()) {
         const startedAt = Date.now();
         this.store.createRun({
             id: runId, webhookId: webhook.id, trigger: ctx.trigger, sourceIp: ctx.sourceIp || null,
