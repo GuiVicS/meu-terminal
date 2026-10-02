@@ -1,6 +1,6 @@
 # Plano de ação: Webhooks e tela administrativa (/admin)
 
-Status: proposta, nada implementado.
+Status: proposta revisada (token, CRUD, modelos de ação, inputs), nada implementado.
 Escopo: dois pedidos que se complementam.
 
 1. Configurar **webhooks** que disparam comandos no terminal.
@@ -58,94 +58,232 @@ Trocar o popup por uma página inteira, com navegação lateral, que funcione be
 
 ---
 
-## 3. Parte B: Webhooks que disparam comandos no terminal
+## 3. Parte B: Webhooks (CRUD de ações executáveis)
 
-### O que o usuário configura (em `/admin/webhooks`)
-Cada webhook tem:
+### A ideia em uma frase
+Um **webhook é uma ação nomeada**: um script bash, com **entradas declaradas** (inputs), que roda no servidor quando alguém chama a URL dele com um **token** válido, ou quando o usuário clica em **Executar** no `/admin`.
 
-- **Nome** e **ativo/inativo**.
-- **URL** gerada: `POST /hooks/<id>`, com segredo próprio. Mostrada uma vez, depois só dá para regenerar.
-- **Destino**, uma das opções:
-  - uma sessão de terminal específica;
-  - a última sessão em foco;
-  - **uma sessão nova** a cada disparo (com `cwd` e nome).
-- **Comando**: texto fixo ou modelo com variáveis do payload (ver segurança abaixo).
-- **Executar (Enter)**: liga/desliga, igual aos comandos rápidos.
-- **Limites**: máximo de disparos por minuto e tempo mínimo entre disparos.
-- **Histórico** dos últimos disparos: data, origem, resultado, resposta HTTP.
-- Botão **Testar**.
+```
+  quem chama (GitHub, n8n, celular, curl)      /admin/webhooks
+            │ POST /hooks/<slug>                       │ botão "Executar" (formulário dos inputs)
+            │ Authorization: Bearer mtwh_…             │
+            ▼                                          ▼
+     autentica → valida inputs → enfileira → roda o script (bash) com os inputs como variáveis
+                                                   │
+                                     histórico (saída, código de saída, duração)
+```
 
-### Modelo de dados (SQLite, mesma conexão)
+### 3.1 CRUD na tela `/admin/webhooks`
+
+**Lista:** nome, ativo/inativo, última execução (status e quando), botões Executar, Editar, Duplicar e Excluir.
+
+**Editor de um webhook**, em abas:
+
+| Aba | O que tem |
+|---|---|
+| **Geral** | Nome, slug da URL (`/hooks/deploy-site`), descrição, ativo/inativo. |
+| **Ação** | Escolher uma **sugestão** (modelo pronto) ou **Personalizado**. Editor de script bash com destaque de sintaxe, chips das variáveis disponíveis (clicar insere `$NOME`), pasta de trabalho (`cwd`) e tempo limite. |
+| **Inputs** | Lista das entradas do webhook (ver 3.3). Cada input vira uma variável do script. |
+| **Execução** | Onde roda (segundo plano ou aba visível), fila/concorrência, limite de disparos. |
+| **Acesso** | Tokens (criar, ver prefixo, revogar), modo de autenticação, IPs permitidos. |
+| **Testar** | Formulário com os inputs, **pré-visualização** do que vai rodar e botão **Executar agora**, com a saída ao vivo. |
+| **Histórico** | Últimas execuções: quando, origem (IP ou "manual"), inputs recebidos, código de saída, duração, saída (truncada). Botão **Repetir**. |
+
+### 3.2 Sugestões (modelos de ação)
+
+Ao criar, o usuário escolhe um modelo, que já vem com o script e os inputs preenchidos, e pode editar tudo depois. Ou começa em branco com **Personalizado**.
+
+| Modelo | Script (resumido) | Inputs que já vêm |
+|---|---|---|
+| **Atualizar repositório** | `cd "$PASTA" && git fetch && git checkout "$BRANCH" && git pull --ff-only` | `PASTA` (caminho), `BRANCH` (padrão `main`) |
+| **Deploy com Docker Compose** | `cd "$PASTA" && git pull --ff-only && docker compose up -d --build` | `PASTA` |
+| **Rodar script npm** | `cd "$PASTA" && npm run "$SCRIPT"` | `PASTA`, `SCRIPT` (lista: build, test…) |
+| **Reiniciar serviço** | `systemctl restart "$SERVICO"` ou `pm2 restart "$SERVICO"` | `SERVICO` (lista) |
+| **Backup do banco** | `sqlite3 "$BANCO" ".backup '$DESTINO/backup-$(date +%F-%H%M).db'"` | `BANCO`, `DESTINO` |
+| **Chamar agente (Claude Code)** | `cd "$PASTA" && claude -p "$PROMPT"` | `PASTA`, `PROMPT` (texto longo) |
+| **Notificar no celular** | chama a ferramenta `notify` do MeuTerminal com `$TITULO` e `$MENSAGEM` | `TITULO`, `MENSAGEM` |
+| **Personalizado** | em branco | nenhum |
+
+Os modelos ficam num arquivo (`scripts/webhook-presets.js`), fácil de ampliar.
+
+### 3.3 Inputs (as variáveis do webhook)
+
+Cada webhook declara as entradas que aceita. Uma entrada tem:
+
+| Campo | Exemplo | Para quê |
+|---|---|---|
+| `name` | `BRANCH` | Nome da variável no script (`$BRANCH`). Só `A-Z`, `0-9`, `_`. |
+| `label` | "Branch" | Rótulo no formulário. |
+| `type` | `text`, `number`, `boolean`, `select`, `path`, `textarea`, `secret` | Validação e tipo do campo no formulário. |
+| `required` / `default` | `true` / `main` | Se falta e tem padrão, usa o padrão. Se falta e é obrigatório, rejeita. |
+| `options` | `["main","dev"]` | Para `select`: só aceita esses valores. |
+| `pattern` / `maxLength` | `^[A-Za-z0-9._/-]+$` / `80` | Validação extra. Cada tipo já vem com um padrão seguro. |
+| `source` | `body.ref`, `query.branch`, `header.x-github-event`, `fixed` | De onde o valor vem quando o webhook é chamado de fora. `fixed` = valor definido no `/admin`, quem chama não muda. |
+| `extract` | `^refs/heads/(.+)$` | Opcional: regex que tira só uma parte do valor (ex.: a branch do `ref` do GitHub). |
+
+**"Preenchido depois"** acontece de dois jeitos:
+- **Chamada externa:** os valores chegam no corpo JSON (`{"BRANCH": "dev"}`) ou no caminho definido em `source`.
+- **Execução manual:** o `/admin` mostra um formulário gerado a partir dos inputs; o usuário preenche e executa.
+
+Tipo `secret`: valor guardado no servidor (chave de API, senha), mascarado na tela e nos logs, nunca vem de quem chama.
+
+### 3.4 Como o script roda (o ponto que garante a segurança)
+
+**Os inputs nunca são colados dentro do texto do comando.** Eles são passados como **variáveis de ambiente** do processo, e o script as usa entre aspas (`"$BRANCH"`). Assim, um valor como `main; rm -rf ~` é só um texto dentro de uma variável, nunca vira comando.
+
+- O editor também aceita `{{BRANCH}}` por conveniência, mas ao salvar isso é convertido para `"$BRANCH"` (com aspas). Nunca há substituição de texto no momento da execução.
+- O script é gravado num arquivo temporário (`0700`) e executado com `bash --noprofile --norc -euo pipefail arquivo.sh`, via `child_process.spawn` **sem shell intermediário**.
+- Ambiente **limpo**: só `PATH`, `HOME`, `LANG`, os inputs e as variáveis do webhook (`MT_WEBHOOK_ID`, `MT_RUN_ID`, `MT_TRIGGER=http|manual`). Nada do `process.env` do servidor vaza (tokens, chaves).
+- Corpo bruto da requisição disponível, se o script quiser, em arquivo (`$MT_PAYLOAD_FILE`), nunca em variável interpolada.
+
+**Onde roda** (por webhook):
+1. **Segundo plano** (padrão): processo separado, saída capturada no histórico, tempo limite (padrão 5 min, mata o grupo de processos ao estourar).
+2. **Aba visível**: abre uma **aba nova** de terminal com o nome do webhook e roda o script lá, para acompanhar ao vivo. Usa o `spawnShell` com um `env` extra (o `server.js` já monta o `env` do pty), então os inputs também entram como variáveis, sem digitar valores no terminal.
+
+Digitar dentro de uma aba já aberta (com alguém usando) **fica fora** desta versão: é o caso mais arriscado e o menos útil.
+
+**Concorrência** (por webhook): `fila` (padrão, uma de cada vez), `ignorar se já estiver rodando` ou `cancelar a anterior`.
+
+### 3.5 Autenticação por token
+
+**Token Bearer (padrão)**
+- Formato `mtwh_<32 bytes aleatórios em base64url>`. Gerado pelo servidor, **mostrado uma vez** ao criar.
+- Guardado só como **hash SHA-256**, mais o prefixo (`mtwh_ab12…`) para o usuário reconhecer na lista.
+- Enviado **só no header** `Authorization: Bearer …`. Token na URL (`?token=`) é recusado, porque vaza em logs e no histórico do navegador.
+- Comparação em tempo constante (`safeEqual`, já existe no `server.js`).
+- Vários tokens por webhook (um por integração), cada um com nome, validade opcional, último uso e botão **Revogar**.
+
+**Assinatura HMAC (opcional, para GitHub, Stripe e parecidos)**
+- Valida `X-Hub-Signature-256` (ou o header configurado) com HMAC-SHA256 do corpo **bruto**.
+- Aqui o segredo **não pode ser só hash** (é preciso o valor para recalcular a assinatura). Ele fica **cifrado** no banco (AES-256-GCM) com uma chave do servidor (`WEBHOOK_SECRET_KEY` no `.env`). Correção do plano anterior, que previa hash.
+- Proteção contra replay: timestamp com janela de 5 min quando o provedor manda, e `X-Request-Id`/`Idempotency-Key` guardado por 24 h para ignorar repetição.
+
+### 3.6 Outras proteções
+1. **Desligado por padrão**: a rota `/hooks/*` só existe com `WEBHOOKS_ENABLED=true`.
+2. **PIN obrigatório** para criar, editar o script, ver ou gerar tokens. Quem edita o script controla o servidor.
+3. **Versões do script**: cada alteração guarda a versão anterior (quem, quando). Dá para comparar e voltar.
+4. **Limite de disparos** por webhook e por IP; após 5 falhas de autenticação seguidas, bloqueio temporário do IP.
+5. **IPs permitidos** opcional por webhook.
+6. **Corpo máximo** de 64 KB, só `application/json` ou `application/x-www-form-urlencoded`.
+7. **Resposta não vaza nada**: token inválido e webhook inexistente devolvem o mesmo `404`, para não permitir descobrir slugs.
+8. **Logs**: nunca registrar headers de autenticação, inputs `secret` nem o corpo inteiro. A saída do script passa por máscara dos valores secretos antes de ir para o histórico.
+9. **Só HTTPS** fora de localhost.
+10. **Usuário do sistema**: o script roda com o mesmo usuário do servidor. Documentar isso na tela. Evolução futura: rodar num container ou usuário restrito.
+
+### 3.7 Respostas da rota pública
+
+```
+POST /hooks/<slug>
+Authorization: Bearer mtwh_…
+Content-Type: application/json
+{"BRANCH": "dev"}
+
+202 Accepted   {"run_id": "r_…", "status": "queued"}
+400            {"error": "input_invalido", "input": "BRANCH"}     (sem ecoar o valor)
+404            {"error": "nao_encontrado"}                          (slug ou token errado)
+429            {"error": "limite"}
+```
+
+Opcional por webhook: **modo síncrono** (`?wait=30`), que espera até 30 s e devolve `exit_code` e as últimas linhas da saída. Útil para atalhos do celular.
+
+### 3.8 Modelo de dados (SQLite, mesma conexão)
 
 ```sql
 CREATE TABLE webhooks (
   id            TEXT PRIMARY KEY,
+  slug          TEXT NOT NULL UNIQUE,
   name          TEXT NOT NULL,
+  description   TEXT NOT NULL DEFAULT '',
   enabled       INTEGER NOT NULL DEFAULT 1,
-  secret_hash   TEXT NOT NULL,        -- hash do segredo; o valor puro só aparece na criação
-  target_kind   TEXT NOT NULL,        -- 'session' | 'focused' | 'new'
-  target_id     TEXT,                 -- sessão fixa, quando target_kind = 'session'
-  target_cwd    TEXT,                 -- para 'new'
-  command       TEXT NOT NULL,        -- texto fixo ou modelo
-  run           INTEGER NOT NULL DEFAULT 1,
+  preset        TEXT,                    -- modelo de origem, ou NULL para personalizado
+  script        TEXT NOT NULL,
+  inputs        TEXT NOT NULL DEFAULT '[]',  -- JSON: lista de inputs (3.3)
+  cwd           TEXT,
+  run_mode      TEXT NOT NULL DEFAULT 'background',  -- 'background' | 'tab'
+  concurrency   TEXT NOT NULL DEFAULT 'queue',       -- 'queue' | 'skip' | 'cancel'
+  timeout_sec   INTEGER NOT NULL DEFAULT 300,
   rate_per_min  INTEGER NOT NULL DEFAULT 6,
+  auth_mode     TEXT NOT NULL DEFAULT 'bearer',      -- 'bearer' | 'hmac'
+  hmac_secret   TEXT,                    -- cifrado (AES-256-GCM)
+  allowed_ips   TEXT NOT NULL DEFAULT '[]',
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+
+CREATE TABLE webhook_tokens (
+  id            TEXT PRIMARY KEY,
+  webhook_id    TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  prefix        TEXT NOT NULL,           -- 'mtwh_ab12', para reconhecer
+  token_hash    TEXT NOT NULL UNIQUE,    -- SHA-256
+  expires_at    INTEGER,
+  last_used_at  INTEGER,
+  revoked_at    INTEGER,
   created_at    INTEGER NOT NULL
 );
 
-CREATE TABLE webhook_deliveries (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  webhook_id  TEXT NOT NULL,
-  at          INTEGER NOT NULL,
-  source_ip   TEXT,
-  status      TEXT NOT NULL,          -- 'ok' | 'rejeitado' | 'limitado' | 'erro'
-  detail      TEXT
+CREATE TABLE webhook_secrets (           -- valores dos inputs do tipo 'secret'
+  webhook_id    TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  value_enc     TEXT NOT NULL,           -- cifrado
+  PRIMARY KEY (webhook_id, name)
+);
+
+CREATE TABLE webhook_versions (
+  webhook_id    TEXT NOT NULL,
+  version       INTEGER NOT NULL,
+  script        TEXT NOT NULL,
+  inputs        TEXT NOT NULL,
+  changed_at    INTEGER NOT NULL,
+  PRIMARY KEY (webhook_id, version)
+);
+
+CREATE TABLE webhook_runs (
+  id            TEXT PRIMARY KEY,
+  webhook_id    TEXT NOT NULL,
+  trigger       TEXT NOT NULL,           -- 'http' | 'manual' | 'test'
+  source_ip     TEXT,
+  token_id      TEXT,
+  inputs        TEXT NOT NULL,           -- JSON, com 'secret' mascarado
+  status        TEXT NOT NULL,           -- 'queued' | 'running' | 'ok' | 'failed' | 'timeout' | 'rejected'
+  exit_code     INTEGER,
+  output        TEXT,                    -- últimos 64 KB, mascarado
+  started_at    INTEGER,
+  finished_at   INTEGER,
+  created_at    INTEGER NOT NULL
 );
 ```
 
-### Fluxo de um disparo
+Histórico com retenção configurável (padrão: últimas 200 execuções por webhook).
+
+### 3.9 API interna (atrás do login e do PIN)
 
 ```
-POST /hooks/<id>  (+ assinatura)
-  → localiza o webhook, confere se está ativo
-  → valida a assinatura (HMAC) e a janela de tempo
-  → aplica o limite de disparos
-  → monta o comando (modelo + campos permitidos do payload)
-  → resolve o destino (sessão fixa / em foco / nova)
-  → escreve no pty (com Enter, se configurado)
-  → grava em webhook_deliveries e responde 202
+GET    /api/webhooks/presets              modelos disponíveis
+GET    /api/webhooks                      lista
+POST   /api/webhooks                      cria
+GET    /api/webhooks/:id                  detalhe (sem segredos)
+PUT    /api/webhooks/:id                  edita (gera nova versão se o script mudou)
+DELETE /api/webhooks/:id                  remove
+POST   /api/webhooks/:id/duplicate        duplica (sem tokens)
+POST   /api/webhooks/:id/preview          mostra o script e o ambiente que rodariam com estes inputs (sem executar)
+POST   /api/webhooks/:id/run              executa manualmente com os inputs do formulário
+GET    /api/webhooks/:id/runs             histórico
+GET    /api/webhooks/:id/runs/:run        detalhe; saída ao vivo pelo WebSocket já existente
+POST   /api/webhooks/:id/runs/:run/cancel cancela
+POST   /api/webhooks/:id/tokens           cria token (devolve o valor uma única vez)
+DELETE /api/webhooks/:id/tokens/:token    revoga
+GET    /api/webhooks/:id/versions         versões do script
 ```
 
-### Segurança (parte mais importante)
-Um webhook executa comando no shell do servidor. Qualquer falha aqui é execução remota de comandos. Regras:
-
-1. **Autenticação própria.** Rota fora do login por cookie (quem chama é uma máquina), mas com **assinatura HMAC-SHA256** do corpo com o segredo do webhook, em header, mais **timestamp** com janela curta (5 min) contra replay. Comparação em tempo constante (`safeEqual` já existe no projeto).
-2. **Segredo guardado como hash**, nunca em texto. Regenerar invalida o anterior.
-3. **Sem injeção de shell.** O payload **nunca** vira comando cru. Duas opções, por webhook:
-   - **Comando fixo** (padrão, o mais seguro): o payload não influencia o que roda.
-   - **Modelo com variáveis**: só campos explicitamente declarados (`{{branch}}`, `{{tag}}`), cada um validado por um padrão (por exemplo `^[A-Za-z0-9._/-]{1,80}$`), com aspas escapadas e caracteres de controle e quebras de linha removidos. Valor que não passa na validação rejeita o disparo.
-4. **Limite de disparos** por webhook e por IP, com bloqueio temporário após falhas seguidas de assinatura.
-5. **Lista de IPs permitidos** opcional (por exemplo faixas do GitHub), por webhook.
-6. **Tamanho máximo do corpo** (ex.: 64 KB) e `Content-Type` restrito.
-7. **Auditoria**: todo disparo, aceito ou não, entra no histórico.
-8. **Só HTTPS em produção**, e a URL pública só existe se o administrador ligar `WEBHOOKS_ENABLED=true` (padrão desligado, no mesmo estilo de `NOTES_ENABLED`).
-9. **Confirmação ao criar** com PIN (a tela de webhooks é sensível).
-
-### API interna (atrás do login)
-```
-GET    /api/webhooks                 lista (sem segredo)
-POST   /api/webhooks                 cria, devolve o segredo uma única vez
-PUT    /api/webhooks/:id             edita
-POST   /api/webhooks/:id/rotate      novo segredo
-DELETE /api/webhooks/:id             remove
-POST   /api/webhooks/:id/test        dispara um teste
-GET    /api/webhooks/:id/deliveries  histórico
-```
-
-### Arquivos novos previstos
-- `scripts/webhook-store.js` (store, no modelo do `command-store.js`)
-- `scripts/webhook-runner.js` (validação, montagem do comando, escrita no pty)
-- `public/admin/sections/webhooks.js` (tela)
-- `tests/webhook-store.test.js` e `tests/webhook-runner.test.js`
+### 3.10 Arquivos novos previstos
+- `scripts/webhook-store.js`: CRUD, tokens, versões, histórico (no modelo do `command-store.js`).
+- `scripts/webhook-inputs.js`: validação e extração dos inputs (tipos, `pattern`, `source`, `extract`).
+- `scripts/webhook-runner.js`: fila, `spawn` com ambiente limpo, tempo limite, captura e máscara da saída.
+- `scripts/webhook-crypto.js`: geração e hash de tokens, cifra dos segredos, verificação HMAC.
+- `scripts/webhook-presets.js`: os modelos da seção 3.2.
+- `public/admin/sections/webhooks.js`: lista, editor em abas, formulário de execução.
+- Testes: `tests/webhook-inputs.test.js`, `tests/webhook-runner.test.js` (inclui **testes de injeção**: `;`, `$( )`, crases, quebras de linha, `../`), `tests/webhook-auth.test.js`.
 
 ---
 
@@ -155,26 +293,46 @@ GET    /api/webhooks/:id/deliveries  histórico
 |---|---|---|
 | 0 | Merge das Anotações na `main` e deploy | (feito: `feat/notes-app`) |
 | 1 | `/admin` com as seções atuais migradas do popup | `feat/admin-page` |
-| 2 | Store e runner de webhooks, com testes (sem UI) | `feat/webhooks-core` |
-| 3 | Rota pública `/hooks/:id` e proteções | `feat/webhooks-core` |
-| 4 | Tela `/admin/webhooks` e histórico | `feat/webhooks-ui` |
-| 5 | Seção Segurança do `/admin` (tokens, PIN) e remoção do popup antigo | `feat/admin-page` |
+| 2 | Store, inputs, runner e crypto, com testes (sem UI e sem rota pública) | `feat/webhooks-core` |
+| 3 | Tela `/admin/webhooks`: CRUD, modelos, inputs, **Executar manual** e histórico | `feat/webhooks-ui` |
+| 4 | Rota pública `/hooks/:slug` com token Bearer e proteções | `feat/webhooks-public` |
+| 5 | HMAC (GitHub/Stripe), modo síncrono, versões do script | `feat/webhooks-public` |
+| 6 | Seção Segurança do `/admin` (tokens, PIN) e remoção do popup antigo | `feat/admin-page` |
 
-Cada fase vira um PR separado, com testes rodando no CI (`npm test`).
-
----
-
-## 5. Decisões em aberto
-
-1. O webhook será chamado **de fora** (GitHub, Stripe, n8n) ou só de dentro da rede? Isso define se a rota fica pública e se a lista de IPs é obrigatória.
-2. Modelos com variáveis entram já na primeira versão, ou começamos só com **comando fixo**? Recomendo começar só com comando fixo.
-3. O destino "sessão nova" deve fechar a sessão sozinha ao terminar o comando?
-4. O popup antigo é removido logo no lançamento do `/admin` ou fica por uma versão como fallback?
+A fase 3 já entrega valor sozinha (ações com formulário, rodando pelo app) antes de abrir qualquer porta para fora.
 
 ---
 
-## 6. Riscos
+## 5. Decisões já tomadas
+- Autenticação por **token**, guardado como hash, enviado só no header.
+- Webhooks são um **CRUD** no `/admin`, cada um com sua **ação** (modelo ou script personalizado) e seus **inputs**.
+- Inputs entram no script como **variáveis de ambiente**, nunca por substituição de texto.
 
-- **Execução remota de comandos** se a validação falhar. Mitigação: comando fixo como padrão, assinatura obrigatória, testes de injeção na suíte.
-- **Regressão de configurações** ao migrar o popup. Mitigação: mover o código das seções, sem reescrever, e conferir a lista de opções uma a uma.
-- **Segredos expostos em log.** Mitigação: nunca registrar headers de assinatura nem o corpo completo.
+## 6. Decisões em aberto
+1. A rota pública vai ser chamada de fora (GitHub, n8n) já na primeira versão, ou primeiro só a execução manual pelo app? Recomendo a ordem da seção 4.
+2. Precisamos do modo **aba visível** já na fase 3, ou só segundo plano no começo?
+3. Quais modelos (3.2) entram primeiro? Sugestão: Atualizar repositório, Rodar script npm, Chamar agente e Personalizado.
+4. O popup antigo sai no lançamento do `/admin` ou fica uma versão como fallback?
+
+---
+
+## 7. Riscos
+- **Execução remota de comandos** por um token vazado. Mitigação: token por integração e revogável, IPs permitidos, limite de disparos, PIN para editar, histórico de tudo.
+- **Injeção pelos inputs.** Mitigação: variáveis de ambiente em vez de interpolação, validação por tipo, testes de injeção na suíte.
+- **Script travado ou pesado.** Mitigação: tempo limite, fila, cancelar, matar o grupo de processos.
+- **Segredos em log ou na saída.** Mitigação: máscara dos valores `secret`, nunca registrar headers de autenticação.
+- **Regressão de configurações** ao migrar o popup. Mitigação: mover o código das seções sem reescrever e conferir as opções uma a uma.
+
+---
+
+## 8. Prompt para implementar (copiar e colar no agente)
+
+> Implemente a fase **N** do `docs/PLANO-WEBHOOKS.md` no projeto MeuTerminal (`/root/projetos/meu-terminal`).
+> Siga o estilo do código existente (`scripts/command-store.js`, `scripts/notes-store.js`, rotas em `server.js`, mesma conexão SQLite).
+> Regras que não podem ser quebradas:
+> 1. Inputs entram no script só como variáveis de ambiente; nunca interpolar valores no texto do script.
+> 2. Executar com `spawn('bash', ['--noprofile','--norc','-euo','pipefail', arquivo])`, ambiente limpo, tempo limite e kill do grupo de processos.
+> 3. Tokens `mtwh_…` gerados com `crypto.randomBytes(32)`, guardados como SHA-256, aceitos só em `Authorization: Bearer`, comparados com `safeEqual`.
+> 4. Tudo atrás de `WEBHOOKS_ENABLED` (padrão `false`); criar, editar script e gerar token exigem PIN.
+> 5. Nunca logar headers de autenticação, segredos ou o corpo inteiro.
+> Escreva os testes da seção 3.10 (incluindo injeção) e rode `npm test` antes de terminar. Um PR por fase, na branch indicada na seção 4.
