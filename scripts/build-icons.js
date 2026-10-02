@@ -108,6 +108,14 @@ const ICONS = {
     notes: 'notebook-pen',
     tag: 'tag',
     arrowLeft: 'arrow-left',
+    // Notes editor formatting bar
+    bold: 'bold',
+    italic: 'italic',
+    quote: 'quote',
+    listOrdered: 'list-ordered',
+    code: 'code',
+    minus: 'minus',
+    heading: 'heading',
 };
 
 const escapeAttr = value => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
