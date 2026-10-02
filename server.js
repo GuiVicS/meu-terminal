@@ -16,6 +16,7 @@ const SessionStore = require('./scripts/session-store');
 const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
 const NotesStore = require('./scripts/notes-store');
+const NotesAttachments = require('./scripts/notes-attachments');
 const BackupStore = require('./scripts/backup-store');
 const BackupRunner = require('./scripts/backup-runner');
 const WebhookStore = require('./scripts/webhook-store');
@@ -1348,6 +1349,7 @@ app.get(BASE_PATH + '/api/backup/history', (req, res) => {
 // ---------- Notes (the notes tab; every device reads and writes the same notes) ----------
 const NOTES_DIR = process.env.NOTES_DIR || path.join(path.dirname(DB_PATH), 'notes');
 const notes = new NotesStore(NOTES_DIR);
+const notesFiles = new NotesAttachments(NOTES_DIR);
 
 const notesRoute = handler => (req, res) => {
     if (!NOTES_ENABLED) return res.status(404).json({ error: 'Anotações desligadas.' });
@@ -1373,9 +1375,31 @@ app.post(BASE_PATH + '/api/notes', notesRoute((req, res) => {
 
 // Must come before /api/notes/:id so "trash" is not read as an id
 app.delete(BASE_PATH + '/api/notes/trash', notesRoute((req, res) => {
+    const ids = notes.list({ trash: true }).map(n => n.id);
     const removed = notes.emptyTrash();
+    ids.forEach(id => notesFiles.removeAll(id));
     if (removed) notesChanged(null);
     res.json({ success: true, removed });
+}));
+
+// Upload: the request body is the file itself (no multipart), streamed to disk - same convention as /api/files/upload
+app.post(BASE_PATH + '/api/notes/:id/attachments', notesRoute(async (req, res) => {
+    if (!notes.get(req.params.id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
+    try {
+        const { name } = await notesFiles.save(req, req.params.id, String(one(req.query.name) || 'arquivo'));
+        res.status(201).json({ name, url: `${BASE_PATH}/api/notes/${encodeURIComponent(req.params.id)}/attachments/${encodeURIComponent(name)}` });
+    } catch (e) {
+        res.status(e.status || 400).json({ error: e.message });
+    }
+}));
+
+// Raw attachment (an <img src>, a download link...)
+app.get(BASE_PATH + '/api/notes/:id/attachments/:name', notesRoute((req, res) => {
+    const file = notesFiles.resolve(req.params.id, req.params.name);
+    if (!file) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+    res.setHeader('Content-Type', notesFiles.mimeFor(req.params.name));
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+    fs.createReadStream(file).pipe(res);
 }));
 
 app.get(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
@@ -1405,7 +1429,10 @@ app.post(BASE_PATH + '/api/notes/:id/restore', notesRoute((req, res) => {
 // Live note -> trash; note already in the trash -> deleted for good
 app.delete(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
     const id = req.params.id;
-    if (!notes.trash(id) && !notes.purge(id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
+    if (!notes.trash(id)) {
+        if (!notes.purge(id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
+        notesFiles.removeAll(id);
+    }
     notesChanged(id);
     res.json({ success: true });
 }));

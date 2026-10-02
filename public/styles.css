@@ -485,17 +485,19 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 .search-bar .icon-btn { width: 32px; height: 32px; border-radius: 50%; }
 
 /* ---------- new session page ---------- */
+/* Fixed to the real viewport (not just .workspace): must sit above the topbar/tab strip too,
+   with no tabs visible behind it, same as a full-screen page. */
 .new-session {
-    position: absolute;
+    position: fixed;
     inset: 0;
-    z-index: 4;
+    z-index: 20;
     overflow-y: auto;
     background: var(--bg);
-    padding: clamp(24px, 8vh, 88px) 20px 32px;
+    padding: calc(clamp(24px, 8vh, 88px) + var(--safe-top)) calc(20px + var(--safe-right)) calc(32px + var(--safe-bottom)) calc(20px + var(--safe-left));
     animation: fade-in var(--dur) var(--ease);
 }
 .new-session-inner { width: 100%; max-width: 480px; margin: 0 auto; }
-.ns-close { position: fixed; top: 16px; right: 16px; z-index: 5; }
+.ns-close { position: fixed; top: calc(16px + var(--safe-top)); right: calc(16px + var(--safe-right)); z-index: 21; }
 .new-session-mark {
     width: 48px;
     height: 48px;
@@ -2294,9 +2296,6 @@ audio.fm-media { width: min(520px, 90%); }
 .md hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin: 18px 0; }
 .md-task { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-right: 4px; border-radius: 5px; border: 1.5px solid var(--border); font-size: 11px; vertical-align: -3px; color: transparent; cursor: default; }
 .md-task.done { background: var(--c-green); border-color: var(--c-green); color: var(--bg, #000); }
-.nt-preview .md-task { cursor: pointer; }
-.nt-preview .md-task:hover { border-color: var(--accent); }
-.nt-preview .md-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* streaming caret */
 .ag-assistant.streaming > :last-child:not(.md-code):not(.md-table)::after,
@@ -2491,20 +2490,57 @@ audio.fm-media { width: min(520px, 90%); }
     flex-shrink: 0; width: 100%; padding: 16px 20px 6px; border: 0; background: transparent; color: var(--text);
     font-size: 22px; font-weight: 700; outline: none;
 }
-.nt-title::placeholder, .nt-body::placeholder, .nt-tags-input::placeholder { color: var(--text-3); font-weight: 400; }
+.nt-title::placeholder, .nt-tags-input::placeholder { color: var(--text-3); font-weight: 400; }
 .nt-tagsline { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 20px 10px; color: var(--text-3); border-bottom: 1px solid var(--divider); }
 .nt-tags-input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text-2); font-size: 13.5px; outline: none; padding: 4px 0; }
+.nt-title:read-only { opacity: 0.75; }
 
-/* Write + preview side by side, both live (no edit/preview toggle) */
-.nt-write { flex: 1; min-height: 0; min-width: 0; display: flex; }
-.nt-write .nt-body { flex: 1 1 50%; min-width: 0; border-right: 1px solid var(--divider); }
-.nt-write .nt-preview { flex: 1 1 50%; min-width: 0; }
-.nt-body {
-    resize: none; border: 0; background: transparent; color: var(--text);
-    padding: 14px 20px 24px; font: 15px/1.65 var(--font-mono); outline: none; tab-size: 4;
+/* Single Tiptap block: you write where you read, Notion-style (no edit/preview split). */
+.nt-write { flex: 1; min-height: 0; min-width: 0; display: flex; overflow-y: auto; }
+.nt-doc-wrap { position: relative; flex: 1; min-width: 0; max-width: 780px; margin: 0 auto; padding: 14px 20px 24px 42px; }
+.nt-doc-wrap.readonly { opacity: 0.75; }
+.nt-doc .ProseMirror { outline: none; color: var(--text); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; min-height: 200px; }
+.nt-doc .ProseMirror > * + * { margin-top: 10px; }
+.nt-doc .ProseMirror h1, .nt-doc .ProseMirror h2, .nt-doc .ProseMirror h3 { font-weight: 650; letter-spacing: -0.005em; line-height: 1.35; }
+.nt-doc .ProseMirror h1 { font-size: 22px; }
+.nt-doc .ProseMirror h2 { font-size: 19px; }
+.nt-doc .ProseMirror h3 { font-size: 16.5px; color: var(--text-2); }
+.nt-doc .ProseMirror p { margin: 0; }
+.nt-doc .ProseMirror strong { font-weight: 650; }
+.nt-doc .ProseMirror ul, .nt-doc .ProseMirror ol { margin: 0; padding-left: 24px; }
+.nt-doc .ProseMirror li { margin: 4px 0; padding-left: 2px; }
+.nt-doc .ProseMirror li::marker { color: var(--text-3); }
+.nt-doc .ProseMirror ol > li::marker { font-variant-numeric: tabular-nums; font-weight: 600; }
+.nt-doc .ProseMirror a { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 3px; }
+.nt-doc .ProseMirror :not(pre) > code {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px;
+    padding: 1px 5px; font: 13px/1.4 var(--font-mono); color: var(--text);
 }
-.nt-preview { overflow-y: auto; padding: 14px 20px 24px; font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
-.nt-title:read-only, .nt-body:read-only { opacity: 0.75; }
+.nt-doc .ProseMirror pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; overflow-x: auto; }
+.nt-doc .ProseMirror pre code { background: none; border: 0; padding: 0; font: 13px/1.55 var(--font-mono); }
+.nt-doc .ProseMirror blockquote { margin: 0; padding: 4px 14px; border-left: 3px solid color-mix(in srgb, var(--accent) 50%, var(--border)); color: var(--text-2); }
+.nt-doc .ProseMirror hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin: 6px 0; }
+.nt-doc .ProseMirror img { max-width: 100%; border-radius: var(--radius-md); display: block; }
+.nt-doc .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 2px; }
+.nt-doc .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
+.nt-doc .ProseMirror ul[data-type="taskList"] li > label { margin-top: 3px; flex-shrink: 0; }
+.nt-doc .ProseMirror ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.nt-doc .ProseMirror ul[data-type="taskList"] input[type="checkbox"] { width: 16px; height: 16px; border-radius: 5px; accent-color: var(--accent); cursor: pointer; }
+.nt-doc .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--text-3);
+}
+/* A block being dragged, and the block the drag is hovering over */
+.nt-doc .ProseMirror .nt-drag-source { opacity: 0.4; }
+.nt-doc .ProseMirror .nt-drag-target { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+/* Grip in the left gutter, tracking whichever line the mouse is over (top/height set in JS). */
+.nt-draghandle {
+    position: absolute; left: 4px; width: 26px; display: flex; align-items: center; justify-content: center;
+    cursor: grab; border-radius: 6px; color: var(--text-3); background: transparent; border: 0;
+}
+.nt-draghandle:hover { background: var(--surface-2); color: var(--text-2); }
+.nt-draghandle:active { cursor: grabbing; }
+.nt-draghandle[hidden] { display: none; }
 
 /* Floating formatting bar: a card docked under the write area (desktop), or pinned above the
    on-screen keyboard on mobile (positioned in JS from visualViewport). */
@@ -2517,7 +2553,7 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-fbar-row::-webkit-scrollbar { display: none; }
 .nt-fbtn { flex-shrink: 0; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--text-2); }
 .nt-fbtn:hover, .nt-fbtn:focus-visible { background: var(--surface-2); color: var(--text); }
-.nt-fbtn:active { background: var(--accent-soft); color: var(--accent); }
+.nt-fbtn:active, .nt-fbtn.on { background: var(--accent-soft); color: var(--accent); }
 
 /* "/" command palette, shown above the toolbar row inside the same floating card */
 .nt-slash { list-style: none; margin: 0 0 6px; padding: 4px; max-height: 240px; overflow-y: auto; border-bottom: 1px solid var(--divider); }
@@ -2548,11 +2584,8 @@ audio.fm-media { width: min(520px, 90%); }
     .nt-title { font-size: 20px; padding: 14px 16px 6px; }
     .nt-tagsline { padding: 0 16px 10px; }
     .nt-tags-input { font-size: 16px; }
-    .nt-write { flex-direction: column; }
-    .nt-write .nt-body { border-right: 0; border-bottom: 1px solid var(--divider); flex: 1 1 45%; }
-    .nt-write .nt-preview { flex: 1 1 55%; }
-    .nt-body, .nt-preview { padding: 12px 16px 16px; }
-    .nt-body { font-size: 16px; }
+    .nt-doc-wrap { padding: 12px 16px 16px 38px; }
+    .nt-doc .ProseMirror { font-size: 16px; }
     .nt-fbar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; border-width: 1.5px 0 0; border-radius: var(--radius-md) var(--radius-md) 0 0; z-index: 30; }
 }
 

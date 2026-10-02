@@ -120,6 +120,9 @@ const ICONS = {
     code: 'code',
     minus: 'minus',
     heading: 'heading',
+    gripVertical: 'grip-vertical',
+    image: 'image',
+    strikethrough: 'strikethrough',
 };
 
 const escapeAttr = value => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');

@@ -1,8 +1,10 @@
 /**
  * notesSession.js
  * "Anotações" tab: Markdown notes saved on the server, so every device shows the same notes.
- * List with search, tags, pin and trash; editor with autosave and a Markdown preview. When
- * another device changes the open note the tab reloads it, or asks which version to keep.
+ * List with search, tags, pin and trash; a single Tiptap editor (write = preview, Notion-style -
+ * no separate textarea/preview split) with autosave, a "/" block palette, a per-line drag handle
+ * and drag-and-drop/paste of files (uploaded to the server, inserted as an image or a link).
+ * When another device changes the open note the tab reloads it, or asks which version to keep.
  * Same interface as TerminalSession, so tabs, status bar and menus work with it.
  */
 import { STATE, SESSION_COLORS } from './session.js';
@@ -10,14 +12,16 @@ import { icon } from '../ui/icons.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { toast } from '../ui/toast.js';
 import { askConfirm } from '../ui/prompt.js';
-import { renderMarkdown, esc } from '../agent/markdown.js';
-import { highlightIn, onCodeClick, copyText } from '../agent/codeblock.js';
+import { esc } from '../agent/markdown.js';
+import { copyText } from '../agent/codeblock.js';
+import { Editor, StarterKit, Image, Placeholder, TaskList, TaskItem, Link, Markdown } from '../vendor/tiptap.bundle.js';
 
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
 const SAVE_DELAY = 800;
 const REFRESH_DELAY = 300;
 const SEARCH_DELAY = 250;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const dayFormat = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' });
 const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -25,6 +29,12 @@ const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '
 function formatDate(ms) {
     const date = new Date(ms);
     return date.toDateString() === new Date().toDateString() ? timeFormat.format(date) : dayFormat.format(date);
+}
+
+function formatSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function request(method, route = '', { params, body } = {}) {
@@ -53,54 +63,70 @@ async function request(method, route = '', { params, body } = {}) {
     return data;
 }
 
+/** Uploads a file's raw bytes (no multipart, same convention as the file manager) for `noteId`. */
+async function uploadAttachment(noteId, file) {
+    if (file.size > MAX_UPLOAD_BYTES) throw new Error(`"${file.name}" passa de 25 MB.`);
+    const query = new URLSearchParams({ name: file.name });
+    const response = await fetch(`${basePath()}/api/notes/${encodeURIComponent(noteId)}/attachments?${query}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+    });
+    let data = null;
+    try {
+        data = await response.json();
+    } catch { /* empty body */ }
+    if (!response.ok) throw new Error(data?.error || `Erro ${response.status}`);
+    return data; // { name, url }
+}
+
 const parseTags = text => text.split(',').map(t => t.trim()).filter(Boolean);
 
-// Floating formatting bar: inline wraps (**bold**) or line prefixes (> quote).
+function cycleHeading(editor) {
+    const chain = editor.chain().focus();
+    if (editor.isActive('heading', { level: 1 })) chain.setHeading({ level: 2 }).run();
+    else if (editor.isActive('heading', { level: 2 })) chain.setHeading({ level: 3 }).run();
+    else if (editor.isActive('heading', { level: 3 })) chain.setParagraph().run();
+    else chain.setHeading({ level: 1 }).run();
+}
+
+function insertLink(editor) {
+    const previousUrl = editor.getAttributes('link').href;
+    const url = window.prompt('URL do link:', previousUrl || 'https://');
+    if (url === null) return;
+    const chain = editor.chain().focus().extendMarkRange('link');
+    if (!url) chain.unsetLink().run();
+    else chain.setLink({ href: url }).run();
+}
+
+// Floating formatting bar: each entry runs a Tiptap command on the live editor.
 const FORMAT_ACTIONS = [
-    { key: 'bold', icon: 'bold', label: 'Negrito', wrap: ['**', '**'] },
-    { key: 'italic', icon: 'italic', label: 'Itálico', wrap: ['*', '*'] },
-    { key: 'code', icon: 'code', label: 'Código', wrap: ['`', '`'] },
-    { key: 'link', icon: 'link', label: 'Link', wrap: ['[', '](url)'] },
-    { key: 'heading', icon: 'heading', label: 'Título', prefix: '## ' },
-    { key: 'quote', icon: 'quote', label: 'Citação', prefix: '> ' },
-    { key: 'list', icon: 'list', label: 'Lista', prefix: '- ' },
-    { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', prefix: '1. ' },
-    { key: 'check', icon: 'squareCheck', label: 'Checklist', prefix: '- [ ] ' },
+    { key: 'bold', icon: 'bold', label: 'Negrito', run: e => e.chain().focus().toggleBold().run(), active: e => e.isActive('bold') },
+    { key: 'italic', icon: 'italic', label: 'Itálico', run: e => e.chain().focus().toggleItalic().run(), active: e => e.isActive('italic') },
+    { key: 'strike', icon: 'strikethrough', label: 'Riscado', run: e => e.chain().focus().toggleStrike().run(), active: e => e.isActive('strike') },
+    { key: 'code', icon: 'code', label: 'Código', run: e => e.chain().focus().toggleCode().run(), active: e => e.isActive('code') },
+    { key: 'link', icon: 'link', label: 'Link', run: insertLink, active: e => e.isActive('link') },
+    { key: 'heading', icon: 'heading', label: 'Título', run: cycleHeading, active: e => e.isActive('heading') },
+    { key: 'quote', icon: 'quote', label: 'Citação', run: e => e.chain().focus().toggleBlockquote().run(), active: e => e.isActive('blockquote') },
+    { key: 'list', icon: 'list', label: 'Lista', run: e => e.chain().focus().toggleBulletList().run(), active: e => e.isActive('bulletList') },
+    { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', run: e => e.chain().focus().toggleOrderedList().run(), active: e => e.isActive('orderedList') },
+    { key: 'check', icon: 'squareCheck', label: 'Checklist', run: e => e.chain().focus().toggleTaskList().run(), active: e => e.isActive('taskList') },
 ];
 
-// "/" command palette (Notion-style): replaces "/query" with a block snippet.
+// "/" command palette (Notion-style): replaces "/query" with a block.
 const SLASH_BLOCKS = [
-    { key: 'h1', icon: 'heading', label: 'Título 1', snippet: '# ' },
-    { key: 'h2', icon: 'heading', label: 'Título 2', snippet: '## ' },
-    { key: 'h3', icon: 'heading', label: 'Título 3', snippet: '### ' },
-    { key: 'list', icon: 'list', label: 'Lista', snippet: '- ' },
-    { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', snippet: '1. ' },
-    { key: 'check', icon: 'squareCheck', label: 'Checklist', snippet: '- [ ] ' },
-    { key: 'quote', icon: 'quote', label: 'Citação', snippet: '> ' },
-    { key: 'code', icon: 'codeXml', label: 'Bloco de código', snippet: '```\n\n```', caretOffset: 4 },
-    { key: 'hr', icon: 'minus', label: 'Divisória', snippet: '---\n' },
+    { key: 'h1', icon: 'heading', label: 'Título 1', run: e => e.chain().focus().setHeading({ level: 1 }).run() },
+    { key: 'h2', icon: 'heading', label: 'Título 2', run: e => e.chain().focus().setHeading({ level: 2 }).run() },
+    { key: 'h3', icon: 'heading', label: 'Título 3', run: e => e.chain().focus().setHeading({ level: 3 }).run() },
+    { key: 'list', icon: 'list', label: 'Lista', run: e => e.chain().focus().toggleBulletList().run() },
+    { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', run: e => e.chain().focus().toggleOrderedList().run() },
+    { key: 'check', icon: 'squareCheck', label: 'Checklist', run: e => e.chain().focus().toggleTaskList().run() },
+    { key: 'quote', icon: 'quote', label: 'Citação', run: e => e.chain().focus().toggleBlockquote().run() },
+    { key: 'code', icon: 'codeXml', label: 'Bloco de código', run: e => e.chain().focus().toggleCodeBlock().run() },
+    { key: 'hr', icon: 'minus', label: 'Divisória', run: e => e.chain().focus().setHorizontalRule().run() },
+    { key: 'image', icon: 'image', label: 'Imagem', run: (e, self) => self.pickImage() },
 ];
-
-/** Replaces the selection (or inserts a placeholder) wrapped in markers, via execCommand so undo keeps working. */
-function wrapSelection(textarea, before, after) {
-    const { selectionStart: start, selectionEnd: end, value } = textarea;
-    const selected = value.slice(start, end);
-    const placeholder = selected || 'texto';
-    textarea.focus();
-    textarea.setSelectionRange(start, end);
-    document.execCommand('insertText', false, `${before}${placeholder}${after}`);
-    if (!selected) textarea.setSelectionRange(start + before.length, start + before.length + placeholder.length);
-}
-
-/** Prepends a prefix to the current line (not the selection: lists/quotes/headings work on whole lines). */
-function prefixLine(textarea, prefix) {
-    const { selectionStart: start, value } = textarea;
-    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
-    const lineEnd = value.indexOf('\n', start) === -1 ? value.length : value.indexOf('\n', start);
-    textarea.focus();
-    textarea.setSelectionRange(lineStart, lineEnd);
-    document.execCommand('insertText', false, prefix + value.slice(lineStart, lineEnd));
-}
 
 export default class NotesSession {
     /**
@@ -142,10 +168,15 @@ export default class NotesSession {
         this.conflict = null; // the other device's version, while the user decides
         this.pendingRemote = false;
         this.listSeq = 0;
-        this.slashStart = null; // caret position of "/" while the command palette is open
+        this.editor = null;
+        this.slashFrom = null; // doc position of "/" while the command palette is open
+        this.slashTo = null;
         this.slashQuery = '';
         this.slashIndex = 0;
         this.slashItems = [];
+        this.dragHoverPos = null; // top-level node position under the mouse (for the drag handle)
+        this.dragFromPos = null; // top-level node position being dragged
+        this.dragOverPos = null;
 
         this.active = false;
         this.disposed = false;
@@ -218,8 +249,10 @@ export default class NotesSession {
                             <input class="nt-tags-input" type="text" placeholder="Tags separadas por vírgula" aria-label="Tags" autocomplete="off" autocapitalize="off">
                         </div>
                         <div class="nt-write">
-                            <textarea class="nt-body" placeholder="Escreva em Markdown… (digite / para inserir um bloco)" aria-label="Texto da anotação" spellcheck="true"></textarea>
-                            <div class="nt-preview md"></div>
+                            <div class="nt-doc-wrap">
+                                <button type="button" class="nt-draghandle" draggable="true" aria-label="Arrastar para reordenar" hidden>${icon('gripVertical', 16)}</button>
+                                <div class="nt-doc"></div>
+                            </div>
                         </div>
                         <div class="nt-fbar" hidden>
                             <ul class="nt-slash" role="listbox" aria-label="Inserir bloco" hidden></ul>
@@ -236,13 +269,69 @@ export default class NotesSession {
             root: q('.nt'), search: q('.nt-search input'), searchForm: q('.nt-search'), tags: q('.nt-tags'),
             trashbar: q('.nt-trashbar'), listEl: q('.nt-list'), empty: q('.nt-empty'), editor: q('.nt-editor'),
             status: q('.nt-status'), conflict: q('.nt-conflict'), title: q('.nt-title'), tagsInput: q('.nt-tags-input'),
-            body: q('.nt-body'), previewEl: q('.nt-preview'), trashBtn: q('[data-act="trash"]'),
+            docWrap: q('.nt-doc-wrap'), docEl: q('.nt-doc'), dragHandle: q('.nt-draghandle'), trashBtn: q('[data-act="trash"]'),
             restoreBtn: q('[data-act="restore"]'), pinBtn: q('[data-act="pin"]'),
             fbar: q('.nt-fbar'), slashEl: q('.nt-slash'),
         };
+        this.createEditor();
         this.bind();
         this.load();
         this.connect();
+    }
+
+    createEditor() {
+        this.editor = new Editor({
+            element: this.el.docEl,
+            editable: false,
+            autofocus: false,
+            extensions: [
+                StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+                Image.configure({ inline: false, allowBase64: false }),
+                Link.configure({ openOnClick: false, autolink: true }),
+                TaskList,
+                TaskItem.configure({ nested: true }),
+                Placeholder.configure({ placeholder: 'Escreva aqui… (ou arraste um arquivo para qualquer linha)' }),
+                Markdown.configure({ html: false, transformPastedText: true, transformCopiedText: true }),
+            ],
+            editorProps: {
+                handleDrop: (view, event, slice, moved) => {
+                    if (moved) return false; // internal text drag, let ProseMirror handle it
+                    const files = Array.from(event.dataTransfer?.files || []);
+                    if (!files.length || !this.current || this.current.deletedAt) return false;
+                    event.preventDefault();
+                    const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                    void this.insertFiles(files, coords ? coords.pos : view.state.doc.content.size);
+                    return true;
+                },
+                handlePaste: (view, event) => {
+                    const files = Array.from(event.clipboardData?.files || []);
+                    if (!files.length || !this.current || this.current.deletedAt) return false;
+                    event.preventDefault();
+                    void this.insertFiles(files, view.state.selection.from);
+                    return true;
+                },
+                handleKeyDown: (view, event) => {
+                    if (!this.slashItems.length) return false;
+                    if (event.key === 'ArrowDown') { event.preventDefault(); this.moveSlash(1); return true; }
+                    if (event.key === 'ArrowUp') { event.preventDefault(); this.moveSlash(-1); return true; }
+                    if (event.key === 'Enter' || event.key === 'Tab') {
+                        event.preventDefault();
+                        this.pickSlash(this.slashItems[this.slashIndex]?.key);
+                        return true;
+                    }
+                    if (event.key === 'Escape') { event.preventDefault(); this.closeSlash(); return true; }
+                    return false;
+                },
+            },
+            onUpdate: () => {
+                this.edited();
+                this.detectSlash();
+            },
+            onSelectionUpdate: () => this.detectSlash(),
+            onFocus: () => this.showFormatBar(),
+            onBlur: () => this.hideFormatBar(),
+            onTransaction: () => this.updateFormatBar(),
+        });
     }
 
     bind() {
@@ -264,19 +353,7 @@ export default class NotesSession {
             const slash = e.target.closest('[data-slash]');
             if (slash) this.pickSlash(slash.dataset.slash);
         });
-        el.previewEl.addEventListener('click', e => {
-            const task = e.target.closest('[data-task-index]');
-            if (task) return this.toggleTaskAt(Number(task.dataset.taskIndex));
-            onCodeClick(e);
-        });
-        el.previewEl.addEventListener('keydown', e => {
-            if (e.key !== 'Enter' && e.key !== ' ') return;
-            const task = e.target.closest('[data-task-index]');
-            if (!task) return;
-            e.preventDefault();
-            this.toggleTaskAt(Number(task.dataset.taskIndex));
-        });
-        // Clicking a toolbar/slash button must not blur the textarea (that would close the bar first)
+        // Clicking a toolbar/slash button must not blur the editor (that would close the bar first)
         el.fbar.addEventListener('mousedown', e => e.preventDefault());
         el.searchForm.addEventListener('submit', e => e.preventDefault());
         el.search.addEventListener('input', () => {
@@ -287,28 +364,11 @@ export default class NotesSession {
             }, SEARCH_DELAY);
         });
         [el.title, el.tagsInput].forEach(input => input.addEventListener('input', () => this.edited()));
-        el.body.addEventListener('input', () => {
-            this.edited();
-            this.renderPreview();
-            this.handleSlashInput();
-        });
-        el.body.addEventListener('focus', () => this.showFormatBar());
-        el.body.addEventListener('blur', () => this.hideFormatBar());
         this.onViewportChange = () => { if (!el.fbar.hidden) this.positionFormatBar(); };
         window.visualViewport?.addEventListener('resize', this.onViewportChange);
         window.visualViewport?.addEventListener('scroll', this.onViewportChange);
+        this.bindDragHandle();
         this.panel.addEventListener('keydown', e => {
-            if (this.slashStart !== null && e.target === el.body) {
-                if (e.key === 'ArrowDown') { e.preventDefault(); return this.moveSlash(1); }
-                if (e.key === 'ArrowUp') { e.preventDefault(); return this.moveSlash(-1); }
-                if (e.key === 'Enter' || e.key === 'Tab') {
-                    e.preventDefault();
-                    const block = this.slashItems[this.slashIndex];
-                    if (block) this.pickSlash(block.key);
-                    return;
-                }
-                if (e.key === 'Escape') { e.preventDefault(); return this.closeSlash(); }
-            }
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
                 e.preventDefault();
                 e.stopPropagation();
@@ -425,15 +485,17 @@ export default class NotesSession {
         el.editor.hidden = false;
         el.title.value = note.title;
         el.tagsInput.value = note.tags.join(', ');
-        el.body.value = note.body;
+        // emitUpdate: false - this is a programmatic load, not a user edit (must not mark the note dirty)
+        this.editor.commands.setContent(note.body, { emitUpdate: false });
         const locked = !!note.deletedAt;
-        [el.title, el.tagsInput, el.body].forEach(input => { input.readOnly = locked; });
+        [el.title, el.tagsInput].forEach(input => { input.readOnly = locked; });
+        this.editor.setEditable(!locked, false);
+        el.docWrap.classList.toggle('readonly', locked);
         el.restoreBtn.hidden = !locked;
         el.pinBtn.hidden = locked;
         el.pinBtn.setAttribute('aria-pressed', String(note.pinned));
         el.pinBtn.classList.toggle('on', note.pinned);
         this.setStatus(locked ? 'Na lixeira' : '');
-        this.renderPreview();
     }
 
     async openNote(id) {
@@ -471,31 +533,41 @@ export default class NotesSession {
         }
     }
 
-    renderPreview() {
-        if (!this.current) return;
-        const { previewEl } = this.el;
-        previewEl.innerHTML = renderMarkdown(this.el.body.value) || '<p class="nt-none">Nada para mostrar ainda.</p>';
-        void highlightIn(previewEl);
-    }
+    // ---------- attachments (drag-and-drop / paste of files) ----------
 
-    /** Toggles the Nth "- [ ]" line in the raw body (N = the clicked checkbox's data-task-index). */
-    toggleTaskAt(index) {
+    /** Uploads each file to the server and inserts it (image -> <img>, anything else -> a link). */
+    async insertFiles(files, pos) {
         const note = this.current;
         if (!note || note.deletedAt) return;
-        const lines = this.el.body.value.split('\n');
-        let seen = -1;
-        for (let li = 0; li < lines.length; li++) {
-            const m = lines[li].match(/^\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\]/);
-            if (!m) continue;
-            seen++;
-            if (seen === index) {
-                lines[li] = lines[li].replace(/\[[ xX]\]/, m[1] === ' ' ? '[x]' : '[ ]');
-                break;
+        let at = pos;
+        for (const file of files) {
+            try {
+                const result = await uploadAttachment(note.id, file);
+                if (this.current !== note || this.disposed) return; // navigated away mid-upload
+                if (file.type.startsWith('image/')) {
+                    this.editor.chain().focus().insertContentAt(at, { type: 'image', attrs: { src: result.url, alt: file.name } }).run();
+                } else {
+                    this.editor.chain().focus().insertContentAt(at, {
+                        type: 'paragraph',
+                        content: [{ type: 'text', text: `📎 ${file.name} (${formatSize(file.size)})`, marks: [{ type: 'link', attrs: { href: result.url } }] }],
+                    }).run();
+                }
+                at = this.editor.state.selection.to;
+            } catch (error) {
+                toast(error.message, { tone: 'error' });
             }
         }
-        this.el.body.value = lines.join('\n');
-        this.edited();
-        this.renderPreview();
+    }
+
+    pickImage() {
+        if (!this.current || this.current.deletedAt) return;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = () => {
+            if (input.files[0]) void this.insertFiles([input.files[0]], this.editor.state.selection.to);
+        };
+        input.click();
     }
 
     // ---------- formatting bar & "/" command palette ----------
@@ -503,17 +575,22 @@ export default class NotesSession {
     applyFormat(key) {
         if (!this.current || this.current.deletedAt) return;
         const action = FORMAT_ACTIONS.find(a => a.key === key);
-        if (!action) return;
-        if (action.wrap) wrapSelection(this.el.body, action.wrap[0], action.wrap[1]);
-        else prefixLine(this.el.body, action.prefix);
-        this.edited();
-        this.renderPreview();
+        if (action) action.run(this.editor, this);
+    }
+
+    updateFormatBar() {
+        if (this.el.fbar.hidden) return;
+        this.panel.querySelectorAll('[data-fmt]').forEach(btn => {
+            const action = FORMAT_ACTIONS.find(a => a.key === btn.dataset.fmt);
+            btn.classList.toggle('on', !!action?.active(this.editor));
+        });
     }
 
     showFormatBar() {
         if (!this.current || this.current.deletedAt) return;
         this.el.fbar.hidden = false;
         this.positionFormatBar();
+        this.updateFormatBar();
     }
 
     hideFormatBar() {
@@ -532,27 +609,20 @@ export default class NotesSession {
         this.el.fbar.style.bottom = `${kb}px`;
     }
 
-    /** Detects "/" typed at the start of a line (or after a space) and opens/filters the block palette. */
-    handleSlashInput() {
-        const { body } = this.el;
-        const { selectionStart: caret, value } = body;
-        if (this.slashStart !== null) {
-            const sinceSlash = value.slice(this.slashStart, caret);
-            if (caret <= this.slashStart || /[\n ]/.test(sinceSlash.slice(1))) {
-                this.closeSlash();
-            } else {
-                this.slashQuery = sinceSlash.slice(1);
-                this.renderSlashMenu();
-                return;
-            }
-        }
-        const before = caret >= 2 ? value[caret - 2] : undefined;
-        if (value[caret - 1] === '/' && (before === undefined || before === '\n' || before === ' ')) {
-            this.slashStart = caret - 1;
-            this.slashQuery = '';
-            this.slashIndex = 0;
-            this.renderSlashMenu();
-        }
+    /** Detects "/" typed at the start of a line (or after a space) in the current text block. */
+    detectSlash() {
+        const { state } = this.editor;
+        const { $from, empty } = state.selection;
+        if (!empty || !$from.parent.isTextblock) return this.closeSlash();
+        const start = Math.max(0, $from.parentOffset - 40);
+        const textBefore = $from.parent.textBetween(start, $from.parentOffset, undefined, '￼');
+        const match = /(?:^|[\n ])\/(\w*)$/.exec(textBefore);
+        if (!match) return this.closeSlash();
+        this.slashQuery = match[1];
+        this.slashTo = $from.pos;
+        this.slashFrom = $from.pos - match[1].length - 1;
+        this.slashIndex = 0;
+        this.renderSlashMenu();
     }
 
     renderSlashMenu() {
@@ -578,30 +648,109 @@ export default class NotesSession {
     }
 
     closeSlash() {
-        this.slashStart = null;
+        this.slashFrom = null;
+        this.slashTo = null;
         this.slashQuery = '';
         this.slashIndex = 0;
         this.slashItems = [];
-        this.el.slashEl.hidden = true;
+        if (this.el) this.el.slashEl.hidden = true;
     }
 
     pickSlash(key) {
         const block = this.slashItems.find(b => b.key === key) || SLASH_BLOCKS.find(b => b.key === key);
-        if (!block || this.slashStart === null) return;
-        const { body } = this.el;
-        const start = this.slashStart; // execCommand below fires 'input' synchronously, which closes the
-        const caret = body.selectionStart; // palette and resets this.slashStart - capture it first
-        body.focus();
-        body.setSelectionRange(start, Math.max(caret, start));
-        document.execCommand('insertText', false, block.snippet);
-        if (block.caretOffset) body.setSelectionRange(start + block.caretOffset, start + block.caretOffset);
+        if (!block || this.slashFrom === null) return;
+        const { from, to } = { from: this.slashFrom, to: this.slashTo };
         this.closeSlash();
-        this.edited();
-        this.renderPreview();
+        this.editor.chain().focus().deleteRange({ from, to }).run();
+        block.run(this.editor, this);
     }
 
     setStatus(text) {
         this.el.status.textContent = text;
+    }
+
+    // ---------- per-line drag handle (reorders top-level blocks) ----------
+
+    bindDragHandle() {
+        const { docWrap, dragHandle } = this.el;
+        docWrap.addEventListener('mousemove', e => {
+            if (this.dragFromPos !== null || !this.current || this.current.deletedAt) return;
+            const result = this.editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+            if (!result) return this.hideDragHandle();
+            const $pos = this.editor.state.doc.resolve(result.pos);
+            if ($pos.depth < 1) return this.hideDragHandle();
+            const topPos = $pos.before(1);
+            const dom = this.editor.view.nodeDOM(topPos);
+            if (!dom || dom.nodeType !== 1) return this.hideDragHandle();
+            const rect = dom.getBoundingClientRect();
+            const wrapRect = docWrap.getBoundingClientRect();
+            dragHandle.hidden = false;
+            dragHandle.style.top = `${rect.top - wrapRect.top}px`;
+            dragHandle.style.height = `${rect.height}px`;
+            this.dragHoverPos = topPos;
+        });
+        docWrap.addEventListener('mouseleave', () => {
+            if (this.dragFromPos === null) this.hideDragHandle();
+        });
+        dragHandle.addEventListener('dragstart', e => {
+            if (this.dragHoverPos === null) { e.preventDefault(); return; }
+            this.dragFromPos = this.dragHoverPos;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', 'reorder');
+            this.editor.view.nodeDOM(this.dragFromPos)?.classList.add('nt-drag-source');
+        });
+        dragHandle.addEventListener('dragend', () => {
+            this.clearDragHighlights();
+            this.dragFromPos = null;
+            this.dragOverPos = null;
+            this.hideDragHandle();
+        });
+        docWrap.addEventListener('dragover', e => {
+            if (this.dragFromPos === null) return; // an external file drag: editorProps.handleDrop deals with it
+            e.preventDefault();
+            const result = this.editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+            if (!result) return;
+            const $pos = this.editor.state.doc.resolve(result.pos);
+            if ($pos.depth < 1) return;
+            const topPos = $pos.before(1);
+            if (topPos === this.dragOverPos) return;
+            this.panel.querySelectorAll('.nt-drag-target').forEach(elx => elx.classList.remove('nt-drag-target'));
+            this.editor.view.nodeDOM(topPos)?.classList.add('nt-drag-target');
+            this.dragOverPos = topPos;
+        });
+        docWrap.addEventListener('drop', e => {
+            if (this.dragFromPos === null) return;
+            e.preventDefault();
+            if (this.dragOverPos !== null && this.dragOverPos !== this.dragFromPos) {
+                this.moveNode(this.dragFromPos, this.dragOverPos);
+                this.edited();
+            }
+            this.clearDragHighlights();
+            this.dragFromPos = null;
+            this.dragOverPos = null;
+            this.hideDragHandle();
+        });
+    }
+
+    hideDragHandle() {
+        this.el.dragHandle.hidden = true;
+        this.dragHoverPos = null;
+    }
+
+    clearDragHighlights() {
+        this.panel.querySelectorAll('.nt-drag-source, .nt-drag-target').forEach(elx => elx.classList.remove('nt-drag-source', 'nt-drag-target'));
+    }
+
+    /** Moves the top-level block at `fromPos` to sit where the block at `toPos` is. */
+    moveNode(fromPos, toPos) {
+        this.editor.commands.command(({ tr, state }) => {
+            const node = state.doc.nodeAt(fromPos);
+            if (!node) return false;
+            const size = node.nodeSize;
+            tr.delete(fromPos, fromPos + size);
+            tr.insert(toPos > fromPos ? toPos - size : toPos, node);
+            return true;
+        });
     }
 
     // ---------- saving ----------
@@ -625,7 +774,7 @@ export default class NotesSession {
         if (!note || !this.dirty || this.saving || this.conflict) return;
         const { el } = this;
         // Read the fields now: the user may keep typing (or the tab may close) while the request runs
-        const patch = { title: el.title.value, body: el.body.value, tags: parseTags(el.tagsInput.value) };
+        const patch = { title: el.title.value, body: this.editor.storage.markdown.getMarkdown(), tags: parseTags(el.tagsInput.value) };
         this.saving = true;
         this.dirty = false;
         this.setStatus('Salvando…');
@@ -814,7 +963,7 @@ export default class NotesSession {
     openEditorMenu(anchor) {
         const note = this.current;
         if (!note) return;
-        const copy = { label: 'Copiar texto (Markdown)', icon: 'copy', run: () => copyText(this.el.body.value).then(ok => toast(ok ? 'Texto copiado.' : 'Não foi possível copiar.')) };
+        const copy = { label: 'Copiar texto (Markdown)', icon: 'copy', run: () => copyText(this.editor.storage.markdown.getMarkdown()).then(ok => toast(ok ? 'Texto copiado.' : 'Não foi possível copiar.')) };
         const items = note.deletedAt
             ? [copy, 'separator', { label: 'Restaurar', icon: 'restore', run: () => this.restore(note.id) }, { label: 'Excluir para sempre', icon: 'trash', danger: true, run: () => this.purge(note.id) }]
             : [copy, 'separator', { label: 'Mover para a lixeira', icon: 'trash', danger: true, run: () => this.toTrash(note.id) }];
@@ -836,7 +985,8 @@ export default class NotesSession {
 
     focus() {
         if (coarse() || !this.el) return;
-        (this.current && !this.current.deletedAt ? this.el.body : this.el.search).focus({ preventScroll: true });
+        if (this.current && !this.current.deletedAt) this.editor.commands.focus();
+        else this.el.search.focus();
     }
 
     applySettings() { /* uses the app theme via CSS */ }
@@ -856,10 +1006,12 @@ export default class NotesSession {
 
     /** Dictation / clipboard paste: typed into the focused field of this tab, if any. */
     sendText(text) {
-        const field = this.panel.querySelector('input:focus, textarea:focus');
+        const field = this.panel.querySelector('input:focus');
         if (field && !field.readOnly) {
             field.focus();
             document.execCommand('insertText', false, text);
+        } else if (this.editor?.isFocused && this.current && !this.current.deletedAt) {
+            this.editor.chain().focus().insertContent(text).run();
         } else {
             toast('Abra uma anotação e toque no texto para colar aqui.');
         }
@@ -867,9 +1019,9 @@ export default class NotesSession {
 
     sendInput(data) {
         if (data === '\r') {
-            const field = this.panel.querySelector('input:focus, textarea:focus');
-            if (field?.tagName === 'TEXTAREA') document.execCommand('insertText', false, '\n');
-            else if (field) field.form?.requestSubmit();
+            const field = this.panel.querySelector('input:focus');
+            if (field) field.form?.requestSubmit();
+            else if (this.editor?.isFocused) this.editor.chain().focus().splitBlock().run();
             return;
         }
         if (/^[\x20-\x7e -￿]+$/.test(data)) this.sendText(data);
@@ -967,6 +1119,7 @@ export default class NotesSession {
             this.ws.onclose = null;
             this.ws.close();
         }
+        this.editor?.destroy();
         this.panel.remove();
     }
 }

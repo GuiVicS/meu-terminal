@@ -42,6 +42,9 @@ build/Release
 node_modules/
 jspm_packages/
 
+# Generated at build/start time (npm run build-tiptap), same spirit as public/node_modules/@xterm
+public/vendor/
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
