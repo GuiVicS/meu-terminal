@@ -34,6 +34,8 @@ services:
       MAX_SESSION_AGE: ${MAX_SESSION_AGE:-24} # Hours a login lasts
       # Folder the file manager opens at (default: /root)
       FILES_HOME: ${FILES_HOME:-}
+      # Notes tab (on unless set to false)
+      NOTES_ENABLED: ${NOTES_ENABLED:-}
 
       # (OPTIONAL) Comma-separated list of allowed origins, e.g.
       # https://terminal.example.com,http://192.168.0.10:3000 (unset = allow all)

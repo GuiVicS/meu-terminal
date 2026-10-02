@@ -159,6 +159,7 @@ export default class TabBar {
         el.dataset.color = session.color;
         el.classList.toggle('browser', session.kind === 'browser');
         el.classList.toggle('files', session.kind === 'files');
+        el.classList.toggle('notes', session.kind === 'notes');
         el.classList.toggle('agent', session.kind === 'agent');
         el.classList.toggle('pinned', session.pinned);
         el.classList.toggle('activity', session.hasActivity && session.id !== this.activeId);

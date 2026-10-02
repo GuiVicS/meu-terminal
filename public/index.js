@@ -173,8 +173,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     let blurTimer;
     const updateShortcutBar = () => {
         const mode = settings.get('shortcutBar');
-        // File tabs have their own buttons: the terminal keys bar isn't useful there
-        const visible = workspace?.active?.kind !== 'files' && (mode === 'always'
+        // File and notes tabs have their own buttons: the terminal keys bar isn't useful there
+        const kind = workspace?.active?.kind;
+        const visible = kind !== 'files' && kind !== 'notes' && (mode === 'always'
             || (mode === 'auto' && viewport.keyboardOpen && terminalFocused));
         shortcutBar.setVisible(visible);
     };
@@ -340,6 +341,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             { label: 'Nova aba de navegador', icon: 'globe', hint: `${k.mod}+B`, run: () => workspace.createBrowser() },
             ...(config.filesAvailable ? [{ label: 'Gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`,
                 run: () => workspace.createFiles() }] : []),
+            ...(config.notesAvailable ? [{ label: 'Anotações', icon: 'notes', hint: `${k.mod}+O`,
+                run: () => workspace.createNotes() }] : []),
             { label: 'Nova sessão com opções…', icon: 'terminal', run: () => workspace.openNewSessionPage() },
             { label: 'Nova conversa com agente', icon: 'bot', run: () => workspace.openAgentMenu(menuBtn) },
             { label: 'Novo projeto (vibecoding)', icon: 'zap', run: () => vibeForm.open() },

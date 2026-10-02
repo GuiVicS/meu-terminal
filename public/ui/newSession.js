@@ -38,6 +38,7 @@ export default class NewSessionPage {
                         <button type="button" role="radio" data-kind="terminal" aria-checked="true">${icon('terminal', 16)} Terminal</button>
                         <button type="button" role="radio" data-kind="browser" aria-checked="false">${icon('globe', 16)} Navegador</button>
                         <button type="button" role="radio" data-kind="files" aria-checked="false">${icon('folder', 16)} Arquivos</button>
+                        <button type="button" role="radio" data-kind="notes" aria-checked="false">${icon('notes', 16)} Anotações</button>
                     </div>
                     <label class="field">
                         <span class="field-label">Nome</span>
@@ -113,7 +114,8 @@ export default class NewSessionPage {
         const toggle = this.el.querySelector('.kind-toggle');
         toggle.querySelector('[data-kind="browser"]').hidden = !window.appConfig?.browserAvailable;
         toggle.querySelector('[data-kind="files"]').hidden = !window.appConfig?.filesAvailable;
-        toggle.hidden = !window.appConfig?.browserAvailable && !window.appConfig?.filesAvailable;
+        toggle.querySelector('[data-kind="notes"]').hidden = !window.appConfig?.notesAvailable;
+        toggle.hidden = !window.appConfig?.browserAvailable && !window.appConfig?.filesAvailable && !window.appConfig?.notesAvailable;
         this.setKind('terminal');
         this.renderRecents(recents);
         this.el.hidden = false;
@@ -138,6 +140,7 @@ export default class NewSessionPage {
             terminal: ['Nova sessão', 'Criar sessão', 'Se o caminho não existir, o shell abre no diretório padrão do servidor.'],
             browser: ['Nova aba de navegador', 'Abrir navegador', ''],
             files: ['Novo gerenciador de arquivos', 'Abrir arquivos', 'Vazio = pasta inicial do servidor. O Google Drive (rclone) aparece no painel lateral.'],
+            notes: ['Nova aba de anotações', 'Abrir anotações', ''],
         }[kind];
         this.el.querySelector('.new-session-title').textContent = texts[0];
         this.form.querySelector('[type="submit"]').textContent = texts[1];
