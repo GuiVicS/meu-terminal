@@ -45,6 +45,9 @@ jspm_packages/
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
+# Generated at `npm start`/`npm run dev` (scripts/build-notes-editor.js), same as public/node_modules
+public/vendor/
+
 # TypeScript cache
 *.tsbuildinfo
 
