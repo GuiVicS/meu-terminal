@@ -114,7 +114,7 @@ Cada webhook declara as entradas que aceita. Uma entrada tem:
 |---|---|---|
 | `name` | `BRANCH` | Nome da variável no script (`$BRANCH`). Só `A-Z`, `0-9`, `_`. |
 | `label` | "Branch" | Rótulo no formulário. |
-| `type` | `text`, `number`, `boolean`, `select`, `path`, `textarea`, `secret` | Validação e tipo do campo no formulário. |
+| `type` | `text`, `number`, `boolean`, `select`, `path`, `textarea`, `secret`, `file` | Validação e tipo do campo no formulário. |
 | `required` / `default` | `true` / `main` | Se falta e tem padrão, usa o padrão. Se falta e é obrigatório, rejeita. |
 | `options` | `["main","dev"]` | Para `select`: só aceita esses valores. |
 | `pattern` / `maxLength` | `^[A-Za-z0-9._/-]+$` / `80` | Validação extra. Cada tipo já vem com um padrão seguro. |
@@ -126,6 +126,8 @@ Cada webhook declara as entradas que aceita. Uma entrada tem:
 - **Execução manual:** o `/admin` mostra um formulário gerado a partir dos inputs; o usuário preenche e executa.
 
 Tipo `secret`: valor guardado no servidor (chave de API, senha), mascarado na tela e nos logs, nunca vem de quem chama.
+
+Tipo `file`: aceita receber um arquivo no disparo (`multipart/form-data`, campo com o mesmo `name` do input) ou escolher um arquivo ao executar manualmente no `/admin`. O arquivo é salvo num caminho temporário (`$MT_UPLOAD_DIR`, apagado depois da execução) e o script recebe **o caminho** na variável (`$ANEXO` = `/tmp/.../anexo.pdf`), nunca o conteúdo interpolado. Validação por `maxSizeMb` (padrão 20 MB, configurável até o limite do servidor) e, opcional, `accept` (extensões ou mimetypes permitidos, ex.: `[".pdf", "image/*"]`).
 
 ### 3.4 Como o script roda (o ponto que garante a segurança)
 
@@ -164,7 +166,7 @@ Digitar dentro de uma aba já aberta (com alguém usando) **fica fora** desta ve
 3. **Versões do script**: cada alteração guarda a versão anterior (quem, quando). Dá para comparar e voltar.
 4. **Limite de disparos** por webhook e por IP; após 5 falhas de autenticação seguidas, bloqueio temporário do IP.
 5. **IPs permitidos** opcional por webhook.
-6. **Corpo máximo** de 64 KB, só `application/json` ou `application/x-www-form-urlencoded`.
+6. **Corpo máximo** de 64 KB para `application/json` ou `application/x-www-form-urlencoded`. Quando o webhook tem algum input `file`, também aceita `multipart/form-data`, com limite por arquivo (`maxSizeMb` do input, padrão 20 MB) e um limite total do disparo (padrão 100 MB); fora isso, `415`.
 7. **Resposta não vaza nada**: token inválido e webhook inexistente devolvem o mesmo `404`, para não permitir descobrir slugs.
 8. **Logs**: nunca registrar headers de autenticação, inputs `secret` nem o corpo inteiro. A saída do script passa por máscara dos valores secretos antes de ir para o histórico.
 9. **Só HTTPS** fora de localhost.

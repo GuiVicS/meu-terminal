@@ -16,6 +16,8 @@ const SessionStore = require('./scripts/session-store');
 const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
 const NotesStore = require('./scripts/notes-store');
+const BackupStore = require('./scripts/backup-store');
+const BackupRunner = require('./scripts/backup-runner');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
 const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
 const { FileManager, FileError } = require('./scripts/file-manager');
@@ -342,6 +344,12 @@ app.get(BASE_PATH + '/', (req, res) => {
 // Step-by-step guide: turning on the authenticator app (2FA)
 app.get(BASE_PATH + '/guia', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'guia.html'));
+});
+
+// Admin page (settings as a full page instead of the popup; opens in its own tab).
+// Not in publicPaths, so it goes through the same login as everything else.
+app.get(BASE_PATH + '/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html'));
 });
 
 // Serve config.js for frontend
@@ -1225,6 +1233,31 @@ app.patch(BASE_PATH + '/api/commands/:id', (req, res) => {
 app.delete(BASE_PATH + '/api/commands/:id', (req, res) => {
     if (!commands.remove(req.params.id)) return res.status(404).json({ error: 'Command not found' });
     res.json({ success: true });
+});
+
+// ---------- Backup (periodic snapshot of the database + configured folders, sent via rclone) ----------
+const backupStore = new BackupStore(sessionStore.db);
+const backupRunner = new BackupRunner({ store: backupStore, db: sessionStore.db, log: debugLog });
+backupRunner.start();
+
+app.get(BASE_PATH + '/api/backup', (req, res) => {
+    res.json({ ...backupStore.get(), running: backupRunner.running });
+});
+
+app.put(BASE_PATH + '/api/backup', (req, res) => {
+    res.json(backupStore.update(req.body || {}));
+});
+
+app.post(BASE_PATH + '/api/backup/run', async (req, res) => {
+    try {
+        res.json(await backupRunner.run('manual'));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.get(BASE_PATH + '/api/backup/history', (req, res) => {
+    res.json(backupStore.history(Number(req.query.limit) || 20));
 });
 
 // ---------- Notes (the notes tab; every device reads and writes the same notes) ----------
