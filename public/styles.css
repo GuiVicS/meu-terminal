@@ -2593,7 +2593,9 @@ audio.fm-media { width: min(520px, 90%); }
    /admin page (public/admin/*)
    ========================================================= */
 .page-admin { background: var(--bg); }
-.admin { min-height: 100vh; display: flex; flex-direction: column; }
+/* height (not min-height): .admin-main below must be capped to the viewport to scroll its own
+   content - body has overflow:hidden, so letting .admin grow taller than the screen just clips it. */
+.admin { height: 100dvh; display: flex; flex-direction: column; }
 .admin-topbar {
     flex-shrink: 0; height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 16px;
     border-bottom: 1px solid var(--border); background: var(--surface);
