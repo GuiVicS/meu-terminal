@@ -1,8 +1,11 @@
 /**
  * notesSession.js
  * "Anotações" tab: Markdown notes saved on the server, so every device shows the same notes.
- * List with search, tags, pin and trash; editor with autosave and a Markdown preview. When
- * another device changes the open note the tab reloads it, or asks which version to keep.
+ * One editing surface (Notion-style: "/" to insert a block, inline formatting as you type,
+ * clickable checklists, pasted images, attached files) - see editor/notes-editor-entry.js for
+ * the Tiptap setup this mounts, bundled into public/vendor/notes-editor.js. The server still
+ * only ever sees Markdown: the rich editor serializes to/from that string, so sync, search,
+ * previews and conflict handling are unchanged.
  * Same interface as TerminalSession, so tabs, status bar and menus work with it.
  */
 import { STATE, SESSION_COLORS } from './session.js';
@@ -10,14 +13,15 @@ import { icon } from '../ui/icons.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { toast } from '../ui/toast.js';
 import { askConfirm } from '../ui/prompt.js';
-import { renderMarkdown, esc } from '../agent/markdown.js';
-import { highlightIn, onCodeClick, copyText } from '../agent/codeblock.js';
+import { esc } from '../agent/markdown.js';
+import { copyText } from '../agent/codeblock.js';
 
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
 const SAVE_DELAY = 800;
 const REFRESH_DELAY = 300;
 const SEARCH_DELAY = 250;
+const GROUP_ORDER = ['Títulos', 'Blocos', 'Avançado', 'Mídia'];
 
 const dayFormat = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' });
 const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -55,53 +59,6 @@ async function request(method, route = '', { params, body } = {}) {
 
 const parseTags = text => text.split(',').map(t => t.trim()).filter(Boolean);
 
-// Floating formatting bar: inline wraps (**bold**) or line prefixes (> quote).
-const FORMAT_ACTIONS = [
-    { key: 'bold', icon: 'bold', label: 'Negrito', wrap: ['**', '**'] },
-    { key: 'italic', icon: 'italic', label: 'Itálico', wrap: ['*', '*'] },
-    { key: 'code', icon: 'code', label: 'Código', wrap: ['`', '`'] },
-    { key: 'link', icon: 'link', label: 'Link', wrap: ['[', '](url)'] },
-    { key: 'heading', icon: 'heading', label: 'Título', prefix: '## ' },
-    { key: 'quote', icon: 'quote', label: 'Citação', prefix: '> ' },
-    { key: 'list', icon: 'list', label: 'Lista', prefix: '- ' },
-    { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', prefix: '1. ' },
-    { key: 'check', icon: 'squareCheck', label: 'Checklist', prefix: '- [ ] ' },
-];
-
-// "/" command palette (Notion-style): replaces "/query" with a block snippet.
-const SLASH_BLOCKS = [
-    { key: 'h1', icon: 'heading', label: 'Título 1', snippet: '# ' },
-    { key: 'h2', icon: 'heading', label: 'Título 2', snippet: '## ' },
-    { key: 'h3', icon: 'heading', label: 'Título 3', snippet: '### ' },
-    { key: 'list', icon: 'list', label: 'Lista', snippet: '- ' },
-    { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', snippet: '1. ' },
-    { key: 'check', icon: 'squareCheck', label: 'Checklist', snippet: '- [ ] ' },
-    { key: 'quote', icon: 'quote', label: 'Citação', snippet: '> ' },
-    { key: 'code', icon: 'codeXml', label: 'Bloco de código', snippet: '```\n\n```', caretOffset: 4 },
-    { key: 'hr', icon: 'minus', label: 'Divisória', snippet: '---\n' },
-];
-
-/** Replaces the selection (or inserts a placeholder) wrapped in markers, via execCommand so undo keeps working. */
-function wrapSelection(textarea, before, after) {
-    const { selectionStart: start, selectionEnd: end, value } = textarea;
-    const selected = value.slice(start, end);
-    const placeholder = selected || 'texto';
-    textarea.focus();
-    textarea.setSelectionRange(start, end);
-    document.execCommand('insertText', false, `${before}${placeholder}${after}`);
-    if (!selected) textarea.setSelectionRange(start + before.length, start + before.length + placeholder.length);
-}
-
-/** Prepends a prefix to the current line (not the selection: lists/quotes/headings work on whole lines). */
-function prefixLine(textarea, prefix) {
-    const { selectionStart: start, value } = textarea;
-    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
-    const lineEnd = value.indexOf('\n', start) === -1 ? value.length : value.indexOf('\n', start);
-    textarea.focus();
-    textarea.setSelectionRange(lineStart, lineEnd);
-    document.execCommand('insertText', false, prefix + value.slice(lineStart, lineEnd));
-}
-
 export default class NotesSession {
     /**
      * @param {object} opts
@@ -137,15 +94,13 @@ export default class NotesSession {
         this.tag = '';
         this.trashView = false;
         this.current = null; // full note open in the editor
+        this.currentMarkdown = '';
         this.dirty = false;
         this.saving = false;
         this.conflict = null; // the other device's version, while the user decides
         this.pendingRemote = false;
+        this.pendingFill = null; // fill() called before the rich editor bundle finished loading
         this.listSeq = 0;
-        this.slashStart = null; // caret position of "/" while the command palette is open
-        this.slashQuery = '';
-        this.slashIndex = 0;
-        this.slashItems = [];
 
         this.active = false;
         this.disposed = false;
@@ -217,16 +172,7 @@ export default class NotesSession {
                             ${icon('tag', 14)}
                             <input class="nt-tags-input" type="text" placeholder="Tags separadas por vírgula" aria-label="Tags" autocomplete="off" autocapitalize="off">
                         </div>
-                        <div class="nt-write">
-                            <textarea class="nt-body" placeholder="Escreva em Markdown… (digite / para inserir um bloco)" aria-label="Texto da anotação" spellcheck="true"></textarea>
-                            <div class="nt-preview md"></div>
-                        </div>
-                        <div class="nt-fbar" hidden>
-                            <ul class="nt-slash" role="listbox" aria-label="Inserir bloco" hidden></ul>
-                            <div class="nt-fbar-row" role="toolbar" aria-label="Formatação">
-                                ${FORMAT_ACTIONS.map(a => `<button type="button" class="nt-fbtn" data-fmt="${a.key}" aria-label="${a.label}" title="${a.label}">${icon(a.icon, 17)}</button>`).join('')}
-                            </div>
-                        </div>
+                        <div class="nt-surface md"></div>
                     </div>
                 </section>
                 <button type="button" class="nt-fab" data-act="new" aria-label="Nova anotação">${icon('plus', 22)}</button>
@@ -236,13 +182,41 @@ export default class NotesSession {
             root: q('.nt'), search: q('.nt-search input'), searchForm: q('.nt-search'), tags: q('.nt-tags'),
             trashbar: q('.nt-trashbar'), listEl: q('.nt-list'), empty: q('.nt-empty'), editor: q('.nt-editor'),
             status: q('.nt-status'), conflict: q('.nt-conflict'), title: q('.nt-title'), tagsInput: q('.nt-tags-input'),
-            body: q('.nt-body'), previewEl: q('.nt-preview'), trashBtn: q('[data-act="trash"]'),
+            surface: q('.nt-surface'), trashBtn: q('[data-act="trash"]'),
             restoreBtn: q('[data-act="restore"]'), pinBtn: q('[data-act="pin"]'),
-            fbar: q('.nt-fbar'), slashEl: q('.nt-slash'),
         };
         this.bind();
+        this.editorReady = this.initEditor();
         this.load();
         this.connect();
+    }
+
+    async initEditor() {
+        try {
+            const { createNotesEditor } = await import('../vendor/notes-editor.js');
+            if (this.disposed) return;
+            this.rich = createNotesEditor({
+                element: this.el.surface,
+                content: '',
+                editable: true,
+                placeholder: 'Escreva, ou digite "/" para inserir um bloco…',
+                onUpdate: markdown => {
+                    this.currentMarkdown = markdown;
+                    this.edited();
+                },
+                onImageUpload: file => this.uploadMedia(file),
+                onFileUpload: file => this.uploadMedia(file),
+                renderSlashMenu: () => this.createSlashMenuController(),
+            });
+            if (this.pendingFill) {
+                this.rich.setMarkdown(this.pendingFill.body);
+                this.rich.setEditable(!this.pendingFill.locked);
+                this.pendingFill = null;
+            }
+        } catch (error) {
+            console.error('Falha ao carregar o editor de anotações:', error);
+            toast('Não foi possível carregar o editor de anotações.', { tone: 'error' });
+        }
     }
 
     bind() {
@@ -259,25 +233,7 @@ export default class NotesSession {
             }
             const item = e.target.closest('.nt-item');
             if (item) return this.openNote(item.dataset.id);
-            const fmt = e.target.closest('[data-fmt]');
-            if (fmt) return this.applyFormat(fmt.dataset.fmt);
-            const slash = e.target.closest('[data-slash]');
-            if (slash) this.pickSlash(slash.dataset.slash);
         });
-        el.previewEl.addEventListener('click', e => {
-            const task = e.target.closest('[data-task-index]');
-            if (task) return this.toggleTaskAt(Number(task.dataset.taskIndex));
-            onCodeClick(e);
-        });
-        el.previewEl.addEventListener('keydown', e => {
-            if (e.key !== 'Enter' && e.key !== ' ') return;
-            const task = e.target.closest('[data-task-index]');
-            if (!task) return;
-            e.preventDefault();
-            this.toggleTaskAt(Number(task.dataset.taskIndex));
-        });
-        // Clicking a toolbar/slash button must not blur the textarea (that would close the bar first)
-        el.fbar.addEventListener('mousedown', e => e.preventDefault());
         el.searchForm.addEventListener('submit', e => e.preventDefault());
         el.search.addEventListener('input', () => {
             clearTimeout(this.searchTimer);
@@ -287,28 +243,7 @@ export default class NotesSession {
             }, SEARCH_DELAY);
         });
         [el.title, el.tagsInput].forEach(input => input.addEventListener('input', () => this.edited()));
-        el.body.addEventListener('input', () => {
-            this.edited();
-            this.renderPreview();
-            this.handleSlashInput();
-        });
-        el.body.addEventListener('focus', () => this.showFormatBar());
-        el.body.addEventListener('blur', () => this.hideFormatBar());
-        this.onViewportChange = () => { if (!el.fbar.hidden) this.positionFormatBar(); };
-        window.visualViewport?.addEventListener('resize', this.onViewportChange);
-        window.visualViewport?.addEventListener('scroll', this.onViewportChange);
         this.panel.addEventListener('keydown', e => {
-            if (this.slashStart !== null && e.target === el.body) {
-                if (e.key === 'ArrowDown') { e.preventDefault(); return this.moveSlash(1); }
-                if (e.key === 'ArrowUp') { e.preventDefault(); return this.moveSlash(-1); }
-                if (e.key === 'Enter' || e.key === 'Tab') {
-                    e.preventDefault();
-                    const block = this.slashItems[this.slashIndex];
-                    if (block) this.pickSlash(block.key);
-                    return;
-                }
-                if (e.key === 'Escape') { e.preventDefault(); return this.closeSlash(); }
-            }
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
                 e.preventDefault();
                 e.stopPropagation();
@@ -332,6 +267,98 @@ export default class NotesSession {
             case 'keep-mine': return this.keepMine();
             default: return undefined;
         }
+    }
+
+    // ---------- "/" command palette UI (the Tiptap extension only decides *what*; this draws it) ----------
+
+    createSlashMenuController() {
+        let el = null;
+        let items = [];
+        let selected = 0;
+        let command = null;
+
+        const render = () => {
+            if (!el) return;
+            const groups = new Map();
+            items.forEach((it, idx) => {
+                if (!groups.has(it.group)) groups.set(it.group, []);
+                groups.get(it.group).push(idx);
+            });
+            const order = [...groups.keys()].sort((a, b) => GROUP_ORDER.indexOf(a) - GROUP_ORDER.indexOf(b));
+            el.innerHTML = order.map(g => `
+                <div class="nt-slash-group">${esc(g)}</div>
+                ${groups.get(g).map(idx => {
+                    const it = items[idx];
+                    return `<button type="button" class="nt-slash-item${idx === selected ? ' active' : ''}" data-idx="${idx}">
+                        <span class="nt-slash-icon">${icon(it.icon, 18)}</span>
+                        <span class="nt-slash-text"><b>${esc(it.label)}</b><small>${esc(it.hint)}</small></span>
+                    </button>`;
+                }).join('')}`).join('') || '<div class="nt-slash-empty">Nada encontrado</div>';
+        };
+
+        const position = clientRect => {
+            const rect = clientRect?.();
+            if (!rect || !el) return;
+            const left = Math.max(8, Math.min(rect.left, window.innerWidth - 320));
+            el.style.left = `${left}px`;
+            const spaceBelow = window.innerHeight - rect.bottom;
+            if (spaceBelow < 320 && rect.top > 320) {
+                el.style.top = '';
+                el.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+            } else {
+                el.style.bottom = '';
+                el.style.top = `${rect.bottom + 6}px`;
+            }
+        };
+
+        return {
+            onStart: props => {
+                items = props.items;
+                command = props.command;
+                selected = 0;
+                el = document.createElement('div');
+                el.className = 'nt-slash-menu';
+                el.setAttribute('role', 'listbox');
+                el.addEventListener('mousedown', e => e.preventDefault()); // don't steal focus from the editor
+                el.addEventListener('click', e => {
+                    const btn = e.target.closest('[data-idx]');
+                    if (btn) command(items[Number(btn.dataset.idx)]);
+                });
+                document.body.appendChild(el);
+                render();
+                position(props.clientRect);
+            },
+            onUpdate: props => {
+                items = props.items;
+                command = props.command;
+                selected = Math.min(selected, Math.max(0, items.length - 1));
+                render();
+                position(props.clientRect);
+            },
+            onKeyDown: props => {
+                if (!el || !items.length) return false;
+                if (props.event.key === 'ArrowDown') { selected = (selected + 1) % items.length; render(); return true; }
+                if (props.event.key === 'ArrowUp') { selected = (selected - 1 + items.length) % items.length; render(); return true; }
+                if (props.event.key === 'Enter' || props.event.key === 'Tab') { command(items[selected]); return true; }
+                if (props.event.key === 'Escape') { el.remove(); el = null; return true; }
+                return false;
+            },
+            onExit: () => { el?.remove(); el = null; },
+        };
+    }
+
+    async uploadMedia(file) {
+        const note = this.current;
+        if (!note) throw new Error('Abra uma anotação primeiro.');
+        const response = await fetch(`${basePath()}/api/notes/${encodeURIComponent(note.id)}/media?name=${encodeURIComponent(file.name)}`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            body: file,
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || `Erro ${response.status}`);
+        return data; // { url, name, size }
     }
 
     // ---------- list ----------
@@ -425,15 +452,20 @@ export default class NotesSession {
         el.editor.hidden = false;
         el.title.value = note.title;
         el.tagsInput.value = note.tags.join(', ');
-        el.body.value = note.body;
         const locked = !!note.deletedAt;
-        [el.title, el.tagsInput, el.body].forEach(input => { input.readOnly = locked; });
+        [el.title, el.tagsInput].forEach(input => { input.readOnly = locked; });
         el.restoreBtn.hidden = !locked;
         el.pinBtn.hidden = locked;
         el.pinBtn.setAttribute('aria-pressed', String(note.pinned));
         el.pinBtn.classList.toggle('on', note.pinned);
         this.setStatus(locked ? 'Na lixeira' : '');
-        this.renderPreview();
+        this.currentMarkdown = note.body;
+        if (this.rich) {
+            this.rich.setMarkdown(note.body);
+            this.rich.setEditable(!locked);
+        } else {
+            this.pendingFill = { body: note.body, locked };
+        }
     }
 
     async openNote(id) {
@@ -471,135 +503,6 @@ export default class NotesSession {
         }
     }
 
-    renderPreview() {
-        if (!this.current) return;
-        const { previewEl } = this.el;
-        previewEl.innerHTML = renderMarkdown(this.el.body.value) || '<p class="nt-none">Nada para mostrar ainda.</p>';
-        void highlightIn(previewEl);
-    }
-
-    /** Toggles the Nth "- [ ]" line in the raw body (N = the clicked checkbox's data-task-index). */
-    toggleTaskAt(index) {
-        const note = this.current;
-        if (!note || note.deletedAt) return;
-        const lines = this.el.body.value.split('\n');
-        let seen = -1;
-        for (let li = 0; li < lines.length; li++) {
-            const m = lines[li].match(/^\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\]/);
-            if (!m) continue;
-            seen++;
-            if (seen === index) {
-                lines[li] = lines[li].replace(/\[[ xX]\]/, m[1] === ' ' ? '[x]' : '[ ]');
-                break;
-            }
-        }
-        this.el.body.value = lines.join('\n');
-        this.edited();
-        this.renderPreview();
-    }
-
-    // ---------- formatting bar & "/" command palette ----------
-
-    applyFormat(key) {
-        if (!this.current || this.current.deletedAt) return;
-        const action = FORMAT_ACTIONS.find(a => a.key === key);
-        if (!action) return;
-        if (action.wrap) wrapSelection(this.el.body, action.wrap[0], action.wrap[1]);
-        else prefixLine(this.el.body, action.prefix);
-        this.edited();
-        this.renderPreview();
-    }
-
-    showFormatBar() {
-        if (!this.current || this.current.deletedAt) return;
-        this.el.fbar.hidden = false;
-        this.positionFormatBar();
-    }
-
-    hideFormatBar() {
-        this.el.fbar.hidden = true;
-        this.closeSlash();
-    }
-
-    /** Mobile: keeps the bar sitting right above the on-screen keyboard. Desktop uses CSS (sticky). */
-    positionFormatBar() {
-        const vv = window.visualViewport;
-        if (!coarse() || !vv) {
-            this.el.fbar.style.bottom = '';
-            return;
-        }
-        const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-        this.el.fbar.style.bottom = `${kb}px`;
-    }
-
-    /** Detects "/" typed at the start of a line (or after a space) and opens/filters the block palette. */
-    handleSlashInput() {
-        const { body } = this.el;
-        const { selectionStart: caret, value } = body;
-        if (this.slashStart !== null) {
-            const sinceSlash = value.slice(this.slashStart, caret);
-            if (caret <= this.slashStart || /[\n ]/.test(sinceSlash.slice(1))) {
-                this.closeSlash();
-            } else {
-                this.slashQuery = sinceSlash.slice(1);
-                this.renderSlashMenu();
-                return;
-            }
-        }
-        const before = caret >= 2 ? value[caret - 2] : undefined;
-        if (value[caret - 1] === '/' && (before === undefined || before === '\n' || before === ' ')) {
-            this.slashStart = caret - 1;
-            this.slashQuery = '';
-            this.slashIndex = 0;
-            this.renderSlashMenu();
-        }
-    }
-
-    renderSlashMenu() {
-        const q = this.slashQuery.toLowerCase();
-        this.slashItems = SLASH_BLOCKS.filter(b => !q || b.label.toLowerCase().includes(q));
-        const { slashEl } = this.el;
-        if (!this.slashItems.length) {
-            slashEl.hidden = true;
-            return;
-        }
-        this.slashIndex = Math.min(this.slashIndex, this.slashItems.length - 1);
-        slashEl.innerHTML = this.slashItems.map((b, i) => `
-            <li role="option" aria-selected="${i === this.slashIndex}" class="${i === this.slashIndex ? 'active' : ''}" data-slash="${b.key}">
-                ${icon(b.icon, 15)}<span>${b.label}</span>
-            </li>`).join('');
-        slashEl.hidden = false;
-    }
-
-    moveSlash(delta) {
-        if (!this.slashItems.length) return;
-        this.slashIndex = (this.slashIndex + delta + this.slashItems.length) % this.slashItems.length;
-        this.renderSlashMenu();
-    }
-
-    closeSlash() {
-        this.slashStart = null;
-        this.slashQuery = '';
-        this.slashIndex = 0;
-        this.slashItems = [];
-        this.el.slashEl.hidden = true;
-    }
-
-    pickSlash(key) {
-        const block = this.slashItems.find(b => b.key === key) || SLASH_BLOCKS.find(b => b.key === key);
-        if (!block || this.slashStart === null) return;
-        const { body } = this.el;
-        const start = this.slashStart; // execCommand below fires 'input' synchronously, which closes the
-        const caret = body.selectionStart; // palette and resets this.slashStart - capture it first
-        body.focus();
-        body.setSelectionRange(start, Math.max(caret, start));
-        document.execCommand('insertText', false, block.snippet);
-        if (block.caretOffset) body.setSelectionRange(start + block.caretOffset, start + block.caretOffset);
-        this.closeSlash();
-        this.edited();
-        this.renderPreview();
-    }
-
     setStatus(text) {
         this.el.status.textContent = text;
     }
@@ -625,7 +528,7 @@ export default class NotesSession {
         if (!note || !this.dirty || this.saving || this.conflict) return;
         const { el } = this;
         // Read the fields now: the user may keep typing (or the tab may close) while the request runs
-        const patch = { title: el.title.value, body: el.body.value, tags: parseTags(el.tagsInput.value) };
+        const patch = { title: el.title.value, body: this.currentMarkdown ?? note.body, tags: parseTags(el.tagsInput.value) };
         this.saving = true;
         this.dirty = false;
         this.setStatus('Salvando…');
@@ -814,7 +717,7 @@ export default class NotesSession {
     openEditorMenu(anchor) {
         const note = this.current;
         if (!note) return;
-        const copy = { label: 'Copiar texto (Markdown)', icon: 'copy', run: () => copyText(this.el.body.value).then(ok => toast(ok ? 'Texto copiado.' : 'Não foi possível copiar.')) };
+        const copy = { label: 'Copiar texto (Markdown)', icon: 'copy', run: () => copyText(this.currentMarkdown ?? note.body).then(ok => toast(ok ? 'Texto copiado.' : 'Não foi possível copiar.')) };
         const items = note.deletedAt
             ? [copy, 'separator', { label: 'Restaurar', icon: 'restore', run: () => this.restore(note.id) }, { label: 'Excluir para sempre', icon: 'trash', danger: true, run: () => this.purge(note.id) }]
             : [copy, 'separator', { label: 'Mover para a lixeira', icon: 'trash', danger: true, run: () => this.toTrash(note.id) }];
@@ -836,7 +739,8 @@ export default class NotesSession {
 
     focus() {
         if (coarse() || !this.el) return;
-        (this.current && !this.current.deletedAt ? this.el.body : this.el.search).focus({ preventScroll: true });
+        if (this.current && !this.current.deletedAt) this.rich?.focus();
+        else this.el.search.focus({ preventScroll: true });
     }
 
     applySettings() { /* uses the app theme via CSS */ }
@@ -856,7 +760,11 @@ export default class NotesSession {
 
     /** Dictation / clipboard paste: typed into the focused field of this tab, if any. */
     sendText(text) {
-        const field = this.panel.querySelector('input:focus, textarea:focus');
+        if (this.rich?.editor.isFocused && !this.current?.deletedAt) {
+            this.rich.editor.chain().focus().insertContent(text).run();
+            return;
+        }
+        const field = this.panel.querySelector('input:focus');
         if (field && !field.readOnly) {
             field.focus();
             document.execCommand('insertText', false, text);
@@ -867,9 +775,12 @@ export default class NotesSession {
 
     sendInput(data) {
         if (data === '\r') {
-            const field = this.panel.querySelector('input:focus, textarea:focus');
-            if (field?.tagName === 'TEXTAREA') document.execCommand('insertText', false, '\n');
-            else if (field) field.form?.requestSubmit();
+            if (this.rich?.editor.isFocused && !this.current?.deletedAt) {
+                this.rich.editor.chain().focus().insertContent('\n').run();
+                return;
+            }
+            const field = this.panel.querySelector('input:focus');
+            if (field) field.form?.requestSubmit();
             return;
         }
         if (/^[\x20-\x7e -￿]+$/.test(data)) this.sendText(data);
@@ -959,10 +870,7 @@ export default class NotesSession {
         clearTimeout(this.searchTimer);
         this.timers.forEach(clearTimeout);
         this.timers.clear();
-        if (this.onViewportChange) {
-            window.visualViewport?.removeEventListener('resize', this.onViewportChange);
-            window.visualViewport?.removeEventListener('scroll', this.onViewportChange);
-        }
+        this.rich?.destroy();
         if (this.ws) {
             this.ws.onclose = null;
             this.ws.close();
