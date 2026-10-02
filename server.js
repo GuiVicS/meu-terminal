@@ -29,6 +29,7 @@ const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
 const { FileManager, FileError } = require('./scripts/file-manager');
 const { LiveServers } = require('./scripts/live-server');
 const { Vibe } = require('./scripts/vibe');
+const VibeStore = require('./scripts/vibe-store');
 const { PushNotifier } = require('./scripts/push');
 const QRCode = require('qrcode');
 const AgentStore = require('./scripts/agents/agent-store');
@@ -782,9 +783,6 @@ browsers.onLive = (id, folder) => setLiveReload(id, folder).catch(e => debugLog(
     }
 })();
 
-// Vibecoding: project form -> agent terminal | live preview (split) + files tab
-const vibe = new Vibe({ sessions, store: sessionStore, live, setLiveReload, home: files.home, log: debugLog });
-
 /** The terminal tab an agent runs in: given id, else the last terminal the user focused. */
 let lastFocusedTerminal = null;
 function agentTerminal(tabId) {
@@ -899,6 +897,13 @@ const agentLauncher = new AgentLauncher({
     prefs: { get: key => sessionStore.getMeta(key), set: (key, value) => sessionStore.setMeta(key, value) },
     commandExists,
     log: debugLog,
+});
+
+// Vibecoding: project form -> agent UI tab | live preview (split) + files tab, always the agent
+// UI (never a typed shell command) - needs the gateway, so this comes after it above.
+const vibe = new Vibe({
+    sessions, store: sessionStore, live, setLiveReload, home: files.home,
+    gateway: agentGateway, commandExists, vibeStore: new VibeStore(sessionStore.db), log: debugLog,
 });
 let agentRcFile = null; // bash --rcfile for MeuTerminal shells (scripts/agents/shims.js)
 // The agent UI runs code on this server: it needs a login (AUTH_EMAIL/AUTH_PASSWORD or PIN)
@@ -1218,15 +1223,37 @@ app.put(BASE_PATH + '/api/files/favorites', filesRoute(async (req, res) => {
     res.json(list);
 }));
 
-// ---------- Vibecoding (project form -> split terminal | preview + files tab) ----------
+// ---------- Vibecoding (project form -> split agent UI | preview + files tab) ----------
 app.get(BASE_PATH + '/api/vibe/kinds', (req, res) => {
-    res.json({ kinds: vibe.kinds(), defaults: vibe.defaults() });
+    res.json({ kinds: vibe.kinds(), agents: vibe.agentOptions(), defaults: vibe.defaults() });
+});
+
+// "Abrir projeto anterior": every vibecoding project created so far, newest first
+app.get(BASE_PATH + '/api/vibe/projects', (req, res) => {
+    res.json({ projects: vibe.list() });
+});
+
+// Is this tab part of a vibecoding project, and which agents have a section there already?
+// Backs the agent switcher - specific to vibecoding, not shown for a plain agent conversation.
+app.get(BASE_PATH + '/api/vibe/tab/:tabId', (req, res) => {
+    const project = vibe.projectForTab(req.params.tabId);
+    if (!project) return res.status(404).json({ error: 'Esta aba não faz parte de um projeto vibecoding.' });
+    res.json(project);
 });
 
 // Started from the app menu: a new terminal runs the agent chosen in the form
 app.post(BASE_PATH + '/api/vibe', async (req, res) => {
     try {
         res.status(201).json(await vibe.setup(req.body || {}));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// Reopen a previous project, or switch which agent's UI tab is shown for an open one
+app.post(BASE_PATH + '/api/vibe/:id/open', async (req, res) => {
+    try {
+        res.json(await vibe.openProject(req.params.id, { agent: (req.body || {}).agent || null }));
     } catch (e) {
         res.status(400).json({ error: e.message });
     }

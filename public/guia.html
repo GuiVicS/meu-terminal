@@ -379,10 +379,12 @@ footer { color: var(--text-2); font-size: 0.85rem; margin-top: 56px; text-align:
             <p>Para começar um projeto do zero conversando com a IA:</p>
             <ol class="steps">
                 <li>Abra ⋮ → <strong>Novo projeto (vibecoding)</strong>, ou peça ao agente no terminal: "vamos vibecodar um projeto novo".</li>
-                <li>Preencha o formulário: nome do projeto, tipo (site HTML, React + Vite, Next.js, API Node ou outro), o que você quer construir, a pasta e o agente (Claude Code, Codex ou nenhum).</li>
-                <li>O app cria a pasta (com <code>git init</code>, se marcado) e divide a tela: <strong>terminal do agente</strong> de um lado e <strong>prévia ao vivo</strong> do outro. Os <strong>arquivos do projeto</strong> abrem numa aba separada.</li>
+                <li>Preencha o formulário: nome do projeto, tipo (site HTML, React + Vite, Next.js, API Node ou outro), o que você quer construir, a pasta e o agente (qualquer um com modo UI instalado, ou nenhum - só o terminal).</li>
+                <li>O app cria a pasta (com <code>git init</code>, se marcado) e divide a tela: <strong>a aba de conversa do agente</strong> (modo UI, igual ao descrito abaixo) de um lado e <strong>prévia ao vivo</strong> do outro. Os <strong>arquivos do projeto</strong> abrem numa aba separada.</li>
                 <li>O agente recebe o pedido e começa a construir. Em sites HTML a prévia atualiza a cada arquivo salvo; em Vite/Next ela abre sozinha quando o servidor de desenvolvimento sobe.</li>
             </ol>
+            <p><strong>Abrir projeto anterior:</strong> o mesmo formulário lista os projetos já criados - tocar num deles reabre a prévia, os arquivos e a conversa do agente, recriando as abas que tiverem sido fechadas.</p>
+            <p><strong>Trocar de agente:</strong> dentro de um projeto vibecoding, a aba do agente ganha um botão <span class="n" style="display:inline">⇄</span> "Trocar agente" - cada agente mantém sua própria conversa para aquele projeto, e trocar só muda qual delas está em foco (a prévia e os arquivos continuam os mesmos). Esse botão só aparece em projetos vibecoding, não numa conversa de agente avulsa.</p>
             <h3>Modo UI dos agentes</h3>
             <p>Além do terminal, o Claude Code e o OpenCode podem rodar numa <strong>aba de conversa</strong>: mensagens formatadas, cartões de cada ação (comandos, arquivos lidos, edições com diff), subagentes, plano e um painel com uso e custo.</p>
             <ul>

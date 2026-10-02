@@ -498,6 +498,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 }
 .new-session-inner { width: 100%; max-width: 480px; margin: 0 auto; }
 .ns-close { position: fixed; top: calc(16px + var(--safe-top)); right: calc(16px + var(--safe-right)); z-index: 21; }
+.ns-settings { position: fixed; top: calc(16px + var(--safe-top)); right: calc(16px + 44px + var(--safe-right)); z-index: 21; }
 .new-session-mark {
     width: 48px;
     height: 48px;
@@ -1769,6 +1770,20 @@ audio.fm-media { width: min(520px, 90%); }
 .vibe-check { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text-2); }
 .vibe-check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .vibe-from-agent { font-size: 13px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--accent-soft); color: var(--text); }
+
+/* "Abrir projeto anterior" */
+.vibe-previous-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.vibe-prev-open {
+    width: 100%; display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px;
+    border: 1.5px solid var(--border); border-radius: var(--radius-md); background: var(--surface);
+}
+.vibe-prev-open:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.vibe-prev-open:disabled { opacity: 0.6; cursor: default; }
+.vibe-prev-name { font-weight: 600; font-size: 14px; color: var(--text); }
+.vibe-prev-meta { font-size: 12.5px; color: var(--text-2); }
+.vibe-prev-path { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vibe-divider { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: 12.5px; }
+.vibe-divider::before, .vibe-divider::after { content: ''; flex: 1; height: 1px; background: var(--divider); }
 
 .vibe-form .vibe-kind input[type="radio"] { width: 18px; height: 18px; min-width: 18px; padding: 0; flex: none; border: 0; box-shadow: none; }
 .vibe-form .vibe-check input[type="checkbox"] { width: 18px; height: 18px; flex: none; }
