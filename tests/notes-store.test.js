@@ -1,9 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { DatabaseSync } = require('node:sqlite');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const NotesStore = require('../scripts/notes-store');
 
-const make = () => new NotesStore(new DatabaseSync(':memory:'));
+const tmpDirs = [];
+const make = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mt-notes-'));
+    tmpDirs.push(dir);
+    return new NotesStore(dir);
+};
+
+test.after(() => {
+    for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 test('create trims the title, normalizes tags and stores the body as is', () => {
     const s = make();
@@ -15,10 +26,21 @@ test('create trims the title, normalizes tags and stores the body as is', () => 
     assert.equal(n.deletedAt, null);
 });
 
+test('a note is a real .md file named after its title, with YAML frontmatter', () => {
+    const s = make();
+    const n = s.create({ title: 'Minha nota', body: 'Olá mundo', tags: ['x'] });
+    const file = path.join(s.dir, 'Minha nota.md');
+    assert.ok(fs.existsSync(file));
+    const raw = fs.readFileSync(file, 'utf8');
+    assert.match(raw, /^---\nid: /);
+    assert.match(raw, new RegExp(`id: ${n.id}`));
+    assert.match(raw, /Olá mundo$/);
+});
+
 test('limits: title, body and tag count are capped', () => {
     const s = make();
     const n = s.create({ title: 'x'.repeat(500), body: 'y'.repeat(300 * 1024), tags: Array.from({ length: 40 }, (_, i) => `t${i}`) });
-    assert.equal(n.title.length, 200);
+    assert.equal(n.title.length, 150);
     assert.equal(n.body.length, 200 * 1024);
     assert.equal(n.tags.length, 20);
 });
@@ -36,6 +58,17 @@ test('list: pinned first, then most recently updated; body is cut to a preview',
     assert.ok(b && c);
 });
 
+test('update: changing the title renames the file; a collision picks "(2)"', () => {
+    const s = make();
+    const a = s.create({ title: 'Nota' });
+    s.create({ title: 'Outra' });
+    assert.ok(fs.existsSync(path.join(s.dir, 'Nota.md')));
+    s.update(a.id, { title: 'Outra' });
+    assert.equal(s.get(a.id).title, 'Outra (2)');
+    assert.ok(fs.existsSync(path.join(s.dir, 'Outra (2).md')));
+    assert.ok(!fs.existsSync(path.join(s.dir, 'Nota.md')));
+});
+
 test('list: tasks counts the checklist, or null when the note has none', () => {
     const s = make();
     s.create({ title: 'sem checklist', body: 'só texto' });
@@ -46,7 +79,7 @@ test('list: tasks counts the checklist, or null when the note has none', () => {
     assert.deepEqual(byTitle['com checklist'], { total: 5, done: 3 });
 });
 
-test('search matches title, body and tags, and treats % and _ literally', () => {
+test('search matches title, body and tags, case-insensitively', () => {
     const s = make();
     s.create({ title: 'Compras', body: 'leite e pão' });
     s.create({ title: 'Meta', body: 'chegar a 100% do plano' });
@@ -55,7 +88,7 @@ test('search matches title, body and tags, and treats % and _ literally', () => 
     assert.deepEqual(s.list({ q: 'compras' }).map(r => r.title), ['Compras']);
     assert.deepEqual(s.list({ q: 'viag' }).map(r => r.title), ['Outra']);
     assert.deepEqual(s.list({ q: '100%' }).map(r => r.title), ['Meta']);
-    assert.deepEqual(s.list({ q: '_' }), []);
+    assert.deepEqual(s.list({ q: 'nada aqui' }), []);
 });
 
 test('tag filter is case-insensitive and tags() counts notes outside the trash', () => {
