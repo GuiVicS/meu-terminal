@@ -9,6 +9,8 @@ quando você fecha o app.
 - **Navegador**: Chromium rodando no servidor, para ver o projeto em `localhost` sem expor portas.
 - **Arquivos**: gerenciador de arquivos do servidor e do Google Drive (rclone): ver, editar,
   enviar, baixar, copiar/mover, buscar, favoritos.
+- **Anotações**: notas em Markdown iguais em todos os aparelhos, com busca, tags, fixar, lixeira,
+  visualização formatada e salvamento automático.
 - **Agentes**: servidor MCP próprio, para o Claude Code (e outros) abrir páginas, pastas e avisos no app.
 - **Login**: email e senha, com verificação em duas etapas opcional (app autenticador).
 - **PWA**: instala como app no celular.
@@ -47,6 +49,7 @@ npm start
 | `BASE_URL` | Endereço onde o app é aberto |
 | `SITE_TITLE` | Nome mostrado no app |
 | `FILES_HOME` | Pasta onde o gerenciador de arquivos abre |
+| `NOTES_ENABLED` | `false` desliga a aba de Anotações (padrão: ligada) |
 | `MEUTERMINAL_PIN` | PIN, só quando não há email e senha |
 
 A lista completa está no `.env.example` e no guia.
