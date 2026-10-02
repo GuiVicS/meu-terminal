@@ -158,17 +158,21 @@ function mountCommandsAdmin(section, commands) {
 }
 
 /**
- * Settings dialog. Every control maps to a real setting in SettingsManager.
+ * Builds every settings section (quick commands, terminal, interface, session, pairing, push,
+ * agent UI) into `body`. Used by both the settings popup and the /admin page, so this is the
+ * single place that owns the markup and the wiring - neither caller re-implements any of it.
+ * Each top-level section carries data-page="<slug>" so a page-based UI (like /admin) can show
+ * one at a time; the popup ignores it and just shows everything in one scroll, as before.
+ * @param {HTMLElement} body
  * @param {import('../managers/settings.js').default} settings
  * @param {() => any} getSession - active session (for read-only shell info)
  * @param {import('../managers/commands.js').default} commands - quick commands (server)
+ * @returns {{ refresh: () => void, stopPair: () => void }}
  */
-export function createSettingsDialog(settings, getSession, commands) {
-    const dialog = createDialog('settings-dialog', 'Configurações');
-    const body = dialog.querySelector('.dialog-body');
+export function mountSettingsSections(body, { settings, getSession, commands }) {
     body.innerHTML = `
-        <section class="settings-section" data-commands></section>
-        <section class="settings-section">
+        <section class="settings-section" data-commands data-page="comandos"></section>
+        <section class="settings-section" data-page="terminal">
             <h3 class="section-label">Terminal</h3>
             <label class="setting">
                 <span class="setting-text">Tamanho da fonte</span>
@@ -212,7 +216,7 @@ export function createSettingsDialog(settings, getSession, commands) {
                 <span class="setting-readonly mono" data-shell>—</span>
             </div>
         </section>
-        <section class="settings-section">
+        <section class="settings-section" data-page="interface">
             <h3 class="section-label">Interface</h3>
             <label class="setting">
                 <span class="setting-text">Tema</span>
@@ -239,7 +243,7 @@ export function createSettingsDialog(settings, getSession, commands) {
                 </select>
             </label>
         </section>
-        <section class="settings-section">
+        <section class="settings-section" data-page="sessoes">
             <h3 class="section-label">Sessão</h3>
             <label class="setting setting-stack">
                 <span class="setting-text">Diretório padrão
@@ -253,7 +257,7 @@ export function createSettingsDialog(settings, getSession, commands) {
                     encerra nada. Só fechar a aba (✕) encerra o processo dela.</span></span>
             </div>
         </section>
-        <section class="settings-section pair-section">
+        <section class="settings-section pair-section" data-page="aparelhos">
             <h3 class="section-label">Conectar outro aparelho</h3>
             <p class="setting-help">Mostre um QR code e aponte a câmera do celular: ele entra sem digitar a senha.
                 O código vale uma vez só, por 2 minutos.</p>
@@ -262,7 +266,8 @@ export function createSettingsDialog(settings, getSession, commands) {
                 <p class="setting-help" data-pair-info></p>
             </div>
             <button type="button" class="btn btn-ghost" data-pair-show>Mostrar QR code</button>
-        </section>        <section class="settings-section push-section">
+        </section>
+        <section class="settings-section push-section" data-page="notificacoes">
             <h3 class="section-label">Notificações</h3>
             <p class="setting-help">Receba avisos dos agentes (MCP <code class="mono">notify</code>) com som, mesmo
                 com o app fechado. Ative em cada aparelho.</p>
@@ -272,7 +277,7 @@ export function createSettingsDialog(settings, getSession, commands) {
                 <button type="button" class="btn btn-ghost" data-push-test hidden>Enviar teste</button>
             </div>
         </section>
-        <section class="settings-section agent-ui-section">
+        <section class="settings-section agent-ui-section" data-page="agentes">
             <h3 class="section-label">Modo UI dos agentes</h3>
             <p class="setting-help">Ao digitar <code class="mono">claude</code>, <code class="mono">codex</code> ou
                 <code class="mono">opencode</code> num terminal, o MeuTerminal pergunta se você quer abrir o agente
@@ -283,7 +288,7 @@ export function createSettingsDialog(settings, getSession, commands) {
             </label>
             <div data-agent-prefs></div>
         </section>
-        <section class="settings-section mcp-section">
+        <section class="settings-section mcp-section" data-page="agentes">
             <h3 class="section-label">Agentes (MCP)</h3>
             <p class="setting-help mcp-help">Agentes rodando nos terminais (Claude Code e outros com MCP) podem
                 abrir páginas numa aba de navegador, ver a tela (screenshot), ler o texto, listar abas e portas
@@ -395,7 +400,6 @@ export function createSettingsDialog(settings, getSession, commands) {
         }
         return undefined;
     });
-    dialog.addEventListener('close', stopPair);
     // Push notifications for this device
     const pushEl = {
         status: body.querySelector('[data-push-status]'),
@@ -493,12 +497,31 @@ export function createSettingsDialog(settings, getSession, commands) {
     });
 
     return {
-        open() {
+        refresh() {
             sync();
             commandsAdmin.refresh();
             loadMcpInfo();
             loadPush();
             loadAgentPrefs();
+        },
+        stopPair,
+    };
+}
+
+/**
+ * Settings popup (the `<dialog>` wrapper). Every control maps to a real setting in SettingsManager.
+ * @param {import('../managers/settings.js').default} settings
+ * @param {() => any} getSession - active session (for read-only shell info)
+ * @param {import('../managers/commands.js').default} commands - quick commands (server)
+ */
+export function createSettingsDialog(settings, getSession, commands) {
+    const dialog = createDialog('settings-dialog', 'Configurações');
+    const body = dialog.querySelector('.dialog-body');
+    const sections = mountSettingsSections(body, { settings, getSession, commands });
+    dialog.addEventListener('close', sections.stopPair);
+    return {
+        open() {
+            sections.refresh();
             dialog.showModal();
         },
     };

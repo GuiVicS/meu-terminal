@@ -32,6 +32,18 @@ export default class SettingsManager {
         });
         this.applyTheme();
         this.applyMotion();
+        // Another tab (e.g. /admin) changed a setting: pick it up here too
+        window.addEventListener('storage', e => {
+            if (e.key !== this.storage._getKey('settings')) return;
+            const next = { ...DEFAULT_SETTINGS, ...(this.storage.get('settings') || {}) };
+            Object.keys(next).forEach(key => {
+                if (next[key] === this.values[key]) return;
+                this.values[key] = next[key];
+                if (key === 'theme') this.applyTheme();
+                if (key === 'motion') this.applyMotion();
+                this.listeners.forEach(fn => fn(key, next[key]));
+            });
+        });
     }
 
     get(key) {

@@ -108,6 +108,9 @@ const ICONS = {
     notes: 'notebook-pen',
     tag: 'tag',
     arrowLeft: 'arrow-left',
+    // /admin page
+    bell: 'bell',
+    cloudUpload: 'cloud-upload',
 };
 
 const escapeAttr = value => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');

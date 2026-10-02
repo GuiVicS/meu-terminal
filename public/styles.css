@@ -2518,3 +2518,55 @@ audio.fm-media { width: min(520px, 90%); }
     .nt-body, .nt-preview { padding: 12px 16px 120px; }
     .nt-body { font-size: 16px; }
 }
+
+/* =========================================================
+   /admin page (public/admin/*)
+   ========================================================= */
+.page-admin { background: var(--bg); }
+.admin { min-height: 100vh; display: flex; flex-direction: column; }
+.admin-topbar {
+    flex-shrink: 0; height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 16px;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.admin-topbar .brand { display: flex; padding: 0; }
+.admin-topbar .brand-icon {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: none;
+    background: var(--accent); color: var(--accent-fg); border: 1.5px solid var(--shadow-color); box-shadow: 2px 2px 0 0 var(--shadow-color);
+}
+.admin-nav-toggle { margin-left: auto; }
+@media (min-width: 900px) { .admin-nav-toggle { display: none; } }
+
+.admin-body { flex: 1; min-height: 0; display: flex; }
+.admin-nav { flex-shrink: 0; width: 240px; border-right: 1px solid var(--border); background: var(--surface); overflow-y: auto; }
+.admin-nav ul { list-style: none; margin: 0; padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.admin-nav a {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-md);
+    color: var(--text-2); font-size: 14px; font-weight: 500; text-decoration: none;
+}
+.admin-nav a:hover { background: var(--surface-2); color: var(--text); }
+.admin-nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.admin-main { flex: 1; min-width: 0; overflow-y: auto; }
+.admin-page { max-width: 640px; margin: 0 auto; padding: 32px 24px 80px; }
+.admin-page [data-page] { padding-top: 0; }
+.admin-page [data-page][hidden] { display: none; }
+
+@media (max-width: 899px) {
+    .admin-nav {
+        position: fixed; inset: 56px 0 0 0; z-index: 10; width: auto; transform: translateX(-100%);
+        transition: transform var(--dur) var(--ease);
+    }
+    .admin-nav.open { transform: none; }
+    .admin-page { padding: 20px 16px 80px; }
+}
+
+/* Backup section (admin-only: scripts/backup-store.js + backup-runner.js) */
+.backup-status { margin-top: 16px; font-size: 13px; color: var(--text-2); }
+.backup-history { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.backup-history-row {
+    display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; padding: 9px 10px; border-radius: var(--radius-md);
+    font-size: 12.5px; color: var(--text-2); background: var(--surface-2);
+}
+.backup-history-row span:last-child { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backup-history-row.error span:last-child { color: var(--danger); }
+.backup-history-row.ok span:last-child { color: var(--success); }
+.backup-history-empty { padding: 10px; color: var(--text-3); font-size: 13px; list-style: none; }
