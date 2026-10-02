@@ -1261,7 +1261,8 @@ app.get(BASE_PATH + '/api/backup/history', (req, res) => {
 });
 
 // ---------- Notes (the notes tab; every device reads and writes the same notes) ----------
-const notes = new NotesStore(sessionStore.db);
+const NOTES_DIR = process.env.NOTES_DIR || path.join(path.dirname(DB_PATH), 'notes');
+const notes = new NotesStore(NOTES_DIR);
 
 const notesRoute = handler => (req, res) => {
     if (!NOTES_ENABLED) return res.status(404).json({ error: 'Anotações desligadas.' });

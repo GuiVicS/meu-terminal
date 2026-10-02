@@ -1,8 +1,15 @@
 /**
  * notes-store.js
- * Notes (Markdown title + body, tags, pin, trash) saved on the server so every device shows the same notes.
- * Shares the SQLite connection opened by SessionStore.
+ * Notes (Markdown title + body, tags, pin, trash) saved as plain .md files in a folder, one file
+ * per note, Obsidian-style: the title *is* the filename, metadata lives in YAML frontmatter.
+ * Trashed notes just live in a ".trash" subfolder until purged or restored.
+ *
+ * This on purpose instead of a SQLite table: notes are readable (and editable) directly on disk
+ * by an agent, any other tool, or the user over SFTP - no DB client needed - and they live
+ * wherever the caller points NOTES_DIR, same volume as everything else that must survive a deploy.
  */
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 
 const MAX_TITLE = 200;
@@ -10,6 +17,8 @@ const MAX_BODY = 200 * 1024;
 const MAX_TAGS = 20;
 const MAX_TAG = 30;
 const PREVIEW = 160;
+const TRASH_DIR_NAME = '.trash';
+const UNTITLED = 'Sem título';
 
 function clean(value, max) {
     return typeof value === 'string' ? value.slice(0, max) : '';
@@ -31,20 +40,6 @@ function cleanTags(value) {
     return out;
 }
 
-/** Escape LIKE wildcards so a search for "100%" matches literally. */
-function likePattern(q) {
-    return `%${q.replace(/[\\%_]/g, '\\$&')}%`;
-}
-
-function parseTags(json) {
-    try {
-        const tags = JSON.parse(json);
-        return Array.isArray(tags) ? tags : [];
-    } catch {
-        return [];
-    }
-}
-
 const TASK_LINE = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\[([ xX])\][ \t]/gm;
 
 /** Checklist progress for the note card's progress bar; null when the note has no task list. */
@@ -58,36 +53,135 @@ function taskStats(body) {
     return total ? { total, done } : null;
 }
 
-function toNote(row) {
+// ---------- filenames (the title *is* the filename) ----------
+
+/** Strips characters that are invalid (or awkward) in a filename on any common OS. */
+function sanitizeFileName(title) {
+    let name = String(title ?? '').trim().replace(/[\\/:*?"<>|\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim();
+    if (!name) name = UNTITLED;
+    return name.slice(0, 150);
+}
+
+/** `<base>.md`, or `<base> (2).md` etc. if that name is taken - `keep` lets a note "collide" with its own current file. */
+function uniqueFileName(dir, base, keep) {
+    let name = `${base}.md`;
+    for (let n = 2; name !== keep && fs.existsSync(path.join(dir, name)); n++) name = `${base} (${n}).md`;
+    return name;
+}
+
+// ---------- frontmatter (hand-rolled: fixed, small schema - no need for a YAML dependency) ----------
+
+function serialize(meta, body) {
+    const tags = meta.tags.length ? `[${meta.tags.map(t => JSON.stringify(t)).join(', ')}]` : '[]';
+    const lines = [
+        '---',
+        `id: ${meta.id}`,
+        `tags: ${tags}`,
+        `pinned: ${meta.pinned ? 'true' : 'false'}`,
+        `created: ${new Date(meta.createdAt).toISOString()}`,
+        `updated: ${new Date(meta.updatedAt).toISOString()}`,
+    ];
+    if (meta.deletedAt) lines.push(`deleted: ${new Date(meta.deletedAt).toISOString()}`);
+    lines.push('---', '');
+    return `${lines.join('\n')}${body}`;
+}
+
+function parseFrontmatter(text) {
+    const meta = {};
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+        const kv = /^(\w+):[ \t]*(.*)$/.exec(lines[i]);
+        if (!kv) continue;
+        const [, key, rawVal] = kv;
+        const val = rawVal.trim();
+        if (key === 'tags') {
+            const inline = /^\[(.*)\]$/.exec(val);
+            if (inline) {
+                meta.tags = inline[1].trim() ? inline[1].split(',').map(s => s.trim().replace(/^["']|["']$/g, '')) : [];
+            } else {
+                const tags = [];
+                while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) {
+                    tags.push(lines[++i].replace(/^\s*-\s+/, '').trim().replace(/^["']|["']$/g, ''));
+                }
+                meta.tags = tags;
+            }
+        } else if (key === 'pinned') {
+            meta.pinned = val === 'true';
+        } else {
+            meta[key] = val.replace(/^["']|["']$/g, '');
+        }
+    }
+    return meta;
+}
+
+/** A .md file -> {id, title, body, tags, pinned, createdAt, updatedAt, deletedAt} + file (its current name), or null if not one of ours. */
+function parseNote(raw, file) {
+    const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw);
+    if (!m) return null;
+    const meta = parseFrontmatter(m[1]);
+    if (!meta.id) return null;
     return {
-        id: row.id,
-        title: row.title,
-        body: row.body,
-        tags: parseTags(row.tags),
-        pinned: !!row.pinned,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        deletedAt: row.deleted_at,
+        file,
+        id: meta.id,
+        title: file.replace(/\.md$/i, ''),
+        body: m[2],
+        tags: Array.isArray(meta.tags) ? meta.tags : [],
+        pinned: !!meta.pinned,
+        createdAt: meta.created ? Date.parse(meta.created) : Date.now(),
+        updatedAt: meta.updated ? Date.parse(meta.updated) : Date.now(),
+        deletedAt: meta.deleted ? Date.parse(meta.deleted) : null,
     };
 }
 
+/** Every note file in `dir` (not recursive - .trash lives inside but is read separately). */
+function scanDir(dir) {
+    let names;
+    try {
+        names = fs.readdirSync(dir);
+    } catch {
+        return [];
+    }
+    const out = [];
+    for (const file of names) {
+        if (!file.endsWith('.md')) continue;
+        try {
+            const note = parseNote(fs.readFileSync(path.join(dir, file), 'utf8'), file);
+            if (note) out.push(note);
+        } catch { /* unreadable file: skip rather than fail the whole list */ }
+    }
+    return out;
+}
+
+function toSummary(n) {
+    return {
+        id: n.id, title: n.title, preview: n.body.slice(0, PREVIEW), tags: n.tags, pinned: n.pinned,
+        createdAt: n.createdAt, updatedAt: n.updatedAt, deletedAt: n.deletedAt, tasks: taskStats(n.body),
+    };
+}
+
+function toFull(n) {
+    return { id: n.id, title: n.title, body: n.body, tags: n.tags, pinned: n.pinned, createdAt: n.createdAt, updatedAt: n.updatedAt, deletedAt: n.deletedAt };
+}
+
 class NotesStore {
-    /** @param {import('node:sqlite').DatabaseSync} db */
-    constructor(db) {
-        this.db = db;
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS notes (
-                id          TEXT PRIMARY KEY,
-                title       TEXT NOT NULL DEFAULT '',
-                body        TEXT NOT NULL DEFAULT '',
-                tags        TEXT NOT NULL DEFAULT '[]',  -- JSON array of strings
-                pinned      INTEGER NOT NULL DEFAULT 0,
-                created_at  INTEGER NOT NULL,
-                updated_at  INTEGER NOT NULL,
-                deleted_at  INTEGER                      -- set = in the trash
-            );
-            CREATE INDEX IF NOT EXISTS notes_updated ON notes (deleted_at, pinned, updated_at);
-        `);
+    /** @param {string} dir - folder to keep notes in (created if missing); trashed notes go in `<dir>/.trash` */
+    constructor(dir) {
+        this.dir = dir;
+        this.trashDir = path.join(dir, TRASH_DIR_NAME);
+        fs.mkdirSync(this.dir, { recursive: true });
+        fs.mkdirSync(this.trashDir, { recursive: true });
+    }
+
+    _find(id, { liveOnly = false, trashOnly = false } = {}) {
+        if (!trashOnly) {
+            const hit = scanDir(this.dir).find(n => n.id === id);
+            if (hit) return hit;
+        }
+        if (!liveOnly) {
+            const hit = scanDir(this.trashDir).find(n => n.id === id);
+            if (hit) return hit;
+        }
+        return null;
     }
 
     /**
@@ -95,94 +189,116 @@ class NotesStore {
      * @param {{q?: string, tag?: string, trash?: boolean}} opts
      */
     list({ q, tag, trash } = {}) {
-        const where = [trash ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL'];
-        const args = [];
-        const query = typeof q === 'string' ? q.trim().slice(0, 100) : '';
+        let entries = scanDir(trash ? this.trashDir : this.dir);
+        const query = typeof q === 'string' ? q.trim().toLowerCase().slice(0, 100) : '';
         if (query) {
-            where.push(`(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'
-                OR EXISTS (SELECT 1 FROM json_each(notes.tags) WHERE value LIKE ? ESCAPE '\\'))`);
-            const pattern = likePattern(query);
-            args.push(pattern, pattern, pattern);
+            entries = entries.filter(n => n.title.toLowerCase().includes(query) || n.body.toLowerCase().includes(query)
+                || n.tags.some(t => t.toLowerCase().includes(query)));
         }
         if (typeof tag === 'string' && tag.trim()) {
-            where.push('EXISTS (SELECT 1 FROM json_each(notes.tags) WHERE lower(value) = lower(?))');
-            args.push(tag.trim());
+            const needle = tag.trim().toLowerCase();
+            entries = entries.filter(n => n.tags.some(t => t.toLowerCase() === needle));
         }
-        const order = trash ? 'deleted_at DESC' : 'pinned DESC, updated_at DESC';
-        return this.db.prepare(`SELECT id, title, body, tags, pinned,
-                created_at, updated_at, deleted_at FROM notes WHERE ${where.join(' AND ')} ORDER BY ${order}`)
-            .all(...args)
-            .map(r => ({
-                id: r.id, title: r.title, preview: r.body.slice(0, PREVIEW), tags: parseTags(r.tags), pinned: !!r.pinned,
-                createdAt: r.created_at, updatedAt: r.updated_at, deletedAt: r.deleted_at, tasks: taskStats(r.body),
-            }));
+        entries.sort(trash
+            ? (a, b) => b.deletedAt - a.deletedAt
+            : (a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
+        return entries.map(toSummary);
     }
 
     trashCount() {
-        return this.db.prepare('SELECT COUNT(*) AS n FROM notes WHERE deleted_at IS NOT NULL').get().n;
+        return scanDir(this.trashDir).length;
     }
 
     /** Every tag in use (outside the trash) with its note count, for the tag filter. */
     tags() {
-        return this.db.prepare(`SELECT value AS tag, COUNT(*) AS count FROM notes, json_each(notes.tags)
-            WHERE deleted_at IS NULL GROUP BY lower(value) ORDER BY count DESC, lower(value)`).all();
+        const counts = new Map(); // lowercase -> { tag, count }
+        for (const n of scanDir(this.dir)) {
+            for (const t of n.tags) {
+                const key = t.toLowerCase();
+                const cur = counts.get(key) || { tag: t, count: 0 };
+                cur.count++;
+                counts.set(key, cur);
+            }
+        }
+        return [...counts.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
     }
 
     get(id) {
-        const row = this.db.prepare('SELECT * FROM notes WHERE id = ?').get(id);
-        return row ? toNote(row) : null;
+        const hit = this._find(id);
+        return hit ? toFull(hit) : null;
     }
 
     create({ title, body, tags, pinned } = {}) {
         const id = crypto.randomUUID();
         const now = Date.now();
-        this.db.prepare(`INSERT INTO notes (id, title, body, tags, pinned, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`)
-            .run(id, clean(title, MAX_TITLE).trim(), clean(body, MAX_BODY), JSON.stringify(cleanTags(tags)),
-                pinned ? 1 : 0, now, now);
+        const file = uniqueFileName(this.dir, sanitizeFileName(clean(title, MAX_TITLE).trim()));
+        const meta = { id, tags: cleanTags(tags), pinned: !!pinned, createdAt: now, updatedAt: now, deletedAt: null };
+        fs.writeFileSync(path.join(this.dir, file), serialize(meta, clean(body, MAX_BODY)));
         return this.get(id);
     }
 
     /**
      * Patch a note. When `baseUpdatedAt` is given and differs from what is stored, the note was
      * changed elsewhere in the meantime: nothing is written and the current note is returned.
+     * A title change renames the file (colliding with another note's name picks " (2)" etc.).
      * @returns {{note: object}|{conflict: true, note: object}|null} null when missing or in the trash
      */
     update(id, patch = {}, baseUpdatedAt) {
-        const current = this.db.prepare('SELECT * FROM notes WHERE id = ? AND deleted_at IS NULL').get(id);
+        const current = this._find(id, { liveOnly: true });
         if (!current) return null;
-        if (baseUpdatedAt !== undefined && baseUpdatedAt !== current.updated_at) {
-            return { conflict: true, note: toNote(current) };
+        if (baseUpdatedAt !== undefined && baseUpdatedAt !== current.updatedAt) {
+            return { conflict: true, note: toFull(current) };
         }
         const title = patch.title !== undefined ? clean(patch.title, MAX_TITLE).trim() : current.title;
         const body = patch.body !== undefined ? clean(patch.body, MAX_BODY) : current.body;
-        const tags = patch.tags !== undefined ? JSON.stringify(cleanTags(patch.tags)) : current.tags;
-        const pinned = patch.pinned !== undefined ? (patch.pinned ? 1 : 0) : current.pinned;
-        // Strictly increasing, so a stale `baseUpdatedAt` is always detectable even within one millisecond.
-        const updatedAt = Math.max(Date.now(), current.updated_at + 1);
-        this.db.prepare('UPDATE notes SET title = ?, body = ?, tags = ?, pinned = ?, updated_at = ? WHERE id = ?')
-            .run(title, body, tags, pinned, updatedAt, id);
+        const tags = patch.tags !== undefined ? cleanTags(patch.tags) : current.tags;
+        const pinned = patch.pinned !== undefined ? !!patch.pinned : current.pinned;
+        const updatedAt = Math.max(Date.now(), current.updatedAt + 1); // strictly increasing: a stale baseUpdatedAt is always detectable
+
+        let file = current.file;
+        const wantedBase = sanitizeFileName(title);
+        if (`${wantedBase}.md` !== current.file && wantedBase !== current.title) {
+            file = uniqueFileName(this.dir, wantedBase, current.file);
+            if (file !== current.file) fs.renameSync(path.join(this.dir, current.file), path.join(this.dir, file));
+        }
+        const meta = { id, tags, pinned, createdAt: current.createdAt, updatedAt, deletedAt: null };
+        fs.writeFileSync(path.join(this.dir, file), serialize(meta, body));
         return { note: this.get(id) };
     }
 
     /** Move to the trash (unpinned, so it does not stay on top once restored by accident). */
     trash(id) {
-        return this.db.prepare('UPDATE notes SET deleted_at = ?, pinned = 0 WHERE id = ? AND deleted_at IS NULL')
-            .run(Date.now(), id).changes > 0;
+        const current = this._find(id, { liveOnly: true });
+        if (!current) return false;
+        const meta = { id, tags: current.tags, pinned: false, createdAt: current.createdAt, updatedAt: current.updatedAt, deletedAt: Date.now() };
+        fs.writeFileSync(path.join(this.dir, current.file), serialize(meta, current.body));
+        const destFile = uniqueFileName(this.trashDir, current.file.replace(/\.md$/i, ''));
+        fs.renameSync(path.join(this.dir, current.file), path.join(this.trashDir, destFile));
+        return true;
     }
 
     restore(id) {
-        return this.db.prepare('UPDATE notes SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL')
-            .run(Date.now(), id).changes > 0;
+        const current = this._find(id, { trashOnly: true });
+        if (!current) return false;
+        const meta = { id, tags: current.tags, pinned: current.pinned, createdAt: current.createdAt, updatedAt: Date.now(), deletedAt: null };
+        fs.writeFileSync(path.join(this.trashDir, current.file), serialize(meta, current.body));
+        const destFile = uniqueFileName(this.dir, current.file.replace(/\.md$/i, ''));
+        fs.renameSync(path.join(this.trashDir, current.file), path.join(this.dir, destFile));
+        return true;
     }
 
     /** Delete for good; only notes already in the trash. */
     purge(id) {
-        return this.db.prepare('DELETE FROM notes WHERE id = ? AND deleted_at IS NOT NULL').run(id).changes > 0;
+        const current = this._find(id, { trashOnly: true });
+        if (!current) return false;
+        fs.unlinkSync(path.join(this.trashDir, current.file));
+        return true;
     }
 
     emptyTrash() {
-        return Number(this.db.prepare('DELETE FROM notes WHERE deleted_at IS NOT NULL').run().changes);
+        const entries = scanDir(this.trashDir);
+        for (const n of entries) fs.unlinkSync(path.join(this.trashDir, n.file));
+        return entries.length;
     }
 }
 
