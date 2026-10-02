@@ -104,6 +104,10 @@ const ICONS = {
     shield: 'shield-check',
     bot: 'bot',
     login: 'log-in',
+    // Notes tab
+    notes: 'notebook-pen',
+    tag: 'tag',
+    arrowLeft: 'arrow-left',
 };
 
 const escapeAttr = value => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
