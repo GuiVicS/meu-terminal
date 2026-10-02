@@ -8,6 +8,7 @@ import StorageManager from './storage.js';
 import TerminalSession, { STATE } from './session.js';
 import BrowserSession from './browserSession.js';
 import FilesSession from './filesSession.js';
+import NotesSession from './notesSession.js';
 import AgentSession from './agentSession.js';
 import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
@@ -140,7 +141,7 @@ export default class TerminalManager {
     addSession(row, { index, activate = false } = {}) {
         if (this.sessions.has(row.id)) return this.sessions.get(row.id);
         const Kind = row.kind === 'browser' ? BrowserSession : row.kind === 'files' ? FilesSession
-            : row.kind === 'agent' ? AgentSession : TerminalSession;
+            : row.kind === 'notes' ? NotesSession : row.kind === 'agent' ? AgentSession : TerminalSession;
         const session = new Kind({ row, settings: this.settings, hooks: this.hooks });
 
         const at = index ?? this.sessions.size;
@@ -164,7 +165,7 @@ export default class TerminalManager {
         try {
             const row = await api('POST', 'sessions', {
                 name,
-                cwd: kind === 'browser' ? undefined : (cwd || (kind === 'files' ? undefined : this.settings.get('defaultCwd')) || undefined),
+                cwd: kind === 'browser' || kind === 'notes' ? undefined : (cwd || (kind === 'files' ? undefined : this.settings.get('defaultCwd')) || undefined),
                 color,
                 afterId,
                 reopenId,
@@ -357,7 +358,7 @@ export default class TerminalManager {
     openSplitMenu(id, pos = {}) {
         const s = this.sessions.get(id);
         if (!s) return;
-        const kindIcon = k => (k === 'browser' ? 'globe' : k === 'files' ? 'folder' : 'terminal');
+        const kindIcon = k => (k === 'browser' ? 'globe' : k === 'files' ? 'folder' : k === 'notes' ? 'notes' : 'terminal');
         const others = this.order.filter(o => o !== id).map(o => this.sessions.get(o));
         const newBeside = async opts => {
             const created = await this.create({ ...opts, afterId: id });
@@ -367,6 +368,7 @@ export default class TerminalManager {
             ...(window.appConfig?.browserAvailable ? [{ label: 'Nova aba de navegador', icon: 'globe', run: () => newBeside({ kind: 'browser' }) }] : []),
             ...(window.appConfig?.filesAvailable ? [{ label: 'Arquivos desta pasta', icon: 'folder',
                 run: () => newBeside({ kind: 'files', cwd: s.kind === 'terminal' ? (s.cwd || s.startCwd || undefined) : undefined }) }] : []),
+            ...(window.appConfig?.notesAvailable ? [{ label: 'Anotações', icon: 'notes', run: () => newBeside({ kind: 'notes' }) }] : []),
             { label: 'Novo terminal', icon: 'terminal', run: () => newBeside({}) },
             ...(others.length ? ['separator'] : []),
             ...others.map(o => ({ label: o.name, icon: kindIcon(o.kind), hint: o.displayCwd?.() || '',
@@ -503,6 +505,10 @@ export default class TerminalManager {
             this.create({ kind: 'files', name: s.name, url: s.source, cwd: s.path, afterId: id });
             return;
         }
+        if (s.kind === 'notes') {
+            this.create({ kind: 'notes', name: s.name, afterId: id });
+            return;
+        }
         // An agent conversation cannot be cloned: open a terminal in its folder instead
         if (s.kind === 'agent') {
             this.create({ cwd: s.cwd || undefined, afterId: id });
@@ -618,6 +624,7 @@ export default class TerminalManager {
         if (recent) this.create({ reopenId: recent.id });
         else if (kind === 'browser') this.create({ kind, name, url });
         else if (kind === 'files') this.create({ kind, name, cwd: cwd || undefined });
+        else if (kind === 'notes') this.create({ kind, name });
         else this.create({ name, cwd });
     }
 
@@ -637,6 +644,15 @@ export default class TerminalManager {
             return;
         }
         this.create({ kind: 'files', cwd });
+    }
+
+    /** New notes tab (the notes live on the server, so every notes tab shows the same ones). */
+    createNotes() {
+        if (!window.appConfig?.notesAvailable) {
+            toast('As anotações estão desligadas neste servidor.', { tone: 'error' });
+            return;
+        }
+        this.create({ kind: 'notes' });
     }
 
     async forgetRecent(index) {
@@ -677,6 +693,7 @@ export default class TerminalManager {
             { label: 'Nova sessão', icon: 'plus', hint: k.newTab, run: () => this.create() },
             { label: 'Nova aba de navegador', icon: 'globe', hint: `${k.mod}+B`, run: () => this.createBrowser() },
             { label: 'Novo gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`, run: () => this.createFiles() },
+            ...(window.appConfig?.notesAvailable ? [{ label: 'Nova aba de anotações', icon: 'notes', hint: `${k.mod}+O`, run: () => this.createNotes() }] : []),
             ...(s.kind === 'terminal' ? [{ label: 'Abrir pasta atual nos Arquivos', icon: 'folderOpen',
                 run: () => this.createFiles(s.cwd || s.startCwd || undefined) }] : []),
             ...(this.split && (this.split.a === id || this.split.b === id)
@@ -703,7 +720,7 @@ export default class TerminalManager {
             const s = this.sessions.get(id);
             return {
                 label: s.name,
-                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : s.kind === 'agent' ? 'bot' : 'terminal',
+                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : s.kind === 'notes' ? 'notes' : s.kind === 'agent' ? 'bot' : 'terminal',
                 hint: s.displayCwd(),
                 checked: id === this.activeId,
                 run: () => this.activate(id),
@@ -747,6 +764,7 @@ export default class TerminalManager {
             if (key === 't') return 'new';
             if (key === 'b') return 'newBrowser';
             if (key === 'e') return 'newFiles';
+            if (key === 'o') return 'newNotes';
             if (key === 'n') return 'newPage';
             if (key === 'w') return 'close';
             if (key === 'r') return 'rename';
@@ -783,6 +801,7 @@ export default class TerminalManager {
             case 'new': return this.create();
             case 'newBrowser': return this.createBrowser();
             case 'newFiles': return this.createFiles();
+            case 'newNotes': return this.createNotes();
             case 'newPage': return this.openNewSessionPage();
             case 'reopen': return this.restoreLastClosed();
             case 'close': return this.activeId !== null && this.close(this.activeId);
@@ -792,7 +811,7 @@ export default class TerminalManager {
             case 'search':
                 // Browser tabs are images of a page: there's no text here to search
                 if (this.active?.kind === 'browser') return this.active.focus();
-                if (this.active?.kind === 'files') return this.active.openFind();
+                if (this.active?.kind === 'files' || this.active?.kind === 'notes') return this.active.openFind();
                 return this.search.open();
             default: return this.events.onAction(action); // fullscreen, settings: handled by the shell
         }
@@ -815,6 +834,7 @@ export default class TerminalManager {
             { keys: `${m}+T`, label: 'Nova sessão' },
             { keys: `${m}+B`, label: 'Nova aba de navegador' },
             { keys: `${m}+E`, label: 'Novo gerenciador de arquivos' },
+            { keys: `${m}+O`, label: 'Nova aba de anotações' },
             { keys: `${m}+N`, label: 'Nova sessão com opções' },
             { keys: `${m}+Shift+T`, label: 'Reabrir sessão fechada' },
             { keys: `${m}+W`, label: 'Fechar sessão (encerra o processo)' },
