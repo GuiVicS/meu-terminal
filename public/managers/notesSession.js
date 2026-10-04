@@ -11,7 +11,7 @@ import { STATE, SESSION_COLORS } from './session.js';
 import { icon } from '../ui/icons.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { toast } from '../ui/toast.js';
-import { askConfirm } from '../ui/prompt.js';
+import { askConfirm, askText } from '../ui/prompt.js';
 import { esc } from '../agent/markdown.js';
 import { copyText } from '../agent/codeblock.js';
 import { Editor, StarterKit, Image, Placeholder, TaskList, TaskItem, Link, Markdown, Table, TableRow, TableHeader, TableCell } from '../vendor/tiptap.bundle.js';
@@ -83,18 +83,27 @@ async function uploadAttachment(noteId, file) {
 
 const parseTags = text => text.split(',').map(t => t.trim()).filter(Boolean);
 
-function insertLink(editor) {
+/** Async, but callers (applyFormat/pickSlash) just fire-and-forget it like the sync actions: askText()
+ *  never rejects, and nothing downstream awaits the result. Doubles as a proper mobile dialog instead
+ *  of the native window.prompt() (styled, becomes a bottom-sheet on phones, no browser chrome). */
+async function insertLink(editor) {
     const previousUrl = editor.getAttributes('link').href;
-    const url = window.prompt('URL do link:', previousUrl || 'https://');
-    if (url === null) return;
+    const url = await askText({
+        title: 'Link', label: 'URL', value: previousUrl || 'https://',
+        confirm: 'Aplicar', placeholder: 'https://exemplo.com',
+    });
+    if (url === null || editor.isDestroyed) return;
     const chain = editor.chain().focus().extendMarkRange('link');
     if (!url) chain.unsetLink().run();
     else chain.setLink({ href: url }).run();
 }
 
 // Floating formatting bar: each entry runs a Tiptap command on the live editor.
+// `phoneExtra: true` marks actions that already exist in SLASH_BLOCKS below (headings, quote, table) -
+// on phones they're hidden from the always-visible row and reached instead through the "+" button,
+// which opens that same "/" menu (see openSlashMenu). Desktop keeps every action visible, unchanged.
 const headingAction = level => ({
-    key: `h${level}`, text: `H${level}`, label: `Título ${level}`,
+    key: `h${level}`, text: `H${level}`, label: `Título ${level}`, phoneExtra: true,
     run: e => e.chain().focus().toggleHeading({ level }).run(),
     active: e => e.isActive('heading', { level }),
 });
@@ -105,11 +114,12 @@ const FORMAT_ACTIONS = [
     { key: 'strike', icon: 'strikethrough', label: 'Riscado', run: e => e.chain().focus().toggleStrike().run(), active: e => e.isActive('strike') },
     { key: 'code', icon: 'code', label: 'Código', run: e => e.chain().focus().toggleCode().run(), active: e => e.isActive('code') },
     { key: 'link', icon: 'link', label: 'Link', run: insertLink, active: e => e.isActive('link') },
-    { key: 'quote', icon: 'quote', label: 'Citação', sep: true, run: e => e.chain().focus().toggleBlockquote().run(), active: e => e.isActive('blockquote') },
+    { key: 'quote', icon: 'quote', label: 'Citação', sep: true, phoneExtra: true, run: e => e.chain().focus().toggleBlockquote().run(), active: e => e.isActive('blockquote') },
     { key: 'list', icon: 'list', label: 'Lista', run: e => e.chain().focus().toggleBulletList().run(), active: e => e.isActive('bulletList') },
     { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', run: e => e.chain().focus().toggleOrderedList().run(), active: e => e.isActive('orderedList') },
     { key: 'check', icon: 'squareCheck', label: 'Checklist', run: e => e.chain().focus().toggleTaskList().run(), active: e => e.isActive('taskList') },
-    { key: 'table', icon: 'table', label: 'Tabela', run: e => e.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: e => e.isActive('table') },
+    { key: 'table', icon: 'table', label: 'Tabela', phoneExtra: true, run: e => e.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: e => e.isActive('table') },
+    { key: 'more', icon: 'plus', label: 'Inserir bloco', cls: 'nt-fbtn-plus', run: (e, self) => self.openSlashMenu() },
 ];
 
 // Table bar: only shown while the cursor is inside a table.
@@ -168,6 +178,7 @@ export default class NotesSession {
 
         this.list = [];
         this.tags = [];
+        this.listLoaded = false;
         this.trashCount = 0;
         this.query = '';
         this.tag = '';
@@ -269,7 +280,7 @@ export default class NotesSession {
                         <div class="nt-fbar" hidden>
                             <ul class="nt-slash" role="listbox" aria-label="Inserir bloco" hidden></ul>
                             <div class="nt-fbar-row" role="toolbar" aria-label="Formatação">
-                                ${FORMAT_ACTIONS.map(a => `<button type="button" class="nt-fbtn${a.text ? ' nt-fbtn-text' : ''}${a.sep ? ' nt-fsep' : ''}" data-fmt="${a.key}" aria-label="${a.label}" title="${a.label}">${a.text || icon(a.icon, 17)}</button>`).join('')}
+                                ${FORMAT_ACTIONS.map(a => `<button type="button" class="nt-fbtn${a.text ? ' nt-fbtn-text' : ''}${a.sep ? ' nt-fsep' : ''}${a.phoneExtra ? ' nt-fbtn-extra' : ''}${a.cls ? ` ${a.cls}` : ''}" data-fmt="${a.key}" aria-label="${a.label}" title="${a.label}">${a.text || icon(a.icon, 17)}</button>`).join('')}
                             </div>
                             <div class="nt-fbar-row nt-tbar" role="toolbar" aria-label="Tabela" hidden>
                                 ${TABLE_ACTIONS.map(a => `<button type="button" class="nt-tbtn${a.danger ? ' danger' : ''}" data-tbl="${a.key}" title="${a.title}">${a.label}</button>`).join('')}
@@ -423,6 +434,9 @@ export default class NotesSession {
 
     async load({ quiet = false } = {}) {
         const seq = ++this.listSeq;
+        // Before the very first response, show a skeleton instead of letting the "sem anotações"
+        // empty-state flash for an instant on a slow connection.
+        if (!this.listLoaded && !quiet) this.renderListSkeleton();
         const params = {};
         if (this.query.trim()) params.q = this.query.trim();
         if (this.tag && !this.trashView) params.tag = this.tag;
@@ -433,12 +447,17 @@ export default class NotesSession {
             this.list = data.notes;
             this.tags = data.tags;
             this.trashCount = data.trashCount;
+            this.listLoaded = true;
             if (this.tag && !this.tags.some(t => t.tag.toLowerCase() === this.tag.toLowerCase())) this.tag = '';
             this.renderList();
             this.hooks.onInfo?.(this);
         } catch (error) {
             if (!quiet) toast(error.message, { tone: 'error' });
         }
+    }
+
+    renderListSkeleton() {
+        this.el.listEl.innerHTML = Array.from({ length: 4 }, () => '<li class="nt-skel" aria-hidden="true"></li>').join('');
     }
 
     refreshSoon() {
@@ -465,12 +484,14 @@ export default class NotesSession {
             const selected = n.id === this.current?.id;
             const preview = n.preview.replace(/```[a-z]*|[#*_`>~|\/-]/gi, '').replace(/\s+/g, ' ').trim(); // Markdown marks are noise in a one-line preview
             const progress = n.tasks ? `<span class="nt-item-progress"><span class="nt-item-bar"><span style="width:${Math.round(n.tasks.done / n.tasks.total * 100)}%"></span></span><small>${n.tasks.done}/${n.tasks.total}</small></span>` : '';
+            // Show at most 2 tags plus a count, instead of letting a long joined list get cut mid-word by the ellipsis
+            const tagList = n.tags.length > 2 ? `${n.tags.slice(0, 2).join(', ')} +${n.tags.length - 2}` : n.tags.join(', ');
             return `<li class="nt-row${selected ? ' selected' : ''}">
                 <button type="button" class="nt-item" role="option" aria-selected="${selected}" data-id="${esc(n.id)}">
                     <span class="nt-item-title">${n.pinned ? `<span class="nt-pin">${icon('pin', 12)}</span>` : ''}${esc(n.title) || '<em>Sem título</em>'}</span>
                     <span class="nt-item-preview">${esc(preview) || '&nbsp;'}</span>
                     ${progress}
-                    <span class="nt-item-meta">${esc(formatDate(n.deletedAt || n.updatedAt))}${n.tags.length ? ` · ${esc(n.tags.join(', '))}` : ''}</span>
+                    <span class="nt-item-meta"${n.tags.length ? ` title="${esc(n.tags.join(', '))}"` : ''}>${esc(formatDate(n.deletedAt || n.updatedAt))}${tagList ? ` · ${esc(tagList)}` : ''}</span>
                 </button>
                 <button type="button" class="icon-btn nt-more" data-more="${esc(n.id)}" aria-label="Ações da anotação">${icon('more', 16)}</button>
             </li>`;
@@ -588,9 +609,11 @@ export default class NotesSession {
     async insertFiles(files, pos) {
         const note = this.current;
         if (!note || note.deletedAt) return;
+        if (files.length > 1) toast(`Enviando ${files.length} arquivos…`);
         let at = pos;
         for (const file of files) {
             try {
+                if (files.length === 1) toast(`Enviando "${file.name}"…`, { duration: 1500 });
                 const result = await uploadAttachment(note.id, file);
                 if (this.current !== note || this.disposed) return; // navigated away mid-upload
                 if (file.type.startsWith('image/')) {
@@ -639,19 +662,21 @@ export default class NotesSession {
         this.reserveBarSpace();
         this.panel.querySelectorAll('[data-fmt]').forEach(btn => {
             const action = FORMAT_ACTIONS.find(a => a.key === btn.dataset.fmt);
-            btn.classList.toggle('on', !!action?.active(this.editor));
+            btn.classList.toggle('on', !!action?.active?.(this.editor));
         });
     }
 
     showFormatBar() {
         if (!this.current || this.current.deletedAt) return;
         this.el.fbar.hidden = false;
+        this.el.root.classList.add('nt-bar-open');
         this.positionFormatBar();
         this.updateFormatBar();
     }
 
     hideFormatBar() {
         this.el.fbar.hidden = true;
+        this.el.root.classList.remove('nt-bar-open');
         this.reserveBarSpace();
         this.closeSlash();
     }
@@ -671,6 +696,18 @@ export default class NotesSession {
     /** Phones: the bar floats over the editor, so the note gets bottom padding as tall as the bar (CSS var). */
     reserveBarSpace() {
         this.el.root.style.setProperty('--nt-fbar-h', coarse() && !this.el.fbar.hidden ? `${this.el.fbar.offsetHeight}px` : '0px');
+    }
+
+    /** Mobile "+": inserts "/" at the cursor so the existing onUpdate -> detectSlash flow below opens
+     *  the same "/" menu used when typing it manually - no separate list of blocks to maintain. */
+    openSlashMenu() {
+        if (!this.current || this.current.deletedAt || this.editor.isDestroyed) return;
+        const { $from, empty } = this.editor.state.selection;
+        const before = empty && $from.parentOffset > 0
+            ? $from.parent.textBetween($from.parentOffset - 1, $from.parentOffset, undefined, '￼')
+            : '\n';
+        const needsSpace = empty && $from.parentOffset > 0 && before !== ' ' && before !== '\n';
+        this.editor.chain().focus().insertContent(needsSpace ? ' /' : '/').run();
     }
 
     /** Detects "/" typed at the start of a line (or after a space) in the current text block. */

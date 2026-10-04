@@ -2447,6 +2447,10 @@ audio.fm-media { width: min(520px, 90%); }
     width: 320px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0;
     background: var(--surface); border-right: 1px solid var(--border);
 }
+/* Narrow desktop/tablet windows (720-980px): the fixed 320px list leaves too little room for the editor */
+@media (min-width: 720px) and (max-width: 980px) {
+    .nt-side { width: 260px; }
+}
 .nt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 
 .nt-toolbar { flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 8px; border-bottom: 1px solid var(--border); }
@@ -2491,6 +2495,15 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-more { align-self: center; opacity: 0; flex-shrink: 0; }
 .nt-row:hover .nt-more, .nt-more:focus-visible, .nt-row.selected .nt-more { opacity: 1; }
 .nt-none { padding: 32px 16px; text-align: center; color: var(--text-3); font-size: 14px; list-style: none; }
+/* Shown only while the first GET /api/notes of the session is in flight, so a slow network doesn't
+   flash "Você ainda não tem anotações" before any response has arrived. */
+.nt-skel {
+    height: 64px; margin: 4px 6px; border-radius: var(--radius-md); list-style: none;
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+    background-size: 400% 100%; animation: nt-shimmer 1.4s ease infinite;
+}
+@keyframes nt-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .nt-skel { animation: none; } }
 
 .nt-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--text-3); text-align: center; }
 .nt-empty[hidden], .nt-editor[hidden], .nt-conflict[hidden] { display: none; }
@@ -2544,7 +2557,14 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-doc .ProseMirror th { background: var(--surface-2); font-weight: 650; }
 .nt-doc .ProseMirror td > p, .nt-doc .ProseMirror th > p { margin: 0; }
 .nt-doc .ProseMirror .selectedCell::after { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--accent) 18%, transparent); pointer-events: none; }
-.nt-doc .ProseMirror .tableWrapper { overflow-x: auto; }
+.nt-doc .ProseMirror .tableWrapper {
+    overflow-x: auto;
+    /* fade on each edge while there is more to scroll; disappears on its own once fully scrolled (background-attachment:local) */
+    background:
+        linear-gradient(to right, var(--bg) 0%, transparent 24px) left no-repeat local,
+        linear-gradient(to left, var(--bg) 0%, transparent 24px) right no-repeat local;
+    background-size: 24px 100%, 24px 100%;
+}
 .nt-doc .ProseMirror img { max-width: 100%; border-radius: var(--radius-md); display: block; }
 .nt-doc .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 2px; }
 .nt-doc .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
@@ -2574,7 +2594,14 @@ audio.fm-media { width: min(520px, 90%); }
     background: var(--surface); border: 1.5px solid var(--border-strong); box-shadow: var(--shadow);
 }
 .nt-fbar[hidden] { display: none; }
-.nt-fbar-row { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.nt-fbar-row {
+    display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none;
+    /* fade on each edge while there is more to scroll; disappears on its own once fully scrolled */
+    background:
+        linear-gradient(to right, var(--surface) 0%, transparent 20px) left no-repeat local,
+        linear-gradient(to left, var(--surface) 0%, transparent 20px) right no-repeat local;
+    background-size: 20px 100%, 20px 100%;
+}
 .nt-fbar-row::-webkit-scrollbar { display: none; }
 .nt-fbtn { flex-shrink: 0; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--text-2); }
 .nt-fbtn:hover, .nt-fbtn:focus-visible { background: var(--surface-2); color: var(--text); }
@@ -2583,6 +2610,9 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-fsep { margin-left: 6px; position: relative; }
 .nt-fsep::before { content: ''; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 1px; background: var(--border); }
 .nt-fs { display: none; }
+/* Mobile only: the "+" that opens the same "/" insert menu, replacing the headings/quote/table
+   buttons that get hidden there (.nt-fbtn-extra) to keep the always-visible row short. */
+.nt-fbtn-plus { display: none; }
 .nt-tbar { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
 .nt-tbar[hidden] { display: none; }
 .nt-tbtn { flex-shrink: 0; height: 32px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; white-space: nowrap; color: var(--text-2); background: var(--surface-2); }
@@ -2612,7 +2642,7 @@ audio.fm-media { width: min(520px, 90%); }
     .nt[data-pane="editor"] .nt-side, .nt[data-pane="editor"] .nt-fab { display: none; }
     .nt[data-pane="list"] .nt-fab { display: grid; }
     .nt-back { display: inline-grid; }
-    .nt-more { opacity: 1; width: 40px; height: 40px; }
+    .nt-more { opacity: 1; width: 44px; height: 44px; }
     .nt-toolbar [data-act="new"] { display: none; }
     .nt-search input { font-size: 16px; }
     .nt-title { font-size: 20px; padding: 14px 16px 6px; }
@@ -2623,21 +2653,29 @@ audio.fm-media { width: min(520px, 90%); }
         position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
         border-width: 1.5px 0 0; border-radius: var(--radius-md) var(--radius-md) 0 0; z-index: 30;
     }
-    .nt-fbtn { width: 42px; height: 42px; }
-    .nt-fbtn-text { width: 44px; }
+    .nt-fbtn { width: 44px; height: 44px; }
+    .nt-fbtn-text { width: 46px; }
     .nt-fsep::before { top: 11px; bottom: 11px; }
     .nt-tbar { margin-top: 4px; padding-top: 4px; }
-    .nt-tbtn { height: 38px; padding: 0 14px; font-size: 13.5px; }
+    .nt-tbtn { height: 44px; padding: 0 14px; font-size: 13.5px; }
     .nt-slash { max-height: 34dvh; }
     /* the bar floats over the note: keep the last lines reachable above it */
     .nt-write { padding-bottom: var(--nt-fbar-h, 0px); scroll-padding-bottom: var(--nt-fbar-h, 0px); }
     .nt-doc-wrap { padding: 10px 16px 24px; }
     .nt-ehead { padding: 4px 6px; }
     .nt-fs { display: inline-grid; }
+    .nt-fbtn-extra { display: none; }
+    .nt-fbtn-plus { display: grid; }
     /* full screen: the note covers the whole screen (tabs and menus included) */
     .nt.nt-full .nt-main { position: fixed; inset: 0; z-index: 80; height: 100dvh; padding-top: env(safe-area-inset-top); }
+    /* the formatting bar reserves its own safe-area-bottom (.nt-fbar above) while it's open; only add it
+       here when the bar is hidden (no note focused), so the inset isn't counted twice */
+    .nt.nt-full:not(.nt-bar-open) .nt-main { padding-bottom: env(safe-area-inset-bottom); }
     .nt.nt-full .nt-tagsline { display: none; }
     .nt.nt-full .nt-title { font-size: 18px; padding: 8px 16px 4px; }
+    /* conflict banner: stack full-width, each button a proper touch target, instead of wrapping mid-sentence */
+    .nt-conflict { flex-direction: column; align-items: stretch; }
+    .nt-conflict .btn-sm { min-height: 44px; width: 100%; justify-content: center; }
     /* tables scroll sideways instead of squeezing the columns */
     .nt-doc .ProseMirror table { table-layout: auto; width: max-content; min-width: 100%; }
     .nt-doc .ProseMirror th, .nt-doc .ProseMirror td { min-width: 110px; }
