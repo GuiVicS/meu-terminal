@@ -2579,6 +2579,10 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-fbtn { flex-shrink: 0; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--text-2); }
 .nt-fbtn:hover, .nt-fbtn:focus-visible { background: var(--surface-2); color: var(--text); }
 .nt-fbtn:active, .nt-fbtn.on { background: var(--accent-soft); color: var(--accent); }
+.nt-fbtn-text { width: 38px; font-size: 13.5px; font-weight: 700; letter-spacing: -0.02em; }
+.nt-fsep { margin-left: 6px; position: relative; }
+.nt-fsep::before { content: ''; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 1px; background: var(--border); }
+.nt-fs { display: none; }
 .nt-tbar { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
 .nt-tbar[hidden] { display: none; }
 .nt-tbtn { flex-shrink: 0; height: 32px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; white-space: nowrap; color: var(--text-2); background: var(--surface-2); }
@@ -2614,9 +2618,29 @@ audio.fm-media { width: min(520px, 90%); }
     .nt-title { font-size: 20px; padding: 14px 16px 6px; }
     .nt-tagsline { padding: 0 16px 10px; }
     .nt-tags-input { font-size: 16px; }
-    .nt-doc-wrap { padding: 12px 16px 16px 38px; }
     .nt-doc .ProseMirror { font-size: 16px; }
-    .nt-fbar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; border-width: 1.5px 0 0; border-radius: var(--radius-md) var(--radius-md) 0 0; z-index: 30; }
+    .nt-fbar {
+        position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+        border-width: 1.5px 0 0; border-radius: var(--radius-md) var(--radius-md) 0 0; z-index: 30;
+    }
+    .nt-fbtn { width: 42px; height: 42px; }
+    .nt-fbtn-text { width: 44px; }
+    .nt-fsep::before { top: 11px; bottom: 11px; }
+    .nt-tbar { margin-top: 4px; padding-top: 4px; }
+    .nt-tbtn { height: 38px; padding: 0 14px; font-size: 13.5px; }
+    .nt-slash { max-height: 34dvh; }
+    /* the bar floats over the note: keep the last lines reachable above it */
+    .nt-write { padding-bottom: var(--nt-fbar-h, 0px); scroll-padding-bottom: var(--nt-fbar-h, 0px); }
+    .nt-doc-wrap { padding: 10px 16px 24px; }
+    .nt-ehead { padding: 4px 6px; }
+    .nt-fs { display: inline-grid; }
+    /* full screen: the note covers the whole screen (tabs and menus included) */
+    .nt.nt-full .nt-main { position: fixed; inset: 0; z-index: 80; height: 100dvh; padding-top: env(safe-area-inset-top); }
+    .nt.nt-full .nt-tagsline { display: none; }
+    .nt.nt-full .nt-title { font-size: 18px; padding: 8px 16px 4px; }
+    /* tables scroll sideways instead of squeezing the columns */
+    .nt-doc .ProseMirror table { table-layout: auto; width: max-content; min-width: 100%; }
+    .nt-doc .ProseMirror th, .nt-doc .ProseMirror td { min-width: 110px; }
 }
 
 /* =========================================================

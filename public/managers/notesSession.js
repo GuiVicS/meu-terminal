@@ -83,14 +83,6 @@ async function uploadAttachment(noteId, file) {
 
 const parseTags = text => text.split(',').map(t => t.trim()).filter(Boolean);
 
-function cycleHeading(editor) {
-    const chain = editor.chain().focus();
-    if (editor.isActive('heading', { level: 1 })) chain.setHeading({ level: 2 }).run();
-    else if (editor.isActive('heading', { level: 2 })) chain.setHeading({ level: 3 }).run();
-    else if (editor.isActive('heading', { level: 3 })) chain.setParagraph().run();
-    else chain.setHeading({ level: 1 }).run();
-}
-
 function insertLink(editor) {
     const previousUrl = editor.getAttributes('link').href;
     const url = window.prompt('URL do link:', previousUrl || 'https://');
@@ -101,17 +93,23 @@ function insertLink(editor) {
 }
 
 // Floating formatting bar: each entry runs a Tiptap command on the live editor.
+const headingAction = level => ({
+    key: `h${level}`, text: `H${level}`, label: `Título ${level}`,
+    run: e => e.chain().focus().toggleHeading({ level }).run(),
+    active: e => e.isActive('heading', { level }),
+});
 const FORMAT_ACTIONS = [
-    { key: 'bold', icon: 'bold', label: 'Negrito', run: e => e.chain().focus().toggleBold().run(), active: e => e.isActive('bold') },
+    headingAction(1), headingAction(2), headingAction(3),
+    { key: 'bold', icon: 'bold', label: 'Negrito', sep: true, run: e => e.chain().focus().toggleBold().run(), active: e => e.isActive('bold') },
     { key: 'italic', icon: 'italic', label: 'Itálico', run: e => e.chain().focus().toggleItalic().run(), active: e => e.isActive('italic') },
     { key: 'strike', icon: 'strikethrough', label: 'Riscado', run: e => e.chain().focus().toggleStrike().run(), active: e => e.isActive('strike') },
     { key: 'code', icon: 'code', label: 'Código', run: e => e.chain().focus().toggleCode().run(), active: e => e.isActive('code') },
     { key: 'link', icon: 'link', label: 'Link', run: insertLink, active: e => e.isActive('link') },
-    { key: 'heading', icon: 'heading', label: 'Título', run: cycleHeading, active: e => e.isActive('heading') },
-    { key: 'quote', icon: 'quote', label: 'Citação', run: e => e.chain().focus().toggleBlockquote().run(), active: e => e.isActive('blockquote') },
+    { key: 'quote', icon: 'quote', label: 'Citação', sep: true, run: e => e.chain().focus().toggleBlockquote().run(), active: e => e.isActive('blockquote') },
     { key: 'list', icon: 'list', label: 'Lista', run: e => e.chain().focus().toggleBulletList().run(), active: e => e.isActive('bulletList') },
     { key: 'listOrdered', icon: 'listOrdered', label: 'Lista numerada', run: e => e.chain().focus().toggleOrderedList().run(), active: e => e.isActive('orderedList') },
     { key: 'check', icon: 'squareCheck', label: 'Checklist', run: e => e.chain().focus().toggleTaskList().run(), active: e => e.isActive('taskList') },
+    { key: 'table', icon: 'table', label: 'Tabela', run: e => e.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: e => e.isActive('table') },
 ];
 
 // Table bar: only shown while the cursor is inside a table.
@@ -192,6 +190,7 @@ export default class NotesSession {
 
         this.active = false;
         this.disposed = false;
+        this.full = false;
         this.ws = null;
         this.reconnectAttempts = 0;
         this.timers = new Set();
@@ -247,6 +246,7 @@ export default class NotesSession {
                             <button type="button" class="icon-btn nt-back" data-act="back" aria-label="Voltar para a lista">${icon('arrowLeft', 18)}</button>
                             <span class="nt-status" role="status" aria-live="polite"></span>
                             <button type="button" class="btn btn-ghost btn-sm" data-act="restore" hidden>Restaurar</button>
+                            <button type="button" class="icon-btn nt-fs" data-act="fullscreen" aria-label="Tela cheia" aria-pressed="false" title="Tela cheia">${icon('maximize', 18)}</button>
                             <button type="button" class="icon-btn" data-act="pin" aria-label="Fixar no topo" aria-pressed="false" title="Fixar no topo">${icon('pin', 18)}</button>
                             <button type="button" class="icon-btn" data-act="more" aria-label="Mais ações">${icon('more', 18)}</button>
                         </div>
@@ -269,7 +269,7 @@ export default class NotesSession {
                         <div class="nt-fbar" hidden>
                             <ul class="nt-slash" role="listbox" aria-label="Inserir bloco" hidden></ul>
                             <div class="nt-fbar-row" role="toolbar" aria-label="Formatação">
-                                ${FORMAT_ACTIONS.map(a => `<button type="button" class="nt-fbtn" data-fmt="${a.key}" aria-label="${a.label}" title="${a.label}">${icon(a.icon, 17)}</button>`).join('')}
+                                ${FORMAT_ACTIONS.map(a => `<button type="button" class="nt-fbtn${a.text ? ' nt-fbtn-text' : ''}${a.sep ? ' nt-fsep' : ''}" data-fmt="${a.key}" aria-label="${a.label}" title="${a.label}">${a.text || icon(a.icon, 17)}</button>`).join('')}
                             </div>
                             <div class="nt-fbar-row nt-tbar" role="toolbar" aria-label="Tabela" hidden>
                                 ${TABLE_ACTIONS.map(a => `<button type="button" class="nt-tbtn${a.danger ? ' danger' : ''}" data-tbl="${a.key}" title="${a.title}">${a.label}</button>`).join('')}
@@ -285,7 +285,7 @@ export default class NotesSession {
             trashbar: q('.nt-trashbar'), listEl: q('.nt-list'), empty: q('.nt-empty'), editor: q('.nt-editor'),
             status: q('.nt-status'), conflict: q('.nt-conflict'), title: q('.nt-title'), tagsInput: q('.nt-tags-input'),
             docWrap: q('.nt-doc-wrap'), docEl: q('.nt-doc'), dragHandle: q('.nt-draghandle'), trashBtn: q('[data-act="trash"]'),
-            restoreBtn: q('[data-act="restore"]'), pinBtn: q('[data-act="pin"]'),
+            restoreBtn: q('[data-act="restore"]'), fsBtn: q('[data-act="fullscreen"]'), pinBtn: q('[data-act="pin"]'),
             fbar: q('.nt-fbar'), tbar: q('.nt-tbar'), slashEl: q('.nt-slash'),
         };
         this.createEditor();
@@ -348,7 +348,7 @@ export default class NotesSession {
             },
             onSelectionUpdate: () => this.detectSlash(),
             onFocus: () => this.showFormatBar(),
-            onBlur: () => this.hideFormatBar(),
+            onBlur: () => { if (!coarse()) this.hideFormatBar(); },
             onTransaction: () => this.updateFormatBar(),
         });
     }
@@ -386,6 +386,8 @@ export default class NotesSession {
         });
         [el.title, el.tagsInput].forEach(input => input.addEventListener('input', () => this.edited()));
         this.onViewportChange = () => { if (!el.fbar.hidden) this.positionFormatBar(); };
+        this.onFullscreenChange = () => { if (!document.fullscreenElement && this.full) this.setFullscreen(false); };
+        document.addEventListener('fullscreenchange', this.onFullscreenChange);
         window.visualViewport?.addEventListener('resize', this.onViewportChange);
         window.visualViewport?.addEventListener('scroll', this.onViewportChange);
         this.bindDragHandle();
@@ -395,7 +397,8 @@ export default class NotesSession {
                 e.stopPropagation();
                 void this.flush();
             } else if (e.key === 'Escape' && !e.target.closest('dialog')) {
-                if (this.el.root.dataset.pane === 'editor') this.showList();
+                if (this.full) this.setFullscreen(false);
+                else if (this.el.root.dataset.pane === 'editor') this.showList();
             }
         });
     }
@@ -403,7 +406,8 @@ export default class NotesSession {
     onAction(act, button) {
         switch (act) {
             case 'new': return this.newNote();
-            case 'back': return this.showList();
+            case 'back': return this.full ? this.setFullscreen(false) : this.showList();
+            case 'fullscreen': return this.setFullscreen(!this.full);
             case 'trash': return this.toggleTrash();
             case 'empty-trash': return this.emptyTrash();
             case 'pin': return this.togglePin();
@@ -481,9 +485,33 @@ export default class NotesSession {
 
     // ---------- editor ----------
 
+    /** Phones show one pane at a time. The formatting bar stays docked while a note is open; leaving it exits full screen. */
+    setPane(pane) {
+        this.el.root.dataset.pane = pane;
+        if (pane === 'list') {
+            this.setFullscreen(false);
+            this.hideFormatBar();
+        } else if (coarse()) {
+            requestAnimationFrame(() => { if (this.el.root.dataset.pane === 'editor') this.showFormatBar(); });
+        }
+    }
+
+    /** Phone-only "tela cheia": the note covers the whole screen (CSS), plus the browser's own full screen where supported. */
+    setFullscreen(on) {
+        if (this.full === on) return;
+        this.full = on;
+        this.el.root.classList.toggle('nt-full', on);
+        this.el.fsBtn.innerHTML = icon(on ? 'minimize' : 'maximize', 18);
+        this.el.fsBtn.setAttribute('aria-label', on ? 'Sair da tela cheia' : 'Tela cheia');
+        this.el.fsBtn.setAttribute('aria-pressed', String(on));
+        if (on) document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }).catch(() => {});
+        else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+        this.positionFormatBar();
+    }
+
     showList() {
         void this.flush();
-        this.el.root.dataset.pane = 'list';
+        this.setPane('list');
     }
 
     showEmpty() {
@@ -492,7 +520,7 @@ export default class NotesSession {
         this.conflict = null;
         this.el.empty.hidden = false;
         this.el.editor.hidden = true;
-        this.el.root.dataset.pane = 'list';
+        this.setPane('list');
         this.renderList();
     }
 
@@ -521,13 +549,13 @@ export default class NotesSession {
 
     async openNote(id) {
         if (this.current?.id === id) {
-            this.el.root.dataset.pane = 'editor';
+            this.setPane('editor');
             return;
         }
         await this.flush();
         try {
             this.fill(await request('GET', `/${encodeURIComponent(id)}`));
-            this.el.root.dataset.pane = 'editor';
+            this.setPane('editor');
             this.renderList();
             if (!coarse() && !this.current.deletedAt && !this.current.title && !this.current.body) this.el.title.focus();
         } catch (error) {
@@ -546,7 +574,7 @@ export default class NotesSession {
         try {
             const note = await request('POST', '', { body: { tags: this.tag ? [this.tag] : [] } });
             this.fill(note);
-            this.el.root.dataset.pane = 'editor';
+            this.setPane('editor');
             await this.load({ quiet: true });
             if (!coarse()) this.el.title.focus();
         } catch (error) {
@@ -608,6 +636,7 @@ export default class NotesSession {
     updateFormatBar() {
         if (this.el.fbar.hidden) return;
         this.el.tbar.hidden = !this.editor.isActive('table');
+        this.reserveBarSpace();
         this.panel.querySelectorAll('[data-fmt]').forEach(btn => {
             const action = FORMAT_ACTIONS.find(a => a.key === btn.dataset.fmt);
             btn.classList.toggle('on', !!action?.active(this.editor));
@@ -623,6 +652,7 @@ export default class NotesSession {
 
     hideFormatBar() {
         this.el.fbar.hidden = true;
+        this.reserveBarSpace();
         this.closeSlash();
     }
 
@@ -635,6 +665,12 @@ export default class NotesSession {
         }
         const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
         this.el.fbar.style.bottom = `${kb}px`;
+        this.reserveBarSpace();
+    }
+
+    /** Phones: the bar floats over the editor, so the note gets bottom padding as tall as the bar (CSS var). */
+    reserveBarSpace() {
+        this.el.root.style.setProperty('--nt-fbar-h', coarse() && !this.el.fbar.hidden ? `${this.el.fbar.offsetHeight}px` : '0px');
     }
 
     /** Detects "/" typed at the start of a line (or after a space) in the current text block. */
@@ -1027,7 +1063,7 @@ export default class NotesSession {
 
     /** Workspace "search" (Ctrl+F) on this tab. */
     openFind() {
-        this.el.root.dataset.pane = 'list';
+        this.setPane('list');
         this.el.search.focus();
         this.el.search.select();
     }
@@ -1140,6 +1176,7 @@ export default class NotesSession {
         this.timers.forEach(clearTimeout);
         this.timers.clear();
         if (this.onViewportChange) {
+            document.removeEventListener('fullscreenchange', this.onFullscreenChange);
             window.visualViewport?.removeEventListener('resize', this.onViewportChange);
             window.visualViewport?.removeEventListener('scroll', this.onViewportChange);
         }
