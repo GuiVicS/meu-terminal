@@ -89,6 +89,7 @@ const ICONS = {
     check: 'check',
     checkCheck: 'check-check',
     squareCheck: 'square-check',
+    table: 'table',
     square: 'square',
     sort: 'arrow-up-down',
     save: 'save',

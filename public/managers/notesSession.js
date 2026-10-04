@@ -14,7 +14,7 @@ import { toast } from '../ui/toast.js';
 import { askConfirm } from '../ui/prompt.js';
 import { esc } from '../agent/markdown.js';
 import { copyText } from '../agent/codeblock.js';
-import { Editor, StarterKit, Image, Placeholder, TaskList, TaskItem, Link, Markdown } from '../vendor/tiptap.bundle.js';
+import { Editor, StarterKit, Image, Placeholder, TaskList, TaskItem, Link, Markdown, Table, TableRow, TableHeader, TableCell } from '../vendor/tiptap.bundle.js';
 
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
@@ -114,6 +114,17 @@ const FORMAT_ACTIONS = [
     { key: 'check', icon: 'squareCheck', label: 'Checklist', run: e => e.chain().focus().toggleTaskList().run(), active: e => e.isActive('taskList') },
 ];
 
+// Table bar: only shown while the cursor is inside a table.
+const TABLE_ACTIONS = [
+    { key: 'rowBefore', label: '+ Linha acima', title: 'Inserir linha acima', run: e => e.chain().focus().addRowBefore().run() },
+    { key: 'rowAfter', label: '+ Linha abaixo', title: 'Inserir linha abaixo', run: e => e.chain().focus().addRowAfter().run() },
+    { key: 'rowDel', label: '− Linha', title: 'Excluir linha', danger: true, run: e => e.chain().focus().deleteRow().run() },
+    { key: 'colBefore', label: '+ Coluna à esquerda', title: 'Inserir coluna à esquerda', run: e => e.chain().focus().addColumnBefore().run() },
+    { key: 'colAfter', label: '+ Coluna à direita', title: 'Inserir coluna à direita', run: e => e.chain().focus().addColumnAfter().run() },
+    { key: 'colDel', label: '− Coluna', title: 'Excluir coluna', danger: true, run: e => e.chain().focus().deleteColumn().run() },
+    { key: 'tableDel', label: 'Excluir tabela', title: 'Excluir a tabela inteira', danger: true, run: e => e.chain().focus().deleteTable().run() },
+];
+
 // "/" command palette (Notion-style): replaces "/query" with a block.
 const SLASH_BLOCKS = [
     { key: 'h1', icon: 'heading', label: 'Título 1', run: e => e.chain().focus().setHeading({ level: 1 }).run() },
@@ -124,6 +135,7 @@ const SLASH_BLOCKS = [
     { key: 'check', icon: 'squareCheck', label: 'Checklist', run: e => e.chain().focus().toggleTaskList().run() },
     { key: 'quote', icon: 'quote', label: 'Citação', run: e => e.chain().focus().toggleBlockquote().run() },
     { key: 'code', icon: 'codeXml', label: 'Bloco de código', run: e => e.chain().focus().toggleCodeBlock().run() },
+    { key: 'table', icon: 'table', label: 'Tabela', run: e => e.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
     { key: 'hr', icon: 'minus', label: 'Divisória', run: e => e.chain().focus().setHorizontalRule().run() },
     { key: 'image', icon: 'image', label: 'Imagem', run: (e, self) => self.pickImage() },
 ];
@@ -259,6 +271,9 @@ export default class NotesSession {
                             <div class="nt-fbar-row" role="toolbar" aria-label="Formatação">
                                 ${FORMAT_ACTIONS.map(a => `<button type="button" class="nt-fbtn" data-fmt="${a.key}" aria-label="${a.label}" title="${a.label}">${icon(a.icon, 17)}</button>`).join('')}
                             </div>
+                            <div class="nt-fbar-row nt-tbar" role="toolbar" aria-label="Tabela" hidden>
+                                ${TABLE_ACTIONS.map(a => `<button type="button" class="nt-tbtn${a.danger ? ' danger' : ''}" data-tbl="${a.key}" title="${a.title}">${a.label}</button>`).join('')}
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -271,7 +286,7 @@ export default class NotesSession {
             status: q('.nt-status'), conflict: q('.nt-conflict'), title: q('.nt-title'), tagsInput: q('.nt-tags-input'),
             docWrap: q('.nt-doc-wrap'), docEl: q('.nt-doc'), dragHandle: q('.nt-draghandle'), trashBtn: q('[data-act="trash"]'),
             restoreBtn: q('[data-act="restore"]'), pinBtn: q('[data-act="pin"]'),
-            fbar: q('.nt-fbar'), slashEl: q('.nt-slash'),
+            fbar: q('.nt-fbar'), tbar: q('.nt-tbar'), slashEl: q('.nt-slash'),
         };
         this.createEditor();
         this.bind();
@@ -290,6 +305,10 @@ export default class NotesSession {
                 Link.configure({ openOnClick: false, autolink: true }),
                 TaskList,
                 TaskItem.configure({ nested: true }),
+                Table.configure({ resizable: false }),
+                TableRow,
+                TableHeader,
+                TableCell,
                 Placeholder.configure({ placeholder: 'Escreva aqui… (ou arraste um arquivo para qualquer linha)' }),
                 Markdown.configure({ html: false, transformPastedText: true, transformCopiedText: true }),
             ],
@@ -350,6 +369,8 @@ export default class NotesSession {
             if (item) return this.openNote(item.dataset.id);
             const fmt = e.target.closest('[data-fmt]');
             if (fmt) return this.applyFormat(fmt.dataset.fmt);
+            const tbl = e.target.closest('[data-tbl]');
+            if (tbl) return this.applyTableAction(tbl.dataset.tbl);
             const slash = e.target.closest('[data-slash]');
             if (slash) this.pickSlash(slash.dataset.slash);
         });
@@ -578,8 +599,15 @@ export default class NotesSession {
         if (action) action.run(this.editor, this);
     }
 
+    applyTableAction(key) {
+        if (!this.current || this.current.deletedAt) return;
+        const action = TABLE_ACTIONS.find(a => a.key === key);
+        if (action) action.run(this.editor);
+    }
+
     updateFormatBar() {
         if (this.el.fbar.hidden) return;
+        this.el.tbar.hidden = !this.editor.isActive('table');
         this.panel.querySelectorAll('[data-fmt]').forEach(btn => {
             const action = FORMAT_ACTIONS.find(a => a.key === btn.dataset.fmt);
             btn.classList.toggle('on', !!action?.active(this.editor));

@@ -2539,6 +2539,12 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-doc .ProseMirror pre code { background: none; border: 0; padding: 0; font: 13px/1.55 var(--font-mono); }
 .nt-doc .ProseMirror blockquote { margin: 0; padding: 4px 14px; border-left: 3px solid color-mix(in srgb, var(--accent) 50%, var(--border)); color: var(--text-2); }
 .nt-doc .ProseMirror hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin: 6px 0; }
+.nt-doc .ProseMirror table { border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0; overflow: hidden; }
+.nt-doc .ProseMirror th, .nt-doc .ProseMirror td { border: 1px solid var(--border); padding: 7px 10px; vertical-align: top; text-align: left; position: relative; min-width: 1em; }
+.nt-doc .ProseMirror th { background: var(--surface-2); font-weight: 650; }
+.nt-doc .ProseMirror td > p, .nt-doc .ProseMirror th > p { margin: 0; }
+.nt-doc .ProseMirror .selectedCell::after { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--accent) 18%, transparent); pointer-events: none; }
+.nt-doc .ProseMirror .tableWrapper { overflow-x: auto; }
 .nt-doc .ProseMirror img { max-width: 100%; border-radius: var(--radius-md); display: block; }
 .nt-doc .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 2px; }
 .nt-doc .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
@@ -2573,6 +2579,11 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-fbtn { flex-shrink: 0; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--text-2); }
 .nt-fbtn:hover, .nt-fbtn:focus-visible { background: var(--surface-2); color: var(--text); }
 .nt-fbtn:active, .nt-fbtn.on { background: var(--accent-soft); color: var(--accent); }
+.nt-tbar { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.nt-tbar[hidden] { display: none; }
+.nt-tbtn { flex-shrink: 0; height: 32px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; white-space: nowrap; color: var(--text-2); background: var(--surface-2); }
+.nt-tbtn:hover, .nt-tbtn:focus-visible { color: var(--text); background: var(--accent-soft); }
+.nt-tbtn.danger:hover, .nt-tbtn.danger:focus-visible { color: var(--danger, #e5484d); background: color-mix(in srgb, var(--danger, #e5484d) 14%, transparent); }
 
 /* "/" command palette, shown above the toolbar row inside the same floating card */
 .nt-slash { list-style: none; margin: 0 0 6px; padding: 4px; max-height: 240px; overflow-y: auto; border-bottom: 1px solid var(--divider); }

@@ -13,3 +13,4 @@ export { default as TaskList } from '@tiptap/extension-task-list';
 export { default as TaskItem } from '@tiptap/extension-task-item';
 export { default as Link } from '@tiptap/extension-link';
 export { Markdown } from 'tiptap-markdown';
+export { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
