@@ -467,6 +467,7 @@ export default class NotesSession {
 
     renderList() {
         const { el } = this;
+        el.listEl.scrollLeft = 0; // defensive: undoes any stray horizontal scroll from before the overflow-x:hidden fix
         el.trashBtn.setAttribute('aria-pressed', String(this.trashView));
         el.trashBtn.classList.toggle('on', this.trashView);
         el.trashbar.hidden = !this.trashView || !this.list.length;

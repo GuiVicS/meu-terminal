@@ -2478,7 +2478,10 @@ audio.fm-media { width: min(520px, 90%); }
 }
 .nt-trashbar span { flex: 1; min-width: 0; }
 
-.nt-list { flex: 1; min-height: 0; margin: 0; padding: 6px; list-style: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+/* overflow-x: hidden is load-bearing - with only overflow-y set, the CSS spec forces the other axis to
+   "auto" too, so the list becomes horizontally scrollable and can get stuck scrolled right (every row's
+   text then looks cut off by the same amount on the left, which is what the "vazando pro lado" bug was). */
+.nt-list { flex: 1; min-height: 0; margin: 0; padding: 6px; list-style: none; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .nt-row { position: relative; display: flex; align-items: stretch; border-radius: var(--radius-md); }
 .nt-row:hover { background: var(--surface-2); }
 .nt-row.selected { background: var(--accent-soft); }
@@ -2528,7 +2531,7 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-title:read-only { opacity: 0.75; }
 
 /* Single Tiptap block: you write where you read, Notion-style (no edit/preview split). */
-.nt-write { flex: 1; min-height: 0; min-width: 0; display: flex; overflow-y: auto; }
+.nt-write { flex: 1; min-height: 0; min-width: 0; display: flex; overflow-y: auto; overflow-x: hidden; }
 .nt-doc-wrap { position: relative; flex: 1; min-width: 0; max-width: 780px; margin: 0 auto; padding: 14px 20px 24px 42px; }
 .nt-doc-wrap.readonly { opacity: 0.75; }
 .nt-doc .ProseMirror { outline: none; color: var(--text); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; min-height: 200px; }
@@ -2620,7 +2623,7 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-tbtn.danger:hover, .nt-tbtn.danger:focus-visible { color: var(--danger, #e5484d); background: color-mix(in srgb, var(--danger, #e5484d) 14%, transparent); }
 
 /* "/" command palette, shown above the toolbar row inside the same floating card */
-.nt-slash { list-style: none; margin: 0 0 6px; padding: 4px; max-height: 240px; overflow-y: auto; border-bottom: 1px solid var(--divider); }
+.nt-slash { list-style: none; margin: 0 0 6px; padding: 4px; max-height: 240px; overflow-y: auto; overflow-x: hidden; border-bottom: 1px solid var(--divider); }
 .nt-slash[hidden] { display: none; }
 .nt-slash li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; font-size: 13.5px; color: var(--text); cursor: pointer; }
 .nt-slash li .icon { color: var(--text-3); flex-shrink: 0; }
