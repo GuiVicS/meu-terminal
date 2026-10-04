@@ -463,7 +463,7 @@ export default class NotesSession {
         }
         el.listEl.innerHTML = this.list.map(n => {
             const selected = n.id === this.current?.id;
-            const preview = n.preview.replace(/```[a-z]*|[#*_`>~]/gi, '').replace(/\s+/g, ' ').trim(); // Markdown marks are noise in a one-line preview
+            const preview = n.preview.replace(/```[a-z]*|[#*_`>~|\/-]/gi, '').replace(/\s+/g, ' ').trim(); // Markdown marks are noise in a one-line preview
             const progress = n.tasks ? `<span class="nt-item-progress"><span class="nt-item-bar"><span style="width:${Math.round(n.tasks.done / n.tasks.total * 100)}%"></span></span><small>${n.tasks.done}/${n.tasks.total}</small></span>` : '';
             return `<li class="nt-row${selected ? ' selected' : ''}">
                 <button type="button" class="nt-item" role="option" aria-selected="${selected}" data-id="${esc(n.id)}">
