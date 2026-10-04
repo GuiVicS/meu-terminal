@@ -302,4 +302,23 @@ class NotesStore {
     }
 }
 
+/**
+ * Where the notes live. NOTES_DIR wins when set. Otherwise the home folder (~/.meuterminal/notes):
+ * in Docker that is the `meuterminal-home` named volume, which panels keep between deploys. The old
+ * default (next to the DB, /app/data/notes) is a bind mount that is lost when it is not mapped
+ * to a persistent folder. Notes found in the old place are copied over once (only when the new
+ * folder doesn't exist yet, so notes deleted later never come back).
+ */
+function resolveNotesDir({ env = process.env.NOTES_DIR, dbPath, home }) {
+    if (env) return env;
+    const target = path.join(home, '.meuterminal', 'notes');
+    const legacy = path.join(path.dirname(dbPath), 'notes');
+    if (!fs.existsSync(target) && fs.existsSync(legacy)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.cpSync(legacy, target, { recursive: true });
+    }
+    return target;
+}
+
 module.exports = NotesStore;
+module.exports.resolveNotesDir = resolveNotesDir;

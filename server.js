@@ -1388,7 +1388,7 @@ app.get(BASE_PATH + '/api/backup/history', (req, res) => {
 });
 
 // ---------- Notes (the notes tab; every device reads and writes the same notes) ----------
-const NOTES_DIR = process.env.NOTES_DIR || path.join(path.dirname(DB_PATH), 'notes');
+const NOTES_DIR = NotesStore.resolveNotesDir({ dbPath: DB_PATH, home: os.homedir() });
 const notes = new NotesStore(NOTES_DIR);
 const notesFiles = new NotesAttachments(NOTES_DIR);
 
