@@ -48,8 +48,8 @@ const KINDS = {
     other: {
         label: 'Outro',
         live: true,
-        hint: 'Escolha a melhor stack para o pedido. Se tiver servidor de desenvolvimento, use a ferramenta '
-            + 'navigate do MCP meuterminal para abrir o endereço na aba de navegador ao lado.',
+        hint: 'Escolha a melhor stack para o pedido. A pré-visualização ao lado já está aberta (Live Server da '
+            + 'pasta); se usar um servidor de desenvolvimento, diga ao usuário em qual porta ele está.',
     },
 };
 
@@ -146,7 +146,8 @@ class Vibe {
             + `O que o usuário quer: ${p.description || '(não descrito; pergunte antes de começar)'}. `
             + `Trabalhe na pasta ${p.folder} (você já está nela). ${k.hint} `
             + 'Use as ferramentas do MCP meuterminal para conferir o resultado (screenshot, read_page) e avise o '
-            + 'usuário com notify quando terminar cada etapa. Comece planejando em poucos passos e depois implemente.');
+            + 'usuário com notify quando terminar cada etapa. NÃO abra abas nem a prévia (não use open_url, '
+            + 'live_preview, open_folder nem navigate): o MeuTerminal já abre as abas necessárias sozinho. Comece planejando em poucos passos e depois implemente.');
     }
 
     /** Only used for the MCP flow's fallback (no live agentTabId to reuse): types the agent into a fresh terminal. */
