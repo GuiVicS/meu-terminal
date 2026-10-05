@@ -41,8 +41,8 @@ const KINDS = {
     other: {
         label: 'Outro',
         live: true,
-        hint: 'Escolha a melhor stack para o pedido. Se tiver servidor de desenvolvimento, use a ferramenta '
-            + 'navigate do MCP meuterminal para abrir o endereço na aba de navegador ao lado.',
+        hint: 'Escolha a melhor stack para o pedido. A aba de prévia ao lado já foi aberta pelo MeuTerminal - '
+            + 'nunca abra outra para isso.',
     },
 };
 
