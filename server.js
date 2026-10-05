@@ -16,6 +16,7 @@ const SessionStore = require('./scripts/session-store');
 const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
 const NotesStore = require('./scripts/notes-store');
+const NotesAttachments = require('./scripts/notes-attachments');
 const BackupStore = require('./scripts/backup-store');
 const BackupRunner = require('./scripts/backup-runner');
 const WebhookStore = require('./scripts/webhook-store');
@@ -28,6 +29,8 @@ const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
 const { FileManager, FileError } = require('./scripts/file-manager');
 const { LiveServers } = require('./scripts/live-server');
 const { Vibe } = require('./scripts/vibe');
+const VibeStore = require('./scripts/vibe-store');
+const { VercelDeploy } = require('./scripts/vercel-deploy');
 const { PushNotifier } = require('./scripts/push');
 const QRCode = require('qrcode');
 const AgentStore = require('./scripts/agents/agent-store');
@@ -781,9 +784,6 @@ browsers.onLive = (id, folder) => setLiveReload(id, folder).catch(e => debugLog(
     }
 })();
 
-// Vibecoding: project form -> agent terminal | live preview (split) + files tab
-const vibe = new Vibe({ sessions, store: sessionStore, live, setLiveReload, home: files.home, log: debugLog });
-
 /** The terminal tab an agent runs in: given id, else the last terminal the user focused. */
 let lastFocusedTerminal = null;
 function agentTerminal(tabId) {
@@ -824,6 +824,35 @@ app.get(BASE_PATH + '/api/ports', async (req, res) => {
 // Every shell gets MEUTERMINAL_MCP_URL / MEUTERMINAL_MCP_TOKEN (see spawnShell).
 const MCP_TOKEN = mcpToken(sessionStore);
 const MCP_URL = `http://127.0.0.1:${PORT}${BASE_PATH}/mcp`;
+
+// Agent UI gateway and vibecoding both need MCP_URL/MCP_TOKEN above, and the MCP handler just
+// below needs vibe - all three have to sit in this exact order.
+const AGENT_MEDIA_DIR = path.join(path.dirname(DB_PATH), 'agent-media');
+const agentGateway = new AgentGateway({
+    store: new AgentStore(DB_PATH),
+    // Images/files produced by agents (or attached to prompts), next to the database (same volume)
+    mediaDir: AGENT_MEDIA_DIR,
+    // Agents never get the popup themselves (their shells are not TTYs anyway)
+    env: { ...process.env, MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN },
+    // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
+    mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
+    log: debugLog,
+});
+const agentLauncher = new AgentLauncher({
+    gateway: agentGateway,
+    sessions,
+    prefs: { get: key => sessionStore.getMeta(key), set: (key, value) => sessionStore.setMeta(key, value) },
+    commandExists,
+    log: debugLog,
+});
+// Vibecoding: project form -> agent UI tab | live preview (split) + files tab, always the agent
+// UI (never a typed shell command).
+const vibe = new Vibe({
+    sessions, store: sessionStore, live, setLiveReload, home: files.home,
+    gateway: agentGateway, commandExists, vibeStore: new VibeStore(sessionStore.db),
+    deployer: new VercelDeploy({ token: process.env.VERCEL_TOKEN }), log: debugLog,
+});
+
 const mcpHandler = createMcpHandler({
     sessions, store: sessionStore, browsers, files: FILES_ENABLED ? files : null,
     listPorts: exclude => listPorts([...exclude, ...live.ports]), normalizeUrl, port: Number(PORT),
@@ -881,24 +910,6 @@ function commandExists(command) {
     });
 }
 
-const AGENT_MEDIA_DIR = path.join(path.dirname(DB_PATH), 'agent-media');
-const agentGateway = new AgentGateway({
-    store: new AgentStore(DB_PATH),
-    // Images/files produced by agents (or attached to prompts), next to the database (same volume)
-    mediaDir: AGENT_MEDIA_DIR,
-    // Agents never get the popup themselves (their shells are not TTYs anyway)
-    env: { ...process.env, MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN },
-    // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
-    mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
-    log: debugLog,
-});
-const agentLauncher = new AgentLauncher({
-    gateway: agentGateway,
-    sessions,
-    prefs: { get: key => sessionStore.getMeta(key), set: (key, value) => sessionStore.setMeta(key, value) },
-    commandExists,
-    log: debugLog,
-});
 let agentRcFile = null; // bash --rcfile for MeuTerminal shells (scripts/agents/shims.js)
 // The agent UI runs code on this server: it needs a login (AUTH_EMAIL/AUTH_PASSWORD or PIN)
 if (AGENT_UI_ENABLED && isAuthRequired) {
@@ -1217,15 +1228,46 @@ app.put(BASE_PATH + '/api/files/favorites', filesRoute(async (req, res) => {
     res.json(list);
 }));
 
-// ---------- Vibecoding (project form -> split terminal | preview + files tab) ----------
+// ---------- Vibecoding (project form -> split agent UI | preview + files tab) ----------
 app.get(BASE_PATH + '/api/vibe/kinds', (req, res) => {
-    res.json({ kinds: vibe.kinds(), defaults: vibe.defaults() });
+    res.json({ kinds: vibe.kinds(), agents: vibe.agentOptions(), defaults: vibe.defaults(), vercelConfigured: vibe.deployer.configured });
+});
+
+// "Abrir projeto anterior": every vibecoding project created so far, newest first
+app.get(BASE_PATH + '/api/vibe/projects', (req, res) => {
+    res.json({ projects: vibe.list() });
+});
+
+// Is this tab part of a vibecoding project, and which agents have a section there already?
+// Backs the agent switcher - specific to vibecoding, not shown for a plain agent conversation.
+app.get(BASE_PATH + '/api/vibe/tab/:tabId', (req, res) => {
+    const project = vibe.projectForTab(req.params.tabId);
+    if (!project) return res.status(404).json({ error: 'Esta aba não faz parte de um projeto vibecoding.' });
+    res.json(project);
 });
 
 // Started from the app menu: a new terminal runs the agent chosen in the form
 app.post(BASE_PATH + '/api/vibe', async (req, res) => {
     try {
         res.status(201).json(await vibe.setup(req.body || {}));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// Reopen a previous project, or switch which agent's UI tab is shown for an open one
+app.post(BASE_PATH + '/api/vibe/:id/open', async (req, res) => {
+    try {
+        res.json(await vibe.openProject(req.params.id, { agent: (req.body || {}).agent || null }));
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// "Publicar": deploys the project to Vercel (production). Can take a few minutes.
+app.post(BASE_PATH + '/api/vibe/:id/publish', async (req, res) => {
+    try {
+        res.json(await vibe.publish(req.params.id));
     } catch (e) {
         res.status(400).json({ error: e.message });
     }
@@ -1346,8 +1388,13 @@ app.get(BASE_PATH + '/api/backup/history', (req, res) => {
 });
 
 // ---------- Notes (the notes tab; every device reads and writes the same notes) ----------
-const NOTES_DIR = process.env.NOTES_DIR || path.join(path.dirname(DB_PATH), 'notes');
+const NOTES_DIR = NotesStore.resolveNotesDir({ dbPath: DB_PATH, home: os.homedir() });
 const notes = new NotesStore(NOTES_DIR);
+const notesFiles = new NotesAttachments(NOTES_DIR);
+// One-time import from the old SQLite-backed notes (pre file-storage): see migrateFromSqlite()'s
+// own comment for why this is safe to call on every boot.
+const notesMigrated = NotesStore.migrateFromSqlite(sessionStore.db, notes);
+if (notesMigrated) debugLog(`Migradas ${notesMigrated} anotações do SQLite antigo para arquivos .md em ${NOTES_DIR}`);
 
 const notesRoute = handler => (req, res) => {
     if (!NOTES_ENABLED) return res.status(404).json({ error: 'Anotações desligadas.' });
@@ -1373,9 +1420,31 @@ app.post(BASE_PATH + '/api/notes', notesRoute((req, res) => {
 
 // Must come before /api/notes/:id so "trash" is not read as an id
 app.delete(BASE_PATH + '/api/notes/trash', notesRoute((req, res) => {
+    const ids = notes.list({ trash: true }).map(n => n.id);
     const removed = notes.emptyTrash();
+    ids.forEach(id => notesFiles.removeAll(id));
     if (removed) notesChanged(null);
     res.json({ success: true, removed });
+}));
+
+// Upload: the request body is the file itself (no multipart), streamed to disk - same convention as /api/files/upload
+app.post(BASE_PATH + '/api/notes/:id/attachments', notesRoute(async (req, res) => {
+    if (!notes.get(req.params.id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
+    try {
+        const { name } = await notesFiles.save(req, req.params.id, String(one(req.query.name) || 'arquivo'));
+        res.status(201).json({ name, url: `${BASE_PATH}/api/notes/${encodeURIComponent(req.params.id)}/attachments/${encodeURIComponent(name)}` });
+    } catch (e) {
+        res.status(e.status || 400).json({ error: e.message });
+    }
+}));
+
+// Raw attachment (an <img src>, a download link...)
+app.get(BASE_PATH + '/api/notes/:id/attachments/:name', notesRoute((req, res) => {
+    const file = notesFiles.resolve(req.params.id, req.params.name);
+    if (!file) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+    res.setHeader('Content-Type', notesFiles.mimeFor(req.params.name));
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+    fs.createReadStream(file).pipe(res);
 }));
 
 app.get(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
@@ -1405,7 +1474,10 @@ app.post(BASE_PATH + '/api/notes/:id/restore', notesRoute((req, res) => {
 // Live note -> trash; note already in the trash -> deleted for good
 app.delete(BASE_PATH + '/api/notes/:id', notesRoute((req, res) => {
     const id = req.params.id;
-    if (!notes.trash(id) && !notes.purge(id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
+    if (!notes.trash(id)) {
+        if (!notes.purge(id)) return res.status(404).json({ error: 'Anotação não encontrada.' });
+        notesFiles.removeAll(id);
+    }
     notesChanged(id);
     res.json({ success: true });
 }));

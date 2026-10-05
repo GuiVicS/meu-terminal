@@ -2,10 +2,17 @@
  * vibe.js
  * "Vibecoding" mode: a project form (name, type, what to build...) that sets up the
  * workspace for building with an AI agent:
- *   - split view: the agent's terminal + a live preview browser (reloads on save)
+ *   - split view: the agent's UI tab (chat, tools, diffs - never a typed shell command) + a
+ *     live preview browser (reloads on save)
  *   - a separate "Arquivos" tab at the project folder
- * Started from the app menu (opens a new terminal running the agent) or by an agent via
- * MCP (the form appears on the user's screen; the agent waits for the answers).
+ * Started from the app menu (opens the agent UI) or by an agent already working in a terminal
+ * via MCP (the form appears on the user's screen; that agent keeps using its own terminal -
+ * it is already mid-conversation there, so it cannot be switched to the UI mid-flight).
+ *
+ * Every project is persisted (vibe-store.js): "Abrir projeto anterior" lists them, and
+ * switching agents on an open project reuses or creates that agent's own UI tab, so each
+ * agent keeps its own conversation for the same project. This agent switcher is specific to
+ * vibecoding - a plain "Nova conversa com agente" tab has no project behind it to switch within.
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -41,8 +48,8 @@ const KINDS = {
     other: {
         label: 'Outro',
         live: true,
-        hint: 'Escolha a melhor stack para o pedido. Se tiver servidor de desenvolvimento, use a ferramenta '
-            + 'navigate do MCP meuterminal para abrir o endereço na aba de navegador ao lado.',
+        hint: 'Escolha a melhor stack para o pedido. A pré-visualização ao lado já está aberta (Live Server da '
+            + 'pasta); se usar um servidor de desenvolvimento, diga ao usuário em qual porta ele está.',
     },
 };
 
@@ -68,20 +75,39 @@ class Vibe {
      * @param {import('./live-server').LiveServers} deps.live
      * @param {Function} deps.setLiveReload - (tabId, folder|null) => Promise
      * @param {string} deps.home
+     * @param {import('./agents/gateway').AgentGateway} deps.gateway - starts agents in UI mode
+     * @param {(command: string) => boolean} deps.commandExists
+     * @param {import('./vibe-store')} deps.vibeStore - persisted projects (previous projects, agent switcher)
+     * @param {import('./vercel-deploy').VercelDeploy} deps.deployer - "Publicar" (Vercel)
      * @param {Function} [deps.log]
      */
-    constructor({ sessions, store, live, setLiveReload, home, log = () => {} }) {
+    constructor({ sessions, store, live, setLiveReload, home, gateway, commandExists, vibeStore, deployer, log = () => {} }) {
         this.sessions = sessions;
         this.store = store;
         this.live = live;
         this.setLiveReload = setLiveReload;
         this.home = home;
+        this.gateway = gateway;
+        this.commandExists = commandExists;
+        this.vibeStore = vibeStore;
+        this.deployer = deployer;
         this.log = log;
         this.pending = new Map(); // requestId -> { resolve, reject, timer }
     }
 
     kinds() {
         return Object.entries(KINDS).map(([id, k]) => ({ id, label: k.label, port: k.port || null }));
+    }
+
+    /** Agents that can run vibecoding's UI mode (excludes terminal-only ones), plus "none". */
+    agentOptions() {
+        return this.gateway.listAgents().filter(a => !a.terminalOnly)
+            .map(a => ({ id: a.id, label: a.label, installed: this.agentInstalled(a.id) }));
+    }
+
+    agentInstalled(agent) {
+        const def = this.gateway.agents[agent];
+        return !!def && this.commandExists(def.requires || def.command);
     }
 
     defaults(partial = {}) {
@@ -104,7 +130,8 @@ class Vibe {
         const raw = oneLine(answers.path) || `~/projetos/${slugify(name)}`;
         if (raw.length > 1024 || raw.includes('\0')) throw new Error('Pasta inválida.');
         const folder = path.resolve(this.home, raw.replace(/^~(?=$|[\\/])/, this.home));
-        const agent = ['claude', 'codex', 'none'].includes(answers.agent) ? answers.agent : 'claude';
+        const validAgent = answers.agent === 'none' || (this.gateway.agents[answers.agent] && !this.gateway.agents[answers.agent].terminalOnly);
+        const agent = validAgent ? answers.agent : 'claude';
         return {
             name, kind, folder, agent,
             description: String(answers.description || '').trim().slice(0, 4000),
@@ -119,9 +146,11 @@ class Vibe {
             + `O que o usuário quer: ${p.description || '(não descrito; pergunte antes de começar)'}. `
             + `Trabalhe na pasta ${p.folder} (você já está nela). ${k.hint} `
             + 'Use as ferramentas do MCP meuterminal para conferir o resultado (screenshot, read_page) e avise o '
-            + 'usuário com notify quando terminar cada etapa. Comece planejando em poucos passos e depois implemente.');
+            + 'usuário com notify quando terminar cada etapa. NÃO abra abas nem a prévia (não use open_url, '
+            + 'live_preview, open_folder nem navigate): o MeuTerminal já abre as abas necessárias sozinho. Comece planejando em poucos passos e depois implemente.');
     }
 
+    /** Only used for the MCP flow's fallback (no live agentTabId to reuse): types the agent into a fresh terminal. */
     agentCommand(p) {
         if (p.agent === 'none') return '';
         const prompt = shellQuote(this.prompt(p));
@@ -133,8 +162,33 @@ class Vibe {
     }
 
     /**
-     * Creates the folder and the tabs. agentTabId = the terminal already running the agent
-     * (MCP flow); without it a new terminal is created and the agent is started there.
+     * Starts (or reuses) `agent`'s UI tab for `project`, remembering it so switching back to this
+     * agent later reuses the same conversation. Throws a user-facing message if the agent isn't
+     * installed. Not used for p.agent === 'none' - callers handle that as a plain terminal.
+     */
+    async startAgentTab(project, agent, promptText, { afterId } = {}) {
+        const existing = project.agents[agent];
+        if (existing?.kind === 'agent' && existing.tabId) {
+            const row = this.store.get(existing.tabId);
+            if (row && row.status === 'open' && row.kind === 'agent') {
+                this.sessions.broadcast({ type: 'open-tab', id: existing.tabId });
+                return { tabId: existing.tabId, reused: true };
+            }
+        }
+        const def = this.gateway.agents[agent];
+        if (!def || def.terminalOnly) throw new Error(`"${agent}" não suporta o modo UI.`);
+        if (!this.agentInstalled(agent)) throw new Error(`${def.label} não está instalado: ${def.install}`);
+        const session = await this.gateway.startSession({ agent, cwd: project.folder, title: project.name });
+        const tab = this.sessions.create({ kind: 'agent', url: session.id, cwd: project.folder, name: `${project.name} · ${def.label}`, afterId });
+        this.vibeStore.setAgentTab(project.id, agent, { tabId: tab.id, kind: 'agent' });
+        if (promptText) this.gateway.prompt(session.id, promptText).catch(e => this.log('Vibecoding: initial prompt failed:', e.message));
+        return { tabId: tab.id, reused: false };
+    }
+
+    /**
+     * Creates the folder and the tabs for a brand-new project, always in the agent UI (never a
+     * typed shell command) - except the MCP flow (agentTabId given): that agent is already
+     * running in its own terminal mid-conversation, so it keeps using it.
      */
     async setup(answers, { agentTabId = null } = {}) {
         const p = this.clean(answers);
@@ -152,36 +206,49 @@ class Vibe {
             }
         }
 
-        // Terminal: the agent's own tab, or a new one that starts the agent
-        let terminalId = agentTabId;
-        const agentRow = agentTabId ? this.store.get(agentTabId) : null;
-        if (!agentRow || agentRow.status !== 'open' || (agentRow.kind && agentRow.kind !== 'terminal')) {
-            terminalId = this.sessions.create({ kind: 'terminal', cwd: p.folder, name: p.name }).id;
+        let project = this.vibeStore.byFolder(p.folder) || this.vibeStore.create(p);
+
+        // Primary tab: the MCP agent's own terminal, a fresh plain terminal ("none"), or the agent UI
+        let primaryId;
+        if (agentTabId) {
+            const agentRow = this.store.get(agentTabId);
+            if (agentRow && agentRow.status === 'open' && (!agentRow.kind || agentRow.kind === 'terminal')) {
+                primaryId = agentTabId;
+            } else {
+                primaryId = this.sessions.create({ kind: 'terminal', cwd: p.folder, name: p.name }).id;
+            }
             const command = this.agentCommand(p);
-            if (command) this.sessions.runCommand(terminalId, command);
+            if (command) this.sessions.runCommand(primaryId, command);
+            if (p.agent !== 'none') this.vibeStore.setAgentTab(project.id, p.agent, { tabId: primaryId, kind: 'terminal' });
+        } else if (p.agent === 'none') {
+            primaryId = this.sessions.create({ kind: 'terminal', cwd: p.folder, name: p.name }).id;
+        } else {
+            ({ tabId: primaryId } = await this.startAgentTab(project, p.agent, this.prompt(p)));
         }
 
         // Preview: live server for static sites (reload on save), waiting page for dev servers
         const k = KINDS[p.kind];
         const base = await this.live.serve(p.folder);
         const previewUrl = k.port ? `${base}?wait=${k.port}` : base;
-        const browser = this.sessions.create({ kind: 'browser', url: previewUrl, name: `${p.name} · prévia`, afterId: terminalId });
+        const browser = this.sessions.create({ kind: 'browser', url: previewUrl, name: `${p.name} · prévia`, afterId: primaryId });
         if (k.live) await this.setLiveReload(browser.id, p.folder);
 
         // Files: separate tab (not split), at the project folder
         const files = this.sessions.create({ kind: 'files', url: 'local', cwd: p.folder, name: `${p.name} · arquivos`, afterId: browser.id });
+        this.vibeStore.setTabs(project.id, { browserTabId: browser.id, filesTabId: files.id });
 
-        // Every open window shows the split: agent terminal | preview
-        this.sessions.broadcast({ type: 'split', a: terminalId, b: browser.id, focus: terminalId });
+        // Every open window shows the split: agent | preview
+        this.sessions.broadcast({ type: 'split', a: primaryId, b: browser.id, focus: primaryId });
         this.log(`Vibecoding: ${p.name} at ${p.folder}`);
         return {
             project: p.name,
+            project_id: project.id,
             kind: p.kind,
             kind_label: k.label,
             path: p.folder,
             description: p.description,
             folder_had_files: existing.length > 0,
-            terminal_tab_id: terminalId,
+            terminal_tab_id: primaryId,
             browser_tab_id: browser.id,
             files_tab_id: files.id,
             preview_url: base,
@@ -189,6 +256,90 @@ class Vibe {
             live_reload: !!k.live,
             instructions: k.hint,
         };
+    }
+
+    // ---------- previous projects + agent switcher (vibecoding only) ----------
+
+    /** For "Abrir projeto anterior": every known project, most recently touched first. */
+    list() {
+        return this.vibeStore.list().map(p => ({
+            id: p.id,
+            name: p.name,
+            folder: p.folder,
+            kind: p.kind,
+            kind_label: (KINDS[p.kind] || {}).label || p.kind,
+            description: p.description,
+            updated_at: p.updatedAt,
+            agents: Object.keys(p.agents),
+            last_agent: this.vibeStore.lastAgent(p.id),
+            deploy_url: p.deployUrl,
+            deployed_at: p.deployedAt,
+        }));
+    }
+
+    /** The vibecoding project a tab belongs to (its agent tab, preview or files tab), or null. */
+    projectForTab(tabId) {
+        const p = this.vibeStore.byTab(tabId);
+        if (!p) return null;
+        return {
+            id: p.id,
+            name: p.name,
+            deploy_url: p.deployUrl,
+            deployed_at: p.deployedAt,
+            can_publish: this.deployer.configured,
+            agents: Object.entries(p.agents)
+                .filter(([, info]) => info.kind === 'agent') // the MCP flow's terminal entry can't be "switched to"
+                .map(([agent, info]) => ({ agent, tab_id: info.tabId, last_used_at: info.lastUsedAt })),
+        };
+    }
+
+    /**
+     * Reopens a known project: recreates the preview/files tabs if they were closed, then opens
+     * (or switches to) `agent`'s UI tab - the same operation whether this is "abrir projeto
+     * anterior" or "trocar agente" on an already-open project.
+     */
+    async openProject(id, { agent = null } = {}) {
+        const project = this.vibeStore.get(id);
+        if (!project) throw new Error('Projeto não encontrado.');
+        const chosenAgent = agent && (agent === 'none' || this.gateway.agents[agent]) ? agent : (this.vibeStore.lastAgent(id) || 'claude');
+        const k = KINDS[project.kind] || KINDS.static;
+
+        let browserTabId = project.browserTabId && this.store.get(project.browserTabId)?.status === 'open' ? project.browserTabId : null;
+        if (!browserTabId) {
+            const base = await this.live.serve(project.folder);
+            const previewUrl = k.port ? `${base}?wait=${k.port}` : base;
+            const browser = this.sessions.create({ kind: 'browser', url: previewUrl, name: `${project.name} · prévia` });
+            if (k.live) await this.setLiveReload(browser.id, project.folder);
+            browserTabId = browser.id;
+        }
+        let filesTabId = project.filesTabId && this.store.get(project.filesTabId)?.status === 'open' ? project.filesTabId : null;
+        if (!filesTabId) {
+            filesTabId = this.sessions.create({ kind: 'files', url: 'local', cwd: project.folder, name: `${project.name} · arquivos`, afterId: browserTabId }).id;
+        }
+        this.vibeStore.setTabs(project.id, { browserTabId, filesTabId });
+
+        let primaryId;
+        if (chosenAgent === 'none') {
+            primaryId = this.sessions.create({ kind: 'terminal', cwd: project.folder, name: project.name, afterId: browserTabId }).id;
+        } else {
+            // Only used if this agent has no tab yet for the project (startAgentTab skips it when reusing one)
+            ({ tabId: primaryId } = await this.startAgentTab(project, chosenAgent, this.prompt(project), { afterId: browserTabId }));
+        }
+
+        this.sessions.broadcast({ type: 'open-tab', id: filesTabId });
+        this.sessions.broadcast({ type: 'split', a: primaryId, b: browserTabId, focus: primaryId });
+        this.log(`Vibecoding: reabriu ${project.name} (${chosenAgent})`);
+        return { project_id: project.id, agent: chosenAgent, terminal_tab_id: primaryId, browser_tab_id: browserTabId, files_tab_id: filesTabId };
+    }
+
+    /** "Publicar": deploys the project to Vercel (production) and remembers the resulting URL. */
+    async publish(id) {
+        const project = this.vibeStore.get(id);
+        if (!project) throw new Error('Projeto não encontrado.');
+        const url = await this.deployer.deploy(project.folder);
+        this.vibeStore.setDeploy(id, url);
+        this.log(`Vibecoding: ${project.name} publicado em ${url}`);
+        return { url };
     }
 
     // ---------- form round-trip (MCP flow) ----------

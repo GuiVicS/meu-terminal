@@ -89,6 +89,7 @@ const ICONS = {
     check: 'check',
     checkCheck: 'check-check',
     squareCheck: 'square-check',
+    table: 'table',
     square: 'square',
     sort: 'arrow-up-down',
     save: 'save',
@@ -120,6 +121,11 @@ const ICONS = {
     code: 'code',
     minus: 'minus',
     heading: 'heading',
+    gripVertical: 'grip-vertical',
+    image: 'image',
+    strikethrough: 'strikethrough',
+    // Vibecoding: switch which agent's UI tab is shown for the open project
+    swap: 'arrow-left-right',
 };
 
 const escapeAttr = value => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');

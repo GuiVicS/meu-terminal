@@ -9,6 +9,7 @@
  */
 import { icon } from './icons.js';
 
+const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
 const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
 
 export function relativeTime(timestamp) {
@@ -46,6 +47,7 @@ export default class NewSessionPage {
         this.el.setAttribute('aria-modal', 'false');
         this.el.setAttribute('aria-labelledby', 'new-session-title');
         this.el.innerHTML = `
+            <button type="button" class="icon-btn ns-settings" aria-label="Configurações" title="Configurações">${icon('settings', 18)}</button>
             <button type="button" class="icon-btn ns-close" aria-label="Fechar">${icon('x', 18)}</button>
             <div class="new-session-inner">
                 <div class="ns-home">
@@ -125,10 +127,13 @@ export default class NewSessionPage {
             if (!tile || tile.hidden) return;
             if (tile.dataset.special === 'agent') this.handlers.onAgent(tile);
             else if (tile.dataset.special === 'vibecode') this.handlers.onVibecode();
+            // Anotações is one shared notebook, not something to name/point at a folder - no form needed.
+            else if (tile.dataset.kind === 'notes') this.handlers.onCreate({ kind: 'notes' });
             else this.showForm(tile.dataset.kind);
         });
         this.el.querySelectorAll('[data-action="back"]').forEach(btn => btn.addEventListener('click', () => this.showGrid()));
         this.el.querySelector('.ns-close').addEventListener('click', () => this.handlers.onCancel());
+        this.el.querySelector('.ns-settings').addEventListener('click', () => { window.location.href = `${basePath()}/admin`; });
         this.el.addEventListener('keydown', e => {
             if (e.key !== 'Escape') return;
             e.preventDefault();
