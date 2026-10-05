@@ -2482,12 +2482,14 @@ audio.fm-media { width: min(520px, 90%); }
    "auto" too, so the list becomes horizontally scrollable and can get stuck scrolled right (every row's
    text then looks cut off by the same amount on the left, which is what the "vazando pro lado" bug was). */
 .nt-list { flex: 1; min-height: 0; margin: 0; padding: 6px; list-style: none; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
-/* .nt-row just clips; .nt-row-fg is what actually slides over the swipe actions underneath */
+/* .nt-row just clips; .nt-row-fg is what actually slides over the swipe actions underneath - its
+   background must stay fully opaque for that to work, so "selected" uses an opaque mix instead of
+   the translucent --accent-soft (which let the solid pin/trash buttons bleed straight through). */
 .nt-row { position: relative; border-radius: var(--radius-md); overflow: hidden; }
 .nt-row-fg { position: relative; z-index: 1; display: flex; align-items: stretch; background: var(--surface); border-radius: var(--radius-md); transition: transform 0.2s ease; }
 .nt-row-fg.dragging { transition: none; }
 .nt-row:hover .nt-row-fg { background: var(--surface-2); }
-.nt-row.selected .nt-row-fg { background: var(--accent-soft); }
+.nt-row.selected .nt-row-fg { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
 .nt-item { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 4px 10px 12px; text-align: left; color: var(--text); }
 .nt-item-title { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nt-item-title em { font-weight: 500; font-style: normal; color: var(--text-3); }
