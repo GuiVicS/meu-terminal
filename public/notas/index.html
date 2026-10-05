@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <!-- viewport-fit=cover: draw under notches/home indicator; safe areas are padded in CSS -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0B0D10">
+    <meta name="color-scheme" content="dark light">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Anotações">
+    <title>Anotações</title>
+    <!-- Relative paths here resolve against BASE_PATH + "/" (this page has no trailing slash in its
+         URL, "/notas"), same as /admin: no "../" needed, and it still works under a BASE_PATH. -->
+    <link rel="preload" href="assets/fonts/Inter-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <script src="config.js"></script>
+    <script>
+        // Same bootstrap as the main app: apply the saved theme before first paint (shared storage key,
+        // so the theme picked in MeuTerminal or /admin carries over here too).
+        (function () {
+            var theme = 'dark';
+            try {
+                var saved = JSON.parse(localStorage.getItem('meuterminal-settings') || '{}').theme;
+                if (saved === 'light' || saved === 'dark') theme = saved;
+                else if (saved === 'system') {
+                    theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+                }
+            } catch (e) { /* storage unavailable: keep dark */ }
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/svg+xml" href="assets/notes-icon.svg">
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/notes-icon-192.png">
+    <link rel="apple-touch-icon" href="assets/notes-apple-touch-icon.png">
+    <link rel="manifest" href="notas/manifest.json">
+</head>
+<body class="page-terminal">
+    <div class="app" id="app">
+        <main class="workspace" id="workspace">
+            <div class="terminal-panels" id="notesHost"></div>
+        </main>
+    </div>
+    <script type="module" src="notas/notas.js"></script>
+</body>
+</html>

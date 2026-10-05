@@ -75,4 +75,49 @@ function generatePWAManifest(siteTitle) {
   console.log("PWA manifest generated!");
 }
 
-module.exports = { generatePWAManifest };
+/**
+ * A second, separate manifest for /notas (see server.js): installs as its own app, distinct from
+ * the main one, pointed at the same server and the same notes - own name/icon/start_url/scope so
+ * the OS treats it as a different installed app, never the same login/data.
+ */
+function generateNotesManifest(siteTitle) {
+  const notesManifest = {
+    name: `Anotações — ${siteTitle}`,
+    short_name: "Anotações",
+    description: "Só as anotações, como um app separado - mesmas anotações do MeuTerminal.",
+    id: `${BASE_PATH}/notas`,
+    lang: "pt-BR",
+    start_url: `${BASE_PATH}/notas`,
+    scope: `${BASE_PATH}/notas`,
+    display: "standalone",
+    display_override: ["standalone", "minimal-ui"],
+    background_color: "#121212",
+    theme_color: "#121212",
+    icons: [
+      {
+        src: `${BASE_PATH}/assets/notes-icon.svg`,
+        type: "image/svg+xml",
+        sizes: "any",
+        purpose: "any maskable"
+      },
+      {
+        src: `${BASE_PATH}/assets/notes-icon-192.png`,
+        type: "image/png",
+        sizes: "192x192",
+        purpose: "any maskable"
+      },
+      {
+        src: `${BASE_PATH}/assets/notes-icon-512.png`,
+        type: "image/png",
+        sizes: "512x512",
+        purpose: "any maskable"
+      }
+    ],
+    orientation: "any"
+  };
+
+  fs.writeFileSync(path.join(ASSETS_DIR, "notes-manifest.json"), JSON.stringify(notesManifest, null, 2));
+  console.log("Notes PWA manifest generated!");
+}
+
+module.exports = { generatePWAManifest, generateNotesManifest };
