@@ -9,7 +9,7 @@ const { WebSocketServer } = require('ws');
 const http = require('http');
 const os = require('os');
 const fs = require('fs');
-const { generatePWAManifest } = require("./scripts/pwa-manifest-generator");
+const { generatePWAManifest, generateNotesManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
 const { TotpVerifier } = require('./scripts/totp');
 const SessionStore = require('./scripts/session-store');
@@ -63,6 +63,7 @@ const SHELL = process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe'
 const HOME_DIR = DEMO_MODE ? '/home/demo' : (process.env.HOME || os.homedir());
 
 generatePWAManifest(SITE_TITLE);
+generateNotesManifest(SITE_TITLE);
 
 function debugLog(...args) {
     if (DEBUG) {
@@ -354,6 +355,7 @@ app.use(BASE_PATH, (req, res, next) => {
         '/styles.css',
         '/manifest.json',
         '/asset-manifest.json',
+        '/notas/manifest.json',
         // The browser fetches the worker script on its own to check for updates; if that
         // hits the login redirect the update fails silently and the PWA stays on old code.
         '/service-worker.js',
@@ -393,6 +395,19 @@ app.get(BASE_PATH + '/guia', (req, res) => {
 // Not in publicPaths, so it goes through the same login as everything else.
 app.get(BASE_PATH + '/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html'));
+});
+
+// Standalone notes-only app: its own page, its own installable PWA (manifest.json below, own icon),
+// same login and the exact same notes as the main app's Anotações tab - just without the rest of
+// MeuTerminal around it. Behind the normal login, like /admin; the page itself checks
+// notesAvailable (via config.js) and explains when it's off, same as every other optional feature.
+// Registered here (before express.static below) because public/notas/ is a real directory - static
+// would otherwise 301-redirect /notas to /notas/ on its own before this ever ran.
+app.get(BASE_PATH + '/notas', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'notas', 'index.html'));
+});
+app.get(BASE_PATH + '/notas/manifest.json', (req, res) => {
+    res.sendFile(path.join(ASSETS_DIR, 'notes-manifest.json'), { headers: { 'Cache-Control': 'no-cache' } });
 });
 
 // Serve config.js for frontend
