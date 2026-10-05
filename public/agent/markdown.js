@@ -177,11 +177,20 @@ export function renderMarkdown(source, _nested) {
         if (line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1])) {
             flush();
             const head = tableRow(line);
+            // ":---" / ":---:" / "---:" in the separator row: left/center/right alignment per column
+            const aligns = tableRow(lines[i + 1]).map(c => {
+                const t = c.trim();
+                if (/^:-+:$/.test(t)) return 'center';
+                if (/^-+:$/.test(t)) return 'right';
+                if (/^:-+$/.test(t)) return 'left';
+                return null;
+            });
+            const alignAttr = idx => (aligns[idx] ? ` style="text-align:${aligns[idx]}"` : '');
             i += 2;
             const rows = [];
             while (i < lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(tableRow(lines[i++]));
-            out.push(`<div class="md-table"><button type="button" class="md-code-btn md-table-copy" data-code-act="copy" aria-label="Copiar tabela" title="Copiar tabela (cola em planilhas)">${icon('copy', 13)}<span>Copiar</span></button><table><thead><tr>${head.map(c => `<th>${inline(esc(c))}</th>`).join('')}</tr></thead>`
-                + `<tbody>${rows.map(r => `<tr>${r.map(c => `<td>${inline(esc(c))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+            out.push(`<div class="md-table"><button type="button" class="md-code-btn md-table-copy" data-code-act="copy" aria-label="Copiar tabela" title="Copiar tabela (cola em planilhas)">${icon('copy', 13)}<span>Copiar</span></button><table><thead><tr>${head.map((c, idx) => `<th${alignAttr(idx)}>${inline(esc(c))}</th>`).join('')}</tr></thead>`
+                + `<tbody>${rows.map(r => `<tr>${r.map((c, idx) => `<td${alignAttr(idx)}>${inline(esc(c))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
             continue;
         }
 

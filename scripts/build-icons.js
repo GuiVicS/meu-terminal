@@ -120,6 +120,7 @@ const ICONS = {
     code: 'code',
     minus: 'minus',
     heading: 'heading',
+    table: 'table',
 };
 
 const escapeAttr = value => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');

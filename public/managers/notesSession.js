@@ -79,7 +79,87 @@ const SLASH_BLOCKS = [
     { key: 'quote', icon: 'quote', label: 'Citação', snippet: '> ' },
     { key: 'code', icon: 'codeXml', label: 'Bloco de código', snippet: '```\n\n```', caretOffset: 4 },
     { key: 'hr', icon: 'minus', label: 'Divisória', snippet: '---\n' },
+    // caretOffset lands right after the first "| ", selectLength selects "Coluna 1" so typing replaces
+    // it immediately - same as tabbing into a cell (see handleTableTab() below).
+    { key: 'table', icon: 'table', label: 'Tabela', snippet: '| Coluna 1 | Coluna 2 | Coluna 3 |\n| --- | --- | --- |\n|  |  |  |\n', caretOffset: 2, selectLength: 8 },
 ];
+
+/**
+ * Offsets (within `line`) of every unescaped "|" - the cell boundaries of one table row/separator.
+ * Only recognizes well-formed rows (leading and trailing "|"); anything else isn't a table line as
+ * far as Tab/Enter-in-a-table is concerned, same as the renderer's own table detection.
+ * @returns {number[]|null}
+ */
+function tableCellPipes(line) {
+    if (!/^\s*\|.*\|\s*$/.test(line)) return null;
+    const pipes = [];
+    for (let j = 0; j < line.length; j++) {
+        if (line[j] === '|' && line[j - 1] !== '\\') pipes.push(j);
+    }
+    return pipes.length >= 2 ? pipes : null;
+}
+
+const isTableSeparatorCells = cells => cells.every(c => /^\s*:?-{1,}:?\s*$/.test(c));
+
+/**
+ * Re-pads every pipe-table in `text` so its columns line up visually in the raw source (and keeps
+ * the ":---"/"---:"/":---:" alignment markers as-is). Everything outside a table is untouched.
+ */
+function formatTablesText(text) {
+    const lines = text.split('\n');
+    const out = [];
+    let i = 0;
+    while (i < lines.length) {
+        const headPipes = tableCellPipes(lines[i]);
+        const sepPipes = headPipes && i + 1 < lines.length ? tableCellPipes(lines[i + 1]) : null;
+        const colCount = headPipes ? headPipes.length - 1 : 0;
+        const sepCells = sepPipes && sepPipes.length - 1 === colCount
+            ? Array.from({ length: colCount }, (_, k) => lines[i + 1].slice(sepPipes[k] + 1, sepPipes[k + 1]))
+            : null;
+        if (!sepCells || !isTableSeparatorCells(sepCells)) {
+            out.push(lines[i]);
+            i++;
+            continue;
+        }
+
+        const cellsOf = (line, pipes) => Array.from({ length: colCount }, (_, k) => line.slice(pipes[k] + 1, pipes[k + 1]).trim());
+        const rows = [cellsOf(lines[i], headPipes)];
+        const aligns = sepCells.map(c => {
+            const t = c.trim();
+            if (/^:-+:$/.test(t)) return 'center';
+            if (/^-+:$/.test(t)) return 'right';
+            if (/^:-+$/.test(t)) return 'left';
+            return null;
+        });
+        i += 2;
+        while (i < lines.length) {
+            const rowPipes = tableCellPipes(lines[i]);
+            if (!rowPipes || rowPipes.length - 1 !== colCount) break;
+            rows.push(cellsOf(lines[i], rowPipes));
+            i++;
+        }
+
+        const widths = Array.from({ length: colCount }, (_, c) => Math.max(3, ...rows.map(r => r[c].length)));
+        const pad = (cell, width, align) => {
+            const gap = width - cell.length;
+            if (align === 'right') return ' '.repeat(gap) + cell;
+            if (align === 'center') { const l = Math.floor(gap / 2); return ' '.repeat(l) + cell + ' '.repeat(gap - l); }
+            return cell + ' '.repeat(gap);
+        };
+        const renderRow = cells => `| ${cells.map((c, k) => pad(c, widths[k], aligns[k])).join(' | ')} |`;
+        const renderSep = () => `| ${widths.map((w, k) => {
+            const dashes = '-'.repeat(w);
+            if (aligns[k] === 'center') return `:${dashes.slice(0, -2)}:`;
+            if (aligns[k] === 'right') return `${dashes.slice(0, -1)}:`;
+            if (aligns[k] === 'left') return `:${dashes.slice(0, -1)}`;
+            return dashes;
+        }).join(' | ')} |`;
+
+        out.push(renderRow(rows[0]), renderSep());
+        for (let r = 1; r < rows.length; r++) out.push(renderRow(rows[r]));
+    }
+    return out.join('\n');
+}
 
 /** Replaces the selection (or inserts a placeholder) wrapped in markers, via execCommand so undo keeps working. */
 function wrapSelection(textarea, before, after) {
@@ -308,6 +388,10 @@ export default class NotesSession {
                     return;
                 }
                 if (e.key === 'Escape') { e.preventDefault(); return this.closeSlash(); }
+            }
+            if (e.target === el.body && this.slashStart === null) {
+                if (e.key === 'Tab' && this.handleTableTab(e.shiftKey)) { e.preventDefault(); return; }
+                if (e.key === 'Enter' && !e.shiftKey && this.handleTableEnter()) { e.preventDefault(); return; }
             }
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
                 e.preventDefault();
@@ -594,8 +678,77 @@ export default class NotesSession {
         body.focus();
         body.setSelectionRange(start, Math.max(caret, start));
         document.execCommand('insertText', false, block.snippet);
-        if (block.caretOffset) body.setSelectionRange(start + block.caretOffset, start + block.caretOffset);
+        if (block.caretOffset) body.setSelectionRange(start + block.caretOffset, start + block.caretOffset + (block.selectLength || 0));
         this.closeSlash();
+        this.edited();
+        this.renderPreview();
+    }
+
+    // ---------- Markdown tables: Tab/Enter navigate cells, "Formatar tabelas" aligns columns ----------
+
+    /** Tab inside a table row selects the next cell (ready to type over); Shift+Tab the previous one. */
+    handleTableTab(reverse) {
+        if (!this.current || this.current.deletedAt) return false;
+        const { body } = this.el;
+        const { selectionStart: caret, value } = body;
+        const lineStart = value.lastIndexOf('\n', caret - 1) + 1;
+        const lineEnd = value.indexOf('\n', caret) === -1 ? value.length : value.indexOf('\n', caret);
+        const pipes = tableCellPipes(value.slice(lineStart, lineEnd));
+        if (!pipes) return false;
+
+        const cellCount = pipes.length - 1;
+        const rel = caret - lineStart;
+        let idx = 0;
+        for (let k = 0; k < cellCount; k++) {
+            if (rel >= pipes[k] && rel <= pipes[k + 1]) { idx = k; break; }
+        }
+        const target = reverse ? idx - 1 : idx + 1;
+        if (target >= cellCount) return this.handleTableEnter(); // Tab past the last cell: start a new row
+        const clamped = Math.max(0, target);
+        body.focus();
+        body.setSelectionRange(lineStart + pipes[clamped] + 1, lineStart + pipes[clamped + 1]);
+        return true;
+    }
+
+    /** Enter on a table row (not the "---" separator) adds a new row with the same number of cells. */
+    handleTableEnter() {
+        if (!this.current || this.current.deletedAt) return false;
+        const { body } = this.el;
+        const { selectionStart: caret, value } = body;
+        const lineStart = value.lastIndexOf('\n', caret - 1) + 1;
+        const lineEnd = value.indexOf('\n', caret) === -1 ? value.length : value.indexOf('\n', caret);
+        const line = value.slice(lineStart, lineEnd);
+        const pipes = tableCellPipes(line);
+        if (!pipes) return false;
+
+        const cellCount = pipes.length - 1;
+        const cells = Array.from({ length: cellCount }, (_, k) => line.slice(pipes[k] + 1, pipes[k + 1]));
+        if (isTableSeparatorCells(cells)) return false; // a plain Enter on "| --- | --- |" is fine as is
+
+        const newRow = `\n|${Array(cellCount).fill(' ').join('|')}|`;
+        body.focus();
+        body.setSelectionRange(lineEnd, lineEnd);
+        document.execCommand('insertText', false, newRow);
+        body.setSelectionRange(lineEnd + 2, lineEnd + 2); // right inside the new row's first cell
+        this.edited();
+        this.renderPreview();
+        return true;
+    }
+
+    /** "Formatar tabelas" (editor menu): re-pads every table's columns so they line up in the raw text. */
+    formatTables() {
+        if (!this.current || this.current.deletedAt) return;
+        const { body } = this.el;
+        const formatted = formatTablesText(body.value);
+        if (formatted === body.value) {
+            toast('Nenhuma tabela para formatar.');
+            return;
+        }
+        const caret = body.selectionStart;
+        body.focus();
+        body.setSelectionRange(0, body.value.length);
+        document.execCommand('insertText', false, formatted);
+        body.setSelectionRange(Math.min(caret, formatted.length), Math.min(caret, formatted.length));
         this.edited();
         this.renderPreview();
     }
@@ -815,9 +968,10 @@ export default class NotesSession {
         const note = this.current;
         if (!note) return;
         const copy = { label: 'Copiar texto (Markdown)', icon: 'copy', run: () => copyText(this.el.body.value).then(ok => toast(ok ? 'Texto copiado.' : 'Não foi possível copiar.')) };
+        const formatTables = { label: 'Formatar tabelas', icon: 'table', run: () => this.formatTables() };
         const items = note.deletedAt
             ? [copy, 'separator', { label: 'Restaurar', icon: 'restore', run: () => this.restore(note.id) }, { label: 'Excluir para sempre', icon: 'trash', danger: true, run: () => this.purge(note.id) }]
-            : [copy, 'separator', { label: 'Mover para a lixeira', icon: 'trash', danger: true, run: () => this.toTrash(note.id) }];
+            : [copy, formatTables, 'separator', { label: 'Mover para a lixeira', icon: 'trash', danger: true, run: () => this.toTrash(note.id) }];
         showMenu(items, { anchor, label: 'Ações da anotação' });
     }
 
