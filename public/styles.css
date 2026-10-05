@@ -2482,9 +2482,12 @@ audio.fm-media { width: min(520px, 90%); }
    "auto" too, so the list becomes horizontally scrollable and can get stuck scrolled right (every row's
    text then looks cut off by the same amount on the left, which is what the "vazando pro lado" bug was). */
 .nt-list { flex: 1; min-height: 0; margin: 0; padding: 6px; list-style: none; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
-.nt-row { position: relative; display: flex; align-items: stretch; border-radius: var(--radius-md); }
-.nt-row:hover { background: var(--surface-2); }
-.nt-row.selected { background: var(--accent-soft); }
+/* .nt-row just clips; .nt-row-fg is what actually slides over the swipe actions underneath */
+.nt-row { position: relative; border-radius: var(--radius-md); overflow: hidden; }
+.nt-row-fg { position: relative; z-index: 1; display: flex; align-items: stretch; background: var(--surface); border-radius: var(--radius-md); transition: transform 0.2s ease; }
+.nt-row-fg.dragging { transition: none; }
+.nt-row:hover .nt-row-fg { background: var(--surface-2); }
+.nt-row.selected .nt-row-fg { background: var(--accent-soft); }
 .nt-item { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 4px 10px 12px; text-align: left; color: var(--text); }
 .nt-item-title { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nt-item-title em { font-weight: 500; font-style: normal; color: var(--text-3); }
@@ -2507,6 +2510,14 @@ audio.fm-media { width: min(520px, 90%); }
 }
 @keyframes nt-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 @media (prefers-reduced-motion: reduce) { .nt-skel { animation: none; } }
+
+/* Swipe-to-reveal (phones only - bindSwipe() in notesSession.js no-ops on a mouse pointer) */
+.nt-swipe-actions { position: absolute; top: 0; bottom: 0; width: 72px; display: flex; }
+.nt-swipe-right { left: 0; justify-content: flex-start; }
+.nt-swipe-left { right: 0; justify-content: flex-end; }
+.nt-swipe-btn { flex: 1; border: 0; display: flex; align-items: center; justify-content: center; color: #fff; }
+.nt-swipe-pin, .nt-swipe-restore { background: var(--accent); }
+.nt-swipe-trash, .nt-swipe-purge { background: var(--danger); }
 
 .nt-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--text-3); text-align: center; }
 .nt-empty[hidden], .nt-editor[hidden], .nt-conflict[hidden] { display: none; }

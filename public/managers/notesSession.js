@@ -301,6 +301,7 @@ export default class NotesSession {
         };
         this.createEditor();
         this.bind();
+        this.bindSwipe();
         this.load();
         this.connect();
     }
@@ -367,6 +368,20 @@ export default class NotesSession {
     bind() {
         const { el } = this;
         this.panel.addEventListener('click', e => {
+            // A row left open by a swipe (see bindSwipe()) eats the next tap: on its own content,
+            // that tap just closes it (how Mail/Reminders behave); on its own revealed button, or
+            // on anything outside that row, the tap still does its normal thing.
+            const openFg = el.listEl.querySelector('.nt-row-fg.swiped');
+            if (openFg) {
+                const sameRow = e.target.closest('.nt-row') === openFg.closest('.nt-row');
+                if (!sameRow || !e.target.closest('[data-swipe-act]')) {
+                    openFg.classList.remove('swiped');
+                    openFg.style.transform = '';
+                    if (sameRow) return;
+                }
+            }
+            const swipeAct = e.target.closest('[data-swipe-act]');
+            if (swipeAct) return this.onSwipeAction(swipeAct.dataset.swipeAct, swipeAct.dataset.id);
             const act = e.target.closest('[data-act]');
             if (act) return this.onAction(act.dataset.act, act);
             const more = e.target.closest('[data-more]');
@@ -481,20 +496,34 @@ export default class NotesSession {
             el.listEl.innerHTML = `<li class="nt-none">${text}</li>`;
             return;
         }
+        // Swipe actions (phones): right = the light/reversible one, left = the destructive one -
+        // same convention as Mail/Reminders/Keep. The "⋮" menu underneath still has both, for mouse
+        // use and as a fallback - swiping is a shortcut, not the only way to reach these actions.
+        const rightAct = this.trashView
+            ? { act: 'restore', icon: 'restore', label: 'Restaurar' }
+            : { act: 'pin', icon: 'pin', label: 'Fixar no topo' };
+        const leftAct = this.trashView
+            ? { act: 'purge', icon: 'trash', label: 'Excluir para sempre' }
+            : { act: 'trash', icon: 'trash', label: 'Mover para a lixeira' };
         el.listEl.innerHTML = this.list.map(n => {
             const selected = n.id === this.current?.id;
             const preview = n.preview.replace(/```[a-z]*|[#*_`>~|\/-]/gi, '').replace(/\s+/g, ' ').trim(); // Markdown marks are noise in a one-line preview
             const progress = n.tasks ? `<span class="nt-item-progress"><span class="nt-item-bar"><span style="width:${Math.round(n.tasks.done / n.tasks.total * 100)}%"></span></span><small>${n.tasks.done}/${n.tasks.total}</small></span>` : '';
+            const right = this.trashView ? rightAct : { ...rightAct, label: n.pinned ? 'Desafixar no topo' : rightAct.label };
             // Show at most 2 tags plus a count, instead of letting a long joined list get cut mid-word by the ellipsis
             const tagList = n.tags.length > 2 ? `${n.tags.slice(0, 2).join(', ')} +${n.tags.length - 2}` : n.tags.join(', ');
             return `<li class="nt-row${selected ? ' selected' : ''}">
-                <button type="button" class="nt-item" role="option" aria-selected="${selected}" data-id="${esc(n.id)}">
-                    <span class="nt-item-title">${n.pinned ? `<span class="nt-pin">${icon('pin', 12)}</span>` : ''}${esc(n.title) || '<em>Sem título</em>'}</span>
-                    <span class="nt-item-preview">${esc(preview) || '&nbsp;'}</span>
-                    ${progress}
-                    <span class="nt-item-meta"${n.tags.length ? ` title="${esc(n.tags.join(', '))}"` : ''}>${esc(formatDate(n.deletedAt || n.updatedAt))}${tagList ? ` · ${esc(tagList)}` : ''}</span>
-                </button>
-                <button type="button" class="icon-btn nt-more" data-more="${esc(n.id)}" aria-label="Ações da anotação">${icon('more', 16)}</button>
+                <span class="nt-swipe-actions nt-swipe-right" aria-hidden="true"><button type="button" tabindex="-1" class="nt-swipe-btn nt-swipe-${right.act}" data-swipe-act="${right.act}" data-id="${esc(n.id)}" aria-label="${esc(right.label)}">${icon(right.icon, 18)}</button></span>
+                <div class="nt-row-fg">
+                    <button type="button" class="nt-item" role="option" aria-selected="${selected}" data-id="${esc(n.id)}">
+                        <span class="nt-item-title">${n.pinned ? `<span class="nt-pin">${icon('pin', 12)}</span>` : ''}${esc(n.title) || '<em>Sem título</em>'}</span>
+                        <span class="nt-item-preview">${esc(preview) || '&nbsp;'}</span>
+                        ${progress}
+                        <span class="nt-item-meta"${n.tags.length ? ` title="${esc(n.tags.join(', '))}"` : ''}>${esc(formatDate(n.deletedAt || n.updatedAt))}${tagList ? ` · ${esc(tagList)}` : ''}</span>
+                    </button>
+                    <button type="button" class="icon-btn nt-more" data-more="${esc(n.id)}" aria-label="Ações da anotação">${icon('more', 16)}</button>
+                </div>
+                <span class="nt-swipe-actions nt-swipe-left" aria-hidden="true"><button type="button" tabindex="-1" class="nt-swipe-btn nt-swipe-${leftAct.act}" data-swipe-act="${leftAct.act}" data-id="${esc(n.id)}" aria-label="${esc(leftAct.label)}">${icon(leftAct.icon, 18)}</button></span>
             </li>`;
         }).join('');
     }
@@ -503,6 +532,80 @@ export default class NotesSession {
         this.trashView = !this.trashView;
         this.tag = '';
         this.load();
+    }
+
+    onSwipeAction(act, id) {
+        if (act === 'pin') {
+            const note = this.list.find(n => n.id === id);
+            if (note) void this.pinRow(note);
+        } else if (act === 'trash') void this.toTrash(id);
+        else if (act === 'restore') void this.restore(id);
+        else if (act === 'purge') void this.purge(id);
+    }
+
+    /**
+     * Swipe-to-reveal on phones, same convention as Mail/Reminders/Keep: swipe right reveals the
+     * light/reversible action, left the destructive one (see renderList()'s rightAct/leftAct).
+     * Delegated on the list (rows are replaced wholesale on every render), touch-only, and gives
+     * up to the browser's own vertical scroll the moment a gesture looks more vertical than
+     * horizontal - it only claims a gesture (and calls preventDefault) once that's decided.
+     */
+    bindSwipe() {
+        if (!coarse()) return;
+        const REVEAL = 72; // px - matches .nt-swipe-actions' width in styles.css
+        const { listEl } = this.el;
+        let fg = null, startX = 0, startY = 0, startTx = 0, axis = null;
+
+        const closeOthers = except => {
+            listEl.querySelectorAll('.nt-row-fg.swiped').forEach(other => {
+                if (other !== except) { other.classList.remove('swiped'); other.style.transform = ''; }
+            });
+        };
+
+        listEl.addEventListener('touchstart', e => {
+            fg = e.target.closest('.nt-row-fg');
+            if (!fg) return;
+            const t = e.touches[0];
+            startX = t.clientX;
+            startY = t.clientY;
+            startTx = fg.classList.contains('swiped') ? Number(fg.dataset.tx || 0) : 0;
+            axis = null;
+        }, { passive: true });
+
+        listEl.addEventListener('touchmove', e => {
+            if (!fg) return;
+            const t = e.touches[0];
+            const dx = t.clientX - startX;
+            const dy = t.clientY - startY;
+            if (!axis) {
+                if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+                axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+                if (axis === 'y') { fg = null; return; } // a vertical drag: let the list scroll, we're done
+                closeOthers(fg);
+                fg.classList.add('dragging');
+            }
+            e.preventDefault(); // claimed as a horizontal swipe now
+            const tx = Math.max(-REVEAL, Math.min(REVEAL, startTx + dx));
+            fg.style.transform = `translateX(${tx}px)`;
+            fg.dataset.tx = tx;
+        }, { passive: false });
+
+        listEl.addEventListener('touchend', () => {
+            if (!fg) return;
+            fg.classList.remove('dragging');
+            const tx = Number(fg.dataset.tx || 0);
+            if (Math.abs(tx) >= REVEAL / 2) {
+                const resting = tx < 0 ? -REVEAL : REVEAL;
+                fg.style.transform = `translateX(${resting}px)`;
+                fg.dataset.tx = resting;
+                fg.classList.add('swiped');
+            } else {
+                fg.style.transform = '';
+                fg.dataset.tx = 0;
+                fg.classList.remove('swiped');
+            }
+            fg = null;
+        });
     }
 
     // ---------- editor ----------
