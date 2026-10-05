@@ -127,6 +127,8 @@ export default class NewSessionPage {
             if (!tile || tile.hidden) return;
             if (tile.dataset.special === 'agent') this.handlers.onAgent(tile);
             else if (tile.dataset.special === 'vibecode') this.handlers.onVibecode();
+            // Anotações is one shared notebook, not something to name/point at a folder - no form needed.
+            else if (tile.dataset.kind === 'notes') this.handlers.onCreate({ kind: 'notes' });
             else this.showForm(tile.dataset.kind);
         });
         this.el.querySelectorAll('[data-action="back"]').forEach(btn => btn.addEventListener('click', () => this.showGrid()));
