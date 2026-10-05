@@ -1391,6 +1391,10 @@ app.get(BASE_PATH + '/api/backup/history', (req, res) => {
 const NOTES_DIR = NotesStore.resolveNotesDir({ dbPath: DB_PATH, home: os.homedir() });
 const notes = new NotesStore(NOTES_DIR);
 const notesFiles = new NotesAttachments(NOTES_DIR);
+// One-time import from the old SQLite-backed notes (pre file-storage): see migrateFromSqlite()'s
+// own comment for why this is safe to call on every boot.
+const notesMigrated = NotesStore.migrateFromSqlite(sessionStore.db, notes);
+if (notesMigrated) debugLog(`Migradas ${notesMigrated} anotações do SQLite antigo para arquivos .md em ${NOTES_DIR}`);
 
 const notesRoute = handler => (req, res) => {
     if (!NOTES_ENABLED) return res.status(404).json({ error: 'Anotações desligadas.' });

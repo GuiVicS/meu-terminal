@@ -303,6 +303,52 @@ class NotesStore {
 }
 
 /**
+ * One-time import of notes from the old SQLite `notes` table (how notes were stored before the
+ * file-based rewrite, further back than resolveNotesDir()'s own old-folder migration below) into
+ * `store`'s .md files, preserving id/tags/pin/trash/timestamps. Call once at startup, right after
+ * creating the store - server.js does. Writes a ".sqlite-migrated" marker in the store's folder so
+ * a later restart never re-imports (which would resurrect anything the user deleted since): the
+ * SQLite table itself is left untouched either way, never dropped, so a bug here can't be the only
+ * way to lose that data.
+ * @param {import('node:sqlite').DatabaseSync} db
+ * @param {NotesStore} store
+ * @returns {number} notes migrated (0 if there was nothing to do, including "already done")
+ */
+function migrateFromSqlite(db, store) {
+    const marker = path.join(store.dir, '.sqlite-migrated');
+    if (fs.existsSync(marker)) return 0;
+    let hasTable;
+    try {
+        hasTable = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'notes'").get();
+    } catch {
+        return 0; // can't even check: safer to do nothing than to guess
+    }
+    if (!hasTable) {
+        fs.writeFileSync(marker, '0');
+        return 0;
+    }
+
+    const rows = db.prepare('SELECT * FROM notes').all();
+    for (const row of rows) {
+        let tags = [];
+        try {
+            const parsed = JSON.parse(row.tags || '[]');
+            if (Array.isArray(parsed)) tags = parsed;
+        } catch { /* malformed tags: import the note anyway, just without them */ }
+        const deletedAt = row.deleted_at || null;
+        const meta = {
+            id: row.id, tags: cleanTags(tags), pinned: !!row.pinned && !deletedAt,
+            createdAt: row.created_at || Date.now(), updatedAt: row.updated_at || Date.now(), deletedAt,
+        };
+        const dir = deletedAt ? store.trashDir : store.dir;
+        const file = uniqueFileName(dir, sanitizeFileName(clean(row.title, MAX_TITLE).trim()));
+        fs.writeFileSync(path.join(dir, file), serialize(meta, clean(row.body, MAX_BODY)));
+    }
+    fs.writeFileSync(marker, String(rows.length));
+    return rows.length;
+}
+
+/**
  * Where the notes live. NOTES_DIR wins when set. Otherwise the home folder (~/.meuterminal/notes):
  * in Docker that is the `meuterminal-home` named volume, which panels keep between deploys. The old
  * default (next to the DB, /app/data/notes) is a bind mount that is lost when it is not mapped
@@ -321,4 +367,5 @@ function resolveNotesDir({ env = process.env.NOTES_DIR, dbPath, home }) {
 }
 
 module.exports = NotesStore;
+module.exports.migrateFromSqlite = migrateFromSqlite;
 module.exports.resolveNotesDir = resolveNotesDir;

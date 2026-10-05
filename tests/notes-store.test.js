@@ -3,7 +3,19 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
 const NotesStore = require('../scripts/notes-store');
+
+/** A DB with the old (pre file-storage) `notes` table, pre-populated with `rows`. */
+function legacyDb(rows) {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE notes (id TEXT PRIMARY KEY, title TEXT, body TEXT, tags TEXT,
+        pinned INTEGER, created_at INTEGER, updated_at INTEGER, deleted_at INTEGER)`);
+    const insert = db.prepare(`INSERT INTO notes (id, title, body, tags, pinned, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const r of rows) insert.run(r.id, r.title, r.body, JSON.stringify(r.tags || []), r.pinned ? 1 : 0, r.createdAt, r.updatedAt, r.deletedAt || null);
+    return db;
+}
 
 const tmpDirs = [];
 const make = () => {
@@ -141,6 +153,46 @@ test('trash, restore, purge and emptyTrash', () => {
     assert.equal(s.trashCount(), 2);
     assert.equal(s.emptyTrash(), 2);
     assert.equal(s.trashCount(), 0);
+    assert.deepEqual(s.list({ trash: true }), []);
+});
+
+test('migrateFromSqlite: imports live and trashed legacy rows as .md files, preserving id/tags/pin', () => {
+    const s = make();
+    const db = legacyDb([
+        { id: 'a1', title: 'Compras', body: 'leite, pão', tags: ['casa'], pinned: true, createdAt: 1, updatedAt: 2 },
+        { id: 'a2', title: 'Velha', body: 'apagada', tags: [], pinned: false, createdAt: 1, updatedAt: 2, deletedAt: 5 },
+    ]);
+    const n = NotesStore.migrateFromSqlite(db, s);
+    assert.equal(n, 2);
+
+    const live = s.get('a1');
+    assert.equal(live.title, 'Compras');
+    assert.equal(live.body, 'leite, pão');
+    assert.deepEqual(live.tags, ['casa']);
+    assert.equal(live.pinned, true);
+
+    assert.ok(s.get('a2').deletedAt, 'the legacy trashed note lands in the trash, not the live list');
+    assert.deepEqual(s.list().map(r => r.id), ['a1']);
+    assert.deepEqual(s.list({ trash: true }).map(r => r.id), ['a2']);
+    assert.ok(fs.existsSync(path.join(s.dir, '.sqlite-migrated')));
+});
+
+test('migrateFromSqlite: does nothing (and writes the marker) when there is no legacy table', () => {
+    const s = make();
+    const db = new DatabaseSync(':memory:'); // never had the old `notes` table
+    assert.equal(NotesStore.migrateFromSqlite(db, s), 0);
+    assert.deepEqual(s.list(), []);
+    assert.ok(fs.existsSync(path.join(s.dir, '.sqlite-migrated')));
+});
+
+test('migrateFromSqlite: runs only once - a second call (e.g. next boot) never re-imports or resurrects a deleted note', () => {
+    const s = make();
+    const db = legacyDb([{ id: 'a1', title: 'Nota', body: 'x', createdAt: 1, updatedAt: 2 }]);
+    assert.equal(NotesStore.migrateFromSqlite(db, s), 1);
+    s.trash('a1');
+    s.purge('a1'); // the user deleted it for good after the first migration
+    assert.equal(NotesStore.migrateFromSqlite(db, s), 0, 'already migrated once: must not run again');
+    assert.deepEqual(s.list(), []);
     assert.deepEqual(s.list({ trash: true }), []);
 });
 
