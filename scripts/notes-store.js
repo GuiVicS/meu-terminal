@@ -303,12 +303,13 @@ class NotesStore {
 }
 
 /**
- * One-time import of notes from the old SQLite `notes` table (how notes were stored before this
- * file-based rewrite) into `store`'s .md files, preserving id/tags/pin/trash/timestamps. Call once
- * at startup, right after creating the store - server.js does. Writes a ".sqlite-migrated" marker
- * in the store's folder so a later restart never re-imports (which would resurrect anything the
- * user deleted since): the SQLite table itself is left untouched either way, never dropped, so a
- * bug here can't be the only way to lose that data.
+ * One-time import of notes from the old SQLite `notes` table (how notes were stored before the
+ * file-based rewrite, further back than resolveNotesDir()'s own old-folder migration below) into
+ * `store`'s .md files, preserving id/tags/pin/trash/timestamps. Call once at startup, right after
+ * creating the store - server.js does. Writes a ".sqlite-migrated" marker in the store's folder so
+ * a later restart never re-imports (which would resurrect anything the user deleted since): the
+ * SQLite table itself is left untouched either way, never dropped, so a bug here can't be the only
+ * way to lose that data.
  * @param {import('node:sqlite').DatabaseSync} db
  * @param {NotesStore} store
  * @returns {number} notes migrated (0 if there was nothing to do, including "already done")
@@ -347,5 +348,24 @@ function migrateFromSqlite(db, store) {
     return rows.length;
 }
 
+/**
+ * Where the notes live. NOTES_DIR wins when set. Otherwise the home folder (~/.meuterminal/notes):
+ * in Docker that is the `meuterminal-home` named volume, which panels keep between deploys. The old
+ * default (next to the DB, /app/data/notes) is a bind mount that is lost when it is not mapped
+ * to a persistent folder. Notes found in the old place are copied over once (only when the new
+ * folder doesn't exist yet, so notes deleted later never come back).
+ */
+function resolveNotesDir({ env = process.env.NOTES_DIR, dbPath, home }) {
+    if (env) return env;
+    const target = path.join(home, '.meuterminal', 'notes');
+    const legacy = path.join(path.dirname(dbPath), 'notes');
+    if (!fs.existsSync(target) && fs.existsSync(legacy)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.cpSync(legacy, target, { recursive: true });
+    }
+    return target;
+}
+
 module.exports = NotesStore;
 module.exports.migrateFromSqlite = migrateFromSqlite;
+module.exports.resolveNotesDir = resolveNotesDir;

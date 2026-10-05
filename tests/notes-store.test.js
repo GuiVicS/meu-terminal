@@ -195,3 +195,22 @@ test('migrateFromSqlite: runs only once - a second call (e.g. next boot) never r
     assert.deepEqual(s.list(), []);
     assert.deepEqual(s.list({ trash: true }), []);
 });
+
+test('resolveNotesDir: NOTES_DIR wins; default is the home folder, copying old notes only once', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mt-notesdir-'));
+    tmpDirs.push(root);
+    const dbPath = path.join(root, 'app-data', 'meuterminal.db');
+    const home = path.join(root, 'home');
+    assert.equal(NotesStore.resolveNotesDir({ env: '/x/notes', dbPath, home }), '/x/notes');
+
+    const legacy = path.join(root, 'app-data', 'notes');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'Velha.md'), 'oi');
+    const dir = NotesStore.resolveNotesDir({ env: '', dbPath, home });
+    assert.equal(dir, path.join(home, '.meuterminal', 'notes'));
+    assert.equal(fs.readFileSync(path.join(dir, 'Velha.md'), 'utf8'), 'oi');
+
+    fs.unlinkSync(path.join(dir, 'Velha.md')); // deleted on purpose: must not come back
+    NotesStore.resolveNotesDir({ env: '', dbPath, home });
+    assert.equal(fs.existsSync(path.join(dir, 'Velha.md')), false);
+});

@@ -304,7 +304,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             },
             onAction: action => {
                 if (action === 'fullscreen') toggleFullscreen();
-                else if (action === 'settings') window.open(joinPath('admin'), '_blank', 'noopener');
+                else if (action === 'settings') window.location.href = joinPath('admin');
                 else if (action === 'vibecode') vibeForm.open();
             },
         },
@@ -360,8 +360,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             { label: dark ? 'Tema claro' : 'Tema escuro', icon: dark ? 'sun' : 'moon',
                 run: () => settings.set('theme', dark ? 'light' : 'dark') },
             'separator',
-            { label: 'Configurações', icon: 'settings', hint: `${c}+,`, run: () => window.open(joinPath('admin'), '_blank', 'noopener') },
-            { label: 'Configurações (clássico)', icon: 'settings', run: () => settingsDialog.open() },
+            { label: 'Configurações', icon: 'settings', hint: `${c}+,`, run: () => { window.location.href = joinPath('admin'); } },
             { label: 'Guia do app', icon: 'info', run: () => window.open(joinPath('guia'), '_blank', 'noopener') },
         ];
         if (!window.matchMedia('(pointer: coarse)').matches) {

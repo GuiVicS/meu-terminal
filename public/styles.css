@@ -485,17 +485,20 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 .search-bar .icon-btn { width: 32px; height: 32px; border-radius: 50%; }
 
 /* ---------- new session page ---------- */
+/* Fixed to the real viewport (not just .workspace): must sit above the topbar/tab strip too,
+   with no tabs visible behind it, same as a full-screen page. */
 .new-session {
-    position: absolute;
+    position: fixed;
     inset: 0;
-    z-index: 4;
+    z-index: 20;
     overflow-y: auto;
     background: var(--bg);
-    padding: clamp(24px, 8vh, 88px) 20px 32px;
+    padding: calc(clamp(24px, 8vh, 88px) + var(--safe-top)) calc(20px + var(--safe-right)) calc(32px + var(--safe-bottom)) calc(20px + var(--safe-left));
     animation: fade-in var(--dur) var(--ease);
 }
 .new-session-inner { width: 100%; max-width: 480px; margin: 0 auto; }
-.ns-close { position: fixed; top: 16px; right: 16px; z-index: 5; }
+.ns-close { position: fixed; top: calc(16px + var(--safe-top)); right: calc(16px + var(--safe-right)); z-index: 21; }
+.ns-settings { position: fixed; top: calc(16px + var(--safe-top)); right: calc(16px + 44px + var(--safe-right)); z-index: 21; }
 .new-session-mark {
     width: 48px;
     height: 48px;
@@ -1768,6 +1771,20 @@ audio.fm-media { width: min(520px, 90%); }
 .vibe-check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .vibe-from-agent { font-size: 13px; padding: 10px 12px; border-radius: var(--radius-md); background: var(--accent-soft); color: var(--text); }
 
+/* "Abrir projeto anterior" */
+.vibe-previous-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.vibe-prev-open {
+    width: 100%; display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px;
+    border: 1.5px solid var(--border); border-radius: var(--radius-md); background: var(--surface);
+}
+.vibe-prev-open:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.vibe-prev-open:disabled { opacity: 0.6; cursor: default; }
+.vibe-prev-name { font-weight: 600; font-size: 14px; color: var(--text); }
+.vibe-prev-meta { font-size: 12.5px; color: var(--text-2); }
+.vibe-prev-path { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vibe-divider { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: 12.5px; }
+.vibe-divider::before, .vibe-divider::after { content: ''; flex: 1; height: 1px; background: var(--divider); }
+
 .vibe-form .vibe-kind input[type="radio"] { width: 18px; height: 18px; min-width: 18px; padding: 0; flex: none; border: 0; box-shadow: none; }
 .vibe-form .vibe-check input[type="checkbox"] { width: 18px; height: 18px; flex: none; }
 
@@ -1794,6 +1811,8 @@ audio.fm-media { width: min(520px, 90%); }
 .ag-status[data-tone="busy"] { background: var(--accent-soft); color: var(--accent); }
 .ag-status[data-tone="warn"] { background: color-mix(in srgb, var(--c-orange) 18%, transparent); color: var(--c-orange); }
 .ag-status[data-tone="bad"] { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+.ag-publish { flex-shrink: 0; gap: 6px; white-space: nowrap; }
+.ag-publish.loading .icon { animation: ag-spin 0.9s linear infinite; }
 .ag-head .icon-btn { width: 40px; height: 40px; flex-shrink: 0; position: relative; }
 .ag-head .icon-btn.has-activity::after {
     content: ""; position: absolute; top: 9px; right: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
@@ -2021,6 +2040,8 @@ audio.fm-media { width: min(520px, 90%); }
 @media (max-width: 719px), (pointer: coarse) {
     .ag-head { padding-left: 10px; gap: 0; }
     .ag-head [data-act="files"] { display: none; }
+    .ag-publish-label { display: none; }
+    .ag-publish { width: 36px; padding: 0; justify-content: center; }
     .ag-status { padding: 3px 8px; }
     .ag-log { padding: 12px 12px 24px; }
     .ag-user { max-width: 92%; }
@@ -2294,9 +2315,6 @@ audio.fm-media { width: min(520px, 90%); }
 .md hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin: 18px 0; }
 .md-task { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-right: 4px; border-radius: 5px; border: 1.5px solid var(--border); font-size: 11px; vertical-align: -3px; color: transparent; cursor: default; }
 .md-task.done { background: var(--c-green); border-color: var(--c-green); color: var(--bg, #000); }
-.nt-preview .md-task { cursor: pointer; }
-.nt-preview .md-task:hover { border-color: var(--accent); }
-.nt-preview .md-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* streaming caret */
 .ag-assistant.streaming > :last-child:not(.md-code):not(.md-table)::after,
@@ -2429,6 +2447,10 @@ audio.fm-media { width: min(520px, 90%); }
     width: 320px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0;
     background: var(--surface); border-right: 1px solid var(--border);
 }
+/* Narrow desktop/tablet windows (720-980px): the fixed 320px list leaves too little room for the editor */
+@media (min-width: 720px) and (max-width: 980px) {
+    .nt-side { width: 260px; }
+}
 .nt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 
 .nt-toolbar { flex-shrink: 0; display: flex; align-items: center; gap: 2px; padding: 8px; border-bottom: 1px solid var(--border); }
@@ -2456,7 +2478,10 @@ audio.fm-media { width: min(520px, 90%); }
 }
 .nt-trashbar span { flex: 1; min-width: 0; }
 
-.nt-list { flex: 1; min-height: 0; margin: 0; padding: 6px; list-style: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+/* overflow-x: hidden is load-bearing - with only overflow-y set, the CSS spec forces the other axis to
+   "auto" too, so the list becomes horizontally scrollable and can get stuck scrolled right (every row's
+   text then looks cut off by the same amount on the left, which is what the "vazando pro lado" bug was). */
+.nt-list { flex: 1; min-height: 0; margin: 0; padding: 6px; list-style: none; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .nt-row { position: relative; display: flex; align-items: stretch; border-radius: var(--radius-md); }
 .nt-row:hover { background: var(--surface-2); }
 .nt-row.selected { background: var(--accent-soft); }
@@ -2473,6 +2498,15 @@ audio.fm-media { width: min(520px, 90%); }
 .nt-more { align-self: center; opacity: 0; flex-shrink: 0; }
 .nt-row:hover .nt-more, .nt-more:focus-visible, .nt-row.selected .nt-more { opacity: 1; }
 .nt-none { padding: 32px 16px; text-align: center; color: var(--text-3); font-size: 14px; list-style: none; }
+/* Shown only while the first GET /api/notes of the session is in flight, so a slow network doesn't
+   flash "Você ainda não tem anotações" before any response has arrived. */
+.nt-skel {
+    height: 64px; margin: 4px 6px; border-radius: var(--radius-md); list-style: none;
+    background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
+    background-size: 400% 100%; animation: nt-shimmer 1.4s ease infinite;
+}
+@keyframes nt-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .nt-skel { animation: none; } }
 
 .nt-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--text-3); text-align: center; }
 .nt-empty[hidden], .nt-editor[hidden], .nt-conflict[hidden] { display: none; }
@@ -2491,20 +2525,70 @@ audio.fm-media { width: min(520px, 90%); }
     flex-shrink: 0; width: 100%; padding: 16px 20px 6px; border: 0; background: transparent; color: var(--text);
     font-size: 22px; font-weight: 700; outline: none;
 }
-.nt-title::placeholder, .nt-body::placeholder, .nt-tags-input::placeholder { color: var(--text-3); font-weight: 400; }
+.nt-title::placeholder, .nt-tags-input::placeholder { color: var(--text-3); font-weight: 400; }
 .nt-tagsline { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 20px 10px; color: var(--text-3); border-bottom: 1px solid var(--divider); }
 .nt-tags-input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text-2); font-size: 13.5px; outline: none; padding: 4px 0; }
+.nt-title:read-only { opacity: 0.75; }
 
-/* Write + preview side by side, both live (no edit/preview toggle) */
-.nt-write { flex: 1; min-height: 0; min-width: 0; display: flex; }
-.nt-write .nt-body { flex: 1 1 50%; min-width: 0; border-right: 1px solid var(--divider); }
-.nt-write .nt-preview { flex: 1 1 50%; min-width: 0; }
-.nt-body {
-    resize: none; border: 0; background: transparent; color: var(--text);
-    padding: 14px 20px 24px; font: 15px/1.65 var(--font-mono); outline: none; tab-size: 4;
+/* Single Tiptap block: you write where you read, Notion-style (no edit/preview split). */
+.nt-write { flex: 1; min-height: 0; min-width: 0; display: flex; overflow-y: auto; overflow-x: hidden; }
+.nt-doc-wrap { position: relative; flex: 1; min-width: 0; max-width: 780px; margin: 0 auto; padding: 14px 20px 24px 42px; }
+.nt-doc-wrap.readonly { opacity: 0.75; }
+.nt-doc .ProseMirror { outline: none; color: var(--text); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; min-height: 200px; }
+.nt-doc .ProseMirror > * + * { margin-top: 10px; }
+.nt-doc .ProseMirror h1, .nt-doc .ProseMirror h2, .nt-doc .ProseMirror h3 { font-weight: 650; letter-spacing: -0.005em; line-height: 1.35; }
+.nt-doc .ProseMirror h1 { font-size: 22px; }
+.nt-doc .ProseMirror h2 { font-size: 19px; }
+.nt-doc .ProseMirror h3 { font-size: 16.5px; color: var(--text-2); }
+.nt-doc .ProseMirror p { margin: 0; }
+.nt-doc .ProseMirror strong { font-weight: 650; }
+.nt-doc .ProseMirror ul, .nt-doc .ProseMirror ol { margin: 0; padding-left: 24px; }
+.nt-doc .ProseMirror li { margin: 4px 0; padding-left: 2px; }
+.nt-doc .ProseMirror li::marker { color: var(--text-3); }
+.nt-doc .ProseMirror ol > li::marker { font-variant-numeric: tabular-nums; font-weight: 600; }
+.nt-doc .ProseMirror a { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 3px; }
+.nt-doc .ProseMirror :not(pre) > code {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px;
+    padding: 1px 5px; font: 13px/1.4 var(--font-mono); color: var(--text);
 }
-.nt-preview { overflow-y: auto; padding: 14px 20px 24px; font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
-.nt-title:read-only, .nt-body:read-only { opacity: 0.75; }
+.nt-doc .ProseMirror pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; overflow-x: auto; }
+.nt-doc .ProseMirror pre code { background: none; border: 0; padding: 0; font: 13px/1.55 var(--font-mono); }
+.nt-doc .ProseMirror blockquote { margin: 0; padding: 4px 14px; border-left: 3px solid color-mix(in srgb, var(--accent) 50%, var(--border)); color: var(--text-2); }
+.nt-doc .ProseMirror hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin: 6px 0; }
+.nt-doc .ProseMirror table { border-collapse: collapse; width: 100%; table-layout: fixed; margin: 0; overflow: hidden; }
+.nt-doc .ProseMirror th, .nt-doc .ProseMirror td { border: 1px solid var(--border); padding: 7px 10px; vertical-align: top; text-align: left; position: relative; min-width: 1em; }
+.nt-doc .ProseMirror th { background: var(--surface-2); font-weight: 650; }
+.nt-doc .ProseMirror td > p, .nt-doc .ProseMirror th > p { margin: 0; }
+.nt-doc .ProseMirror .selectedCell::after { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--accent) 18%, transparent); pointer-events: none; }
+.nt-doc .ProseMirror .tableWrapper {
+    overflow-x: auto;
+    /* fade on each edge while there is more to scroll; disappears on its own once fully scrolled (background-attachment:local) */
+    background:
+        linear-gradient(to right, var(--bg) 0%, transparent 24px) left no-repeat local,
+        linear-gradient(to left, var(--bg) 0%, transparent 24px) right no-repeat local;
+    background-size: 24px 100%, 24px 100%;
+}
+.nt-doc .ProseMirror img { max-width: 100%; border-radius: var(--radius-md); display: block; }
+.nt-doc .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 2px; }
+.nt-doc .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
+.nt-doc .ProseMirror ul[data-type="taskList"] li > label { margin-top: 3px; flex-shrink: 0; }
+.nt-doc .ProseMirror ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.nt-doc .ProseMirror ul[data-type="taskList"] input[type="checkbox"] { width: 16px; height: 16px; border-radius: 5px; accent-color: var(--accent); cursor: pointer; }
+.nt-doc .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--text-3);
+}
+/* A block being dragged, and the block the drag is hovering over */
+.nt-doc .ProseMirror .nt-drag-source { opacity: 0.4; }
+.nt-doc .ProseMirror .nt-drag-target { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+/* Grip in the left gutter, tracking whichever line the mouse is over (top/height set in JS). */
+.nt-draghandle {
+    position: absolute; left: 4px; width: 26px; display: flex; align-items: center; justify-content: center;
+    cursor: grab; border-radius: 6px; color: var(--text-3); background: transparent; border: 0;
+}
+.nt-draghandle:hover { background: var(--surface-2); color: var(--text-2); }
+.nt-draghandle:active { cursor: grabbing; }
+.nt-draghandle[hidden] { display: none; }
 
 /* Floating formatting bar: a card docked under the write area (desktop), or pinned above the
    on-screen keyboard on mobile (positioned in JS from visualViewport). */
@@ -2513,14 +2597,33 @@ audio.fm-media { width: min(520px, 90%); }
     background: var(--surface); border: 1.5px solid var(--border-strong); box-shadow: var(--shadow);
 }
 .nt-fbar[hidden] { display: none; }
-.nt-fbar-row { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.nt-fbar-row {
+    display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none;
+    /* fade on each edge while there is more to scroll; disappears on its own once fully scrolled */
+    background:
+        linear-gradient(to right, var(--surface) 0%, transparent 20px) left no-repeat local,
+        linear-gradient(to left, var(--surface) 0%, transparent 20px) right no-repeat local;
+    background-size: 20px 100%, 20px 100%;
+}
 .nt-fbar-row::-webkit-scrollbar { display: none; }
 .nt-fbtn { flex-shrink: 0; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--text-2); }
 .nt-fbtn:hover, .nt-fbtn:focus-visible { background: var(--surface-2); color: var(--text); }
-.nt-fbtn:active { background: var(--accent-soft); color: var(--accent); }
+.nt-fbtn:active, .nt-fbtn.on { background: var(--accent-soft); color: var(--accent); }
+.nt-fbtn-text { width: 38px; font-size: 13.5px; font-weight: 700; letter-spacing: -0.02em; }
+.nt-fsep { margin-left: 6px; position: relative; }
+.nt-fsep::before { content: ''; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 1px; background: var(--border); }
+.nt-fs { display: none; }
+/* Mobile only: the "+" that opens the same "/" insert menu, replacing the headings/quote/table
+   buttons that get hidden there (.nt-fbtn-extra) to keep the always-visible row short. */
+.nt-fbtn-plus { display: none; }
+.nt-tbar { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.nt-tbar[hidden] { display: none; }
+.nt-tbtn { flex-shrink: 0; height: 32px; padding: 0 10px; border-radius: 8px; font-size: 12.5px; white-space: nowrap; color: var(--text-2); background: var(--surface-2); }
+.nt-tbtn:hover, .nt-tbtn:focus-visible { color: var(--text); background: var(--accent-soft); }
+.nt-tbtn.danger:hover, .nt-tbtn.danger:focus-visible { color: var(--danger, #e5484d); background: color-mix(in srgb, var(--danger, #e5484d) 14%, transparent); }
 
 /* "/" command palette, shown above the toolbar row inside the same floating card */
-.nt-slash { list-style: none; margin: 0 0 6px; padding: 4px; max-height: 240px; overflow-y: auto; border-bottom: 1px solid var(--divider); }
+.nt-slash { list-style: none; margin: 0 0 6px; padding: 4px; max-height: 240px; overflow-y: auto; overflow-x: hidden; border-bottom: 1px solid var(--divider); }
 .nt-slash[hidden] { display: none; }
 .nt-slash li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; font-size: 13.5px; color: var(--text); cursor: pointer; }
 .nt-slash li .icon { color: var(--text-3); flex-shrink: 0; }
@@ -2542,25 +2645,52 @@ audio.fm-media { width: min(520px, 90%); }
     .nt[data-pane="editor"] .nt-side, .nt[data-pane="editor"] .nt-fab { display: none; }
     .nt[data-pane="list"] .nt-fab { display: grid; }
     .nt-back { display: inline-grid; }
-    .nt-more { opacity: 1; width: 40px; height: 40px; }
+    .nt-more { opacity: 1; width: 44px; height: 44px; }
     .nt-toolbar [data-act="new"] { display: none; }
     .nt-search input { font-size: 16px; }
     .nt-title { font-size: 20px; padding: 14px 16px 6px; }
     .nt-tagsline { padding: 0 16px 10px; }
     .nt-tags-input { font-size: 16px; }
-    .nt-write { flex-direction: column; }
-    .nt-write .nt-body { border-right: 0; border-bottom: 1px solid var(--divider); flex: 1 1 45%; }
-    .nt-write .nt-preview { flex: 1 1 55%; }
-    .nt-body, .nt-preview { padding: 12px 16px 16px; }
-    .nt-body { font-size: 16px; }
-    .nt-fbar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; border-width: 1.5px 0 0; border-radius: var(--radius-md) var(--radius-md) 0 0; z-index: 30; }
+    .nt-doc .ProseMirror { font-size: 16px; }
+    .nt-fbar {
+        position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+        border-width: 1.5px 0 0; border-radius: var(--radius-md) var(--radius-md) 0 0; z-index: 30;
+    }
+    .nt-fbtn { width: 44px; height: 44px; }
+    .nt-fbtn-text { width: 46px; }
+    .nt-fsep::before { top: 11px; bottom: 11px; }
+    .nt-tbar { margin-top: 4px; padding-top: 4px; }
+    .nt-tbtn { height: 44px; padding: 0 14px; font-size: 13.5px; }
+    .nt-slash { max-height: 34dvh; }
+    /* the bar floats over the note: keep the last lines reachable above it */
+    .nt-write { padding-bottom: var(--nt-fbar-h, 0px); scroll-padding-bottom: var(--nt-fbar-h, 0px); }
+    .nt-doc-wrap { padding: 10px 16px 24px; }
+    .nt-ehead { padding: 4px 6px; }
+    .nt-fs { display: inline-grid; }
+    .nt-fbtn-extra { display: none; }
+    .nt-fbtn-plus { display: grid; }
+    /* full screen: the note covers the whole screen (tabs and menus included) */
+    .nt.nt-full .nt-main { position: fixed; inset: 0; z-index: 80; height: 100dvh; padding-top: env(safe-area-inset-top); }
+    /* the formatting bar reserves its own safe-area-bottom (.nt-fbar above) while it's open; only add it
+       here when the bar is hidden (no note focused), so the inset isn't counted twice */
+    .nt.nt-full:not(.nt-bar-open) .nt-main { padding-bottom: env(safe-area-inset-bottom); }
+    .nt.nt-full .nt-tagsline { display: none; }
+    .nt.nt-full .nt-title { font-size: 18px; padding: 8px 16px 4px; }
+    /* conflict banner: stack full-width, each button a proper touch target, instead of wrapping mid-sentence */
+    .nt-conflict { flex-direction: column; align-items: stretch; }
+    .nt-conflict .btn-sm { min-height: 44px; width: 100%; justify-content: center; }
+    /* tables scroll sideways instead of squeezing the columns */
+    .nt-doc .ProseMirror table { table-layout: auto; width: max-content; min-width: 100%; }
+    .nt-doc .ProseMirror th, .nt-doc .ProseMirror td { min-width: 110px; }
 }
 
 /* =========================================================
    /admin page (public/admin/*)
    ========================================================= */
 .page-admin { background: var(--bg); }
-.admin { min-height: 100vh; display: flex; flex-direction: column; }
+/* height (not min-height): .admin-main below must be capped to the viewport to scroll its own
+   content - body has overflow:hidden, so letting .admin grow taller than the screen just clips it. */
+.admin { height: 100dvh; display: flex; flex-direction: column; }
 .admin-topbar {
     flex-shrink: 0; height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 16px;
     border-bottom: 1px solid var(--border); background: var(--surface);
