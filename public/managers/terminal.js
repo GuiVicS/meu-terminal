@@ -47,6 +47,16 @@ async function api(method, path, body) {
     return response.json();
 }
 
+/** Reads and removes "?tab=<id>" from the address (so a reload doesn't jump there again). */
+function takeTabParam() {
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get('tab');
+    if (!id) return null;
+    url.searchParams.delete('tab');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    return id;
+}
+
 export default class TerminalManager {
     /**
      * @param {object} deps
@@ -878,6 +888,12 @@ export default class TerminalManager {
         ];
     }
 
+    /** Switches to a tab that may have just been created elsewhere (push notification links). */
+    async showTab(id) {
+        if (!this.sessions.has(id)) await this.reconcile();
+        if (this.sessions.has(id)) this.activate(id, { focus: !isCoarse() });
+    }
+
     // ---------- messages from agents (MCP) ----------
 
     /**
@@ -983,7 +999,9 @@ export default class TerminalManager {
         }
         rows.forEach(row => this.addSession(row));
         this.normalizeOrder();
-        const saved = this.storage.get('activeSession');
+        // Opened from a push (?tab=<id>, e.g. an agent asking for permission): that tab first
+        const wanted = takeTabParam();
+        const saved = this.sessions.has(wanted) ? wanted : this.storage.get('activeSession');
         this.activate(this.sessions.has(saved) ? saved : this.order[0], { focus: !isCoarse() });
     }
 }

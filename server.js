@@ -1323,10 +1323,13 @@ const notifier = new PushNotifier({
 agentGateway.on('event', (event) => {
     if (event.type !== 'permission.request') return;
     const session = agentGateway.get(event.sessionId);
+    // Tapping the push opens this conversation's tab, not just the app (public/index.js reads ?tab=)
+    const tab = sessionStore.listOpen().find(r => r.kind === 'agent' && r.url === event.sessionId);
     notifier.send({
         title: `${session ? session.agentLabel : 'Agente'} aguardando permissão`,
         body: event.data.title || 'Aprovar ação',
         tag: `agent-permission-${event.sessionId}`,
+        url: tab ? `${BASE_PATH}/?tab=${encodeURIComponent(tab.id)}` : `${BASE_PATH}/`,
     }).catch(e => debugLog('Push (agent permission):', e.message));
 });
 

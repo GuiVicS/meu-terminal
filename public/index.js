@@ -395,6 +395,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         showMenu(items, { anchor: menuBtn, label: 'Mais ações' });
     });
 
+    // A push tapped while the app was already open (service-worker.js): go to the tab it points at
+    navigator.serviceWorker?.addEventListener('message', e => {
+        if (e.data?.type !== 'notification-click') return;
+        const id = new URL(e.data.url, window.location.href).searchParams.get('tab');
+        if (id) workspace.showTab(id);
+    });
+
     // ---------- service worker (silent updates) ----------
     const serviceWorkerManager = new ServiceWorkerManager();
     serviceWorkerManager.initialize(() => {});
