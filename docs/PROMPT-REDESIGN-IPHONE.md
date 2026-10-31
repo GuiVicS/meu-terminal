@@ -62,7 +62,7 @@ Há variantes claro/escuro, um `@supports` para `backdrop-filter` e um fallback 
 | Chat do agente | Caixa de mensagem **flutuante** (cartão de vidro, raio 32), conversa passa por baixo com fade. Texto em cima; embaixo ＋ (anexar), pílula de resumo "Modelo · Modo" e enviar. Os seletores do agente foram para uma **folha deslizante** ("Modelo e configurações") aberta pela pílula. | `composer.js` (`setupIphone`, `settingsSummary`, `openSheet`, `dispose`), CSS |
 | Navegador | Estilo **Safari compacto do iOS 26**: barra flutuante embaixo com voltar, pílula do endereço (mostra só o domínio; editar mostra o endereço completo e ocupa a barra) com recarregar dentro, e "•••" com Avançar, Teclado, Portas abertas e Tamanho e qualidade. Página ocupa a aba inteira. | `browserSession.js` (`.browser-pill`, `.browser-host`, `openMoreMenu`), CSS |
 | Menus (`.menu`) | Popovers de vidro com cantos 22 px e itens de 44 px. | CSS |
-| Gesto de borda | Arrastar da borda esquerda (24 px) para a direita abre a página de apps; com ela aberta, arrastar para a esquerda fecha. Um círculo de vidro com o ícone de grade acompanha o dedo e fica roxo quando soltar vai agir (70 px). Arrasto vertical, toque fora da borda e folhas/menus abertos não disparam. | `public/ui/edgeSwipe.js`, `index.js` (`bindEdgeSwipe`), CSS `.edge-swipe-hint` |
+| Gesto de borda | Arrastar da borda esquerda (24 px) para a direita abre a página de apps (no 4.9 isso vira "voltar", abrindo apps só na raiz); com ela aberta, arrastar para a esquerda fecha. Um círculo de vidro com o ícone de grade acompanha o dedo e fica roxo quando soltar vai agir (70 px). Arrasto vertical, toque fora da borda e folhas/menus abertos não disparam. | `public/ui/edgeSwipe.js`, `index.js` (`bindEdgeSwipe`), CSS `.edge-swipe-hint` |
 | Página inicial de apps ("Nova sessão") | Título grande à esquerda; ícones de app como na tela de início (68 px, gradiente da cor do app, glifo branco, sem cartão em volta, rótulo embaixo); "Sessões recentes" como lista agrupada com ícone do tipo; formulário com controle segmentado, campos de 50 px e botões em cápsula; configurações e fechar como círculos de vidro; fundo com leve gradiente. | `ui/newSession.js` (`RECENT_ICONS`, `.recent-icon`), CSS |
 
 No desktop o navegador mantém a ordem antiga graças a `.browser-pill { display: contents }` e
@@ -192,7 +192,50 @@ preferências em `managers/settings.js`). "Clássico" remove `data-iphone`. Opci
 iPhone em outros celulares" para quem tiver Android (adiciona `data-iphone` também com
 `(pointer: coarse)` e largura < 720).
 
-### 4.8 Pendência de decisão (pergunte ao dono antes)
+### 4.8 Simplificar os fluxos (menos toques, mesmas funções)
+
+A análise completa está em **`docs/ANALISE-UX.md`** (jornadas com contagem de toques, 14
+redundâncias com evidência e o layout proposto). Leia antes de mexer. Resumo do que implementar,
+nesta ordem, **só no iPhone em retrato** (o desktop mantém o ⋮ e os atalhos como estão):
+
+1. **Push abre a conversa** (R14): o push de permissão (`agentGateway.on('event')` em `server.js`)
+   hoje não manda `url`, então abre a raiz. Mande `url: /?tab=<id da aba do agente>` e, no
+   `index.js`, ative essa aba ao abrir (o service worker já usa `notification.data.url`).
+2. **⋮ contextual** (R1, R3, R4, R5, R6, R11): no iPhone o ⋮ mostra primeiro as ações da aba atual
+   (as do menu da aba, as do cabeçalho do chat do agente, Buscar no terminal), depois Configurações,
+   Guia e Sair. Saem do ⋮ no iPhone: os 7 itens de criar (estão na página de apps), Reabrir fechada
+   (está no histórico), Comandos rápidos e Copiados (estão na barra de atalhos), Modo foco (o iPhone
+   já é sempre tela cheia) e Tema (vai para Configurações). O cabeçalho do chat do agente fica só com
+   título e status. Tabela por tipo de aba na seção 5 da análise.
+3. **Criar direto** (R9, R10): tocar em Terminal, Navegador, Arquivos ou Agente na página de apps cria
+   na hora, com os padrões (nome automático, pasta da aba atual, agente padrão lembrado). O formulário
+   só aparece com **toque longo** no ícone ("Personalizar…"). Navegador abre uma página inicial com as
+   portas abertas no servidor. No iPhone, o popup "Deseja usar o modo UI?" lembra a escolha por padrão.
+4. **Configurações numa folha** (R2): no iPhone, ⋮ → Configurações, o ⚙ da página de apps e
+   "Gerenciar comandos" abrem uma **folha** dentro do app (reaproveite `mountSettingsSections` de
+   `ui/dialogs.js`), já na seção certa, sem navegar para `/admin` (que recarrega e derruba o contexto).
+   Backup e Webhooks podem continuar só no `/admin`.
+5. **Barra de status** (R7, R12): no iPhone, tire o botão de lista de sessões (a pílula já faz isso)
+   e avalie tirar a barra inteira, mostrando um aviso só quando a conexão cair (~38 px a mais de tela).
+   **Pergunte ao dono** antes de tirar a barra inteira.
+
+### 4.9 Vibecoding no iPhone: agente ↔ prévia por gesto e 👁
+
+Pedido do dono, avaliado na seção 6 da análise (faz sentido: em retrato a tela dividida deixa cada
+metade com ~340 px). Em um projeto de vibecoding (`GET /api/vibe/tab/:tabId`, `scripts/vibe.js`):
+- **não dividir a tela** no iPhone em retrato (o servidor manda `{ type: 'split', a, b }`; no cliente,
+  ignore a divisão nesse caso e mantenha o par agente → prévia como "tela atual → tela seguinte");
+- **arrastar da borda direita para a esquerda** no chat do agente abre a prévia (estenda
+  `ui/edgeSwipe.js`: mesma dica de vidro, com o ícone `eye`);
+- **arrastar da borda esquerda para a direita** na prévia volta ao agente. Regra geral nova da borda
+  esquerda: é **"voltar"**; só abre a página de apps quando não há tela anterior ligada;
+- **botão visível 👁 "Prévia"** no chat do agente (gestos não aparecem; sempre dê uma alternativa
+  visível). Na prévia, o botão voltar da barra do navegador, quando a página não tem histórico, vira
+  "‹ Agente";
+- quando a prévia recarregar por causa de um arquivo salvo, mostrar no chat um aviso discreto
+  "Prévia atualizada · ver" que leva para ela com um toque.
+
+### 4.10 Pendência de decisão (pergunte ao dono antes)
 
 No mock que o dono desenhou, a **barra de status é uma pílula de vidro** e **cada tecla de atalho
 tem o próprio vidro**. A implementação atual segue a Apple (status em texto; teclas em duas
