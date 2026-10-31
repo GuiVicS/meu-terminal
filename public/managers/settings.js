@@ -9,6 +9,8 @@ export const DEFAULT_SETTINGS = {
     // Interface
     theme: 'dark',            // 'dark' | 'light' | 'system'
     motion: 'system',         // 'system' | 'reduced'
+    // 'glass' (iPhone only) | 'glass-any' (any phone) | 'classic' (no iPhone layout)
+    iphoneVisual: 'glass',
     // Terminal
     fontSize: 15,
     lineHeight: 1.2,
@@ -32,6 +34,7 @@ export default class SettingsManager {
         });
         this.applyTheme();
         this.applyMotion();
+        this.applyIphoneVisual();
         // Another tab (e.g. /admin) changed a setting: pick it up here too
         window.addEventListener('storage', e => {
             if (e.key !== this.storage._getKey('settings')) return;
@@ -41,6 +44,7 @@ export default class SettingsManager {
                 this.values[key] = next[key];
                 if (key === 'theme') this.applyTheme();
                 if (key === 'motion') this.applyMotion();
+                if (key === 'iphoneVisual') this.applyIphoneVisual();
                 this.listeners.forEach(fn => fn(key, next[key]));
             });
         });
@@ -57,6 +61,7 @@ export default class SettingsManager {
         this.storage.set('settings', this.values);
         if (key === 'theme') this.applyTheme();
         if (key === 'motion') this.applyMotion();
+        if (key === 'iphoneVisual') this.applyIphoneVisual();
         this.listeners.forEach(fn => fn(key, value));
     }
 
@@ -80,5 +85,18 @@ export default class SettingsManager {
 
     applyMotion() {
         document.documentElement.toggleAttribute('data-reduced-motion', this.values.motion === 'reduced');
+    }
+
+    /**
+     * iPhone-only layout (Liquid Glass). index.html sets data-iphone before the first paint, so this
+     * mostly keeps the attribute in sync when the preference is changed; it also lets anyone put
+     * the same visual on another phone (Android) from Settings → Interface.
+     */
+    applyIphoneVisual() {
+        const mode = this.values.iphoneVisual;
+        const isPhone = /iPhone|iPod/.test(navigator.userAgent)
+            || (mode === 'glass-any' && window.matchMedia('(pointer: coarse)').matches
+                && Math.min(window.screen.width, window.screen.height) < 720);
+        document.documentElement.toggleAttribute('data-iphone', mode !== 'classic' && isPhone);
     }
 }
