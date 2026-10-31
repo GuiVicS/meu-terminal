@@ -62,7 +62,7 @@ Há variantes claro/escuro, um `@supports` para `backdrop-filter` e um fallback 
 | Chat do agente | Caixa de mensagem **flutuante** (cartão de vidro, raio 32), conversa passa por baixo com fade. Texto em cima; embaixo ＋ (anexar), pílula de resumo "Modelo · Modo" e enviar. Os seletores do agente foram para uma **folha deslizante** ("Modelo e configurações") aberta pela pílula. | `composer.js` (`setupIphone`, `settingsSummary`, `openSheet`, `dispose`), CSS |
 | Navegador | Estilo **Safari compacto do iOS 26**: barra flutuante embaixo com voltar, pílula do endereço (mostra só o domínio; editar mostra o endereço completo e ocupa a barra) com recarregar dentro, e "•••" com Avançar, Teclado, Portas abertas e Tamanho e qualidade. Página ocupa a aba inteira. | `browserSession.js` (`.browser-pill`, `.browser-host`, `openMoreMenu`), CSS |
 | Menus (`.menu`) | Popovers de vidro com cantos 22 px e itens de 44 px. | CSS |
-| Gesto de borda | Arrastar da borda esquerda (24 px) para a direita abre a página de apps (no 4.9 isso vira "voltar", abrindo apps só na raiz); com ela aberta, arrastar para a esquerda fecha. Um círculo de vidro com o ícone de grade acompanha o dedo e fica roxo quando soltar vai agir (70 px). Arrasto vertical, toque fora da borda e folhas/menus abertos não disparam. | `public/ui/edgeSwipe.js`, `index.js` (`bindEdgeSwipe`), CSS `.edge-swipe-hint` |
+| Gesto de borda | Arrastar da borda esquerda (24 px) para a direita abre a página de apps (no 4.10 isso vira "voltar", abrindo apps só na raiz); com ela aberta, arrastar para a esquerda fecha. Um círculo de vidro com o ícone de grade acompanha o dedo e fica roxo quando soltar vai agir (70 px). Arrasto vertical, toque fora da borda e folhas/menus abertos não disparam. | `public/ui/edgeSwipe.js`, `index.js` (`bindEdgeSwipe`), CSS `.edge-swipe-hint` |
 | Página inicial de apps ("Nova sessão") | Título grande à esquerda; ícones de app como na tela de início (68 px, gradiente da cor do app, glifo branco, sem cartão em volta, rótulo embaixo); "Sessões recentes" como lista agrupada com ícone do tipo; formulário com controle segmentado, campos de 50 px e botões em cápsula; configurações e fechar como círculos de vidro; fundo com leve gradiente. | `ui/newSession.js` (`RECENT_ICONS`, `.recent-icon`), CSS |
 
 No desktop o navegador mantém a ordem antiga graças a `.browser-pill { display: contents }` e
@@ -125,13 +125,62 @@ abra o PWA instalado e confira:
 
 Corrija o que falhar antes de seguir.
 
-### 4.2 PWA: garantir que o iPhone receba a versão nova
+### 4.2 Bug: zoom ao tocar em campos de texto (corrigir logo depois da validação)
+
+**Sintoma relatado pelo dono:** toda vez que toca num campo de texto, a tela dá zoom no campo e ele
+precisa tirar o zoom com os dedos.
+
+**Causa:** o Safari do iPhone dá zoom automático ao focar qualquer `input`, `textarea`, `select` ou
+área editável (`contenteditable`) com **fonte menor que 16 px**. O app tem vários campos assim
+(levantamento em `public/styles.css`):
+
+| Linha aprox. | Seletor | Fonte |
+|---|---|---|
+| 471 | `.search-bar input` (busca no terminal) | 13.5 px |
+| 552 | `.field input`, `.login-card input` (formulários, login) | 14 px |
+| 861 | `.setting select`, `.setting input[type="text"]` (Configurações) | 13 px |
+| 1188 | `.commands-form textarea` (comandos rápidos) | 13 px |
+| 1501 | `.fm-search input` (busca nos Arquivos) | 14 px |
+| 1912 | `.ag-input` | 12 px |
+| 2162 | `.ui-select-filter input` (filtro das listas, ex.: modelos) | 14 px |
+| 2470 | `.nt-search input` (busca nas Anotações) | 14 px |
+| 2555 | `.nt-tags-input` (tags) | 13.5 px |
+| 2563 | `.nt-doc .ProseMirror` (editor de anotações, `contenteditable`) | 15 px |
+| 2791-2793 | campos dos Webhooks | 12.5 px |
+
+Alguns já têm correção só para `(pointer: coarse)` (ex.: `.ag-input-row textarea`, `.browser-address
+input`), mas não todos. Atenção também ao **`textarea` escondido do xterm** (`.xterm-helper-textarea`),
+que recebe o foco quando se toca no terminal.
+
+**Correção (vale em qualquer orientação, exceção à regra de "só retrato"):**
+1. Uma regra única no fim do `styles.css`, para telas de toque:
+   ```css
+   /* iOS zooms into any focused field under 16px: keep every editable thing at 16px+ on touch */
+   @media (pointer: coarse) {
+       input, textarea, select, [contenteditable="true"], .ProseMirror, .xterm-helper-textarea {
+           font-size: max(16px, 1em) !important;
+       }
+   }
+   ```
+   Depois confira visualmente cada campo da tabela (alguns vão ficar maiores; ajuste altura e
+   espaçamento onde precisar, mas nunca abaixo de 16 px).
+2. **Rede de segurança só no iPhone:** no script inline do `index.html` (e nas outras páginas:
+   `login.html`, `admin/index.html`, `notas/index.html`, `guia.html`), quando for iPhone, troque o
+   viewport para `width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover`. No iOS
+   isso só impede o zoom automático no foco; o zoom com dois dedos continua funcionando (o Safari
+   ignora `maximum-scale` para o gesto do usuário). **Não** aplique fora do iPhone: no Android isso
+   bloquearia o zoom com os dedos, o que é ruim para acessibilidade.
+3. Teste no iPhone tocando em: busca do terminal, campos da página de apps, endereço do navegador,
+   caixa do chat, busca e editor das Anotações, campos de Configurações, filtro da lista de modelos,
+   login (email, senha, código 2FA) e o próprio terminal. Nenhum pode dar zoom.
+
+### 4.3 PWA: garantir que o iPhone receba a versão nova
 
 O service worker usa `CACHE_NAME = MEUTERMINAL_CACHE_V<versão>` (`public/service-worker.js`,
 `config.js` em `server.js`). Suba a versão em `package.json` (hoje `2.7.0` → `2.8.0`) para o PWA
 trocar o cache. Confira que o iPhone carrega o CSS novo depois do deploy.
 
-### 4.3 Microfone no compositor do chat (como no app do Claude)
+### 4.4 Microfone no compositor do chat (como no app do Claude)
 
 O app do Claude tem 🎤 ao lado do enviar. Já existe ditado em `public/ui/dictation.js`
 (`class Dictation`, `start()`, `stop()`, usado pela barra de atalhos em `ui/shortcutBar.js`). No iPhone:
@@ -141,7 +190,7 @@ O app do Claude tem 🎤 ao lado do enviar. Já existe ditado em `public/ui/dict
 - estado "gravando" em vermelho pulsando (mesmo visual de `.shortcut-key.icon-key.recording`);
 - só aparece se o navegador tiver reconhecimento de voz.
 
-### 4.4 Navegador: barra que encolhe ao rolar (como o Safari)
+### 4.5 Navegador: barra que encolhe ao rolar (como o Safari)
 
 No Safari, rolar para baixo encolhe a barra para uma pílula pequena só com o domínio; rolar para cima
 volta. A página roda no servidor, mas os gestos de rolagem passam por `bindPointer()` em
@@ -149,13 +198,13 @@ volta. A página roda no servidor, mas os gestos de rolagem passam por `bindPoin
 `.browser-toolbar.minimized` e, no CSS de iPhone, esconda voltar/••• e reduza a pílula
 (ex.: 32 px, fonte 13). Tocar na pílula minimizada expande de novo. Respeite "Reduzir movimento".
 
-### 4.5 Trocar de sessão com gesto
+### 4.6 Trocar de sessão com gesto
 
 No Safari, deslizar para os lados na barra troca de aba. Faça o mesmo na **pílula da sessão**
 (`#sessionPill`): arrastar horizontal > 40 px chama a sessão anterior/seguinte (o
 `TerminalManager` já tem as ações `next`/`prev`). Animação curta do nome entrando pelo lado.
 
-### 4.6 Telas que ainda não foram adaptadas ao iPhone
+### 4.7 Telas que ainda não foram adaptadas ao iPhone
 
 **Primeiro, um ajuste pedido pelo dono no formulário de nova sessão** (`ui/newSession.js`):
 o controle segmentado **Terminal / Navegador / Arquivos / Anotações** (`.kind-toggle`) é
@@ -185,14 +234,14 @@ Depois, aplique as regras da seção 3 a:
       (conteúdo, não controles).
 - [ ] **Painel lateral do agente** (`agent/sidepanel.js`) no iPhone: virar folha em vez de painel.
 
-### 4.7 Opção nas Configurações
+### 4.8 Opção nas Configurações
 
 Em Configurações → Interface: "Visual do iPhone: vidro / clássico" (salvo junto com as outras
 preferências em `managers/settings.js`). "Clássico" remove `data-iphone`. Opcional: "Usar o visual de
 iPhone em outros celulares" para quem tiver Android (adiciona `data-iphone` também com
 `(pointer: coarse)` e largura < 720).
 
-### 4.8 Simplificar os fluxos (menos toques, mesmas funções)
+### 4.9 Simplificar os fluxos (menos toques, mesmas funções)
 
 A análise completa está em **`docs/ANALISE-UX.md`** (jornadas com contagem de toques, 14
 redundâncias com evidência e o layout proposto). Leia antes de mexer. Resumo do que implementar,
@@ -219,7 +268,7 @@ nesta ordem, **só no iPhone em retrato** (o desktop mantém o ⋮ e os atalhos 
    e avalie tirar a barra inteira, mostrando um aviso só quando a conexão cair (~38 px a mais de tela).
    **Pergunte ao dono** antes de tirar a barra inteira.
 
-### 4.9 Vibecoding no iPhone: agente ↔ prévia por gesto e 👁
+### 4.10 Vibecoding no iPhone: agente ↔ prévia por gesto e 👁
 
 Pedido do dono, avaliado na seção 6 da análise (faz sentido: em retrato a tela dividida deixa cada
 metade com ~340 px). Em um projeto de vibecoding (`GET /api/vibe/tab/:tabId`, `scripts/vibe.js`):
@@ -235,7 +284,7 @@ metade com ~340 px). Em um projeto de vibecoding (`GET /api/vibe/tab/:tabId`, `s
 - quando a prévia recarregar por causa de um arquivo salvo, mostrar no chat um aviso discreto
   "Prévia atualizada · ver" que leva para ela com um toque.
 
-### 4.10 Pendência de decisão (pergunte ao dono antes)
+### 4.11 Pendência de decisão (pergunte ao dono antes)
 
 No mock que o dono desenhou, a **barra de status é uma pílula de vidro** e **cada tecla de atalho
 tem o próprio vidro**. A implementação atual segue a Apple (status em texto; teclas em duas
