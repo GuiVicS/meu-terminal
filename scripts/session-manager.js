@@ -285,6 +285,21 @@ class SessionManager {
         return true;
     }
 
+    /**
+     * The last `lines` lines of a terminal's screen as plain text (no colors), or null when the
+     * tab has no running shell. Output reaches the headless screen asynchronously: text written
+     * a few milliseconds ago may not be there yet.
+     */
+    readScreen(id, lines = 60) {
+        const rt = this.runtimes.get(id);
+        if (!rt) return null;
+        const buffer = rt.headless.buffer.active;
+        const out = [];
+        for (let i = 0; i < buffer.length; i++) out.push(buffer.getLine(i)?.translateToString(true) ?? '');
+        while (out.length && !out[out.length - 1].trim()) out.pop();
+        return { text: out.slice(-Math.max(1, Math.min(Number(lines) || 60, 2000))).join('\n'), running: !!rt.pty };
+    }
+
     /** First existing directory among: last cwd, starting cwd, server default. */
     pickCwd(row) {
         const candidates = [row && row.cwd, row && row.start_cwd, this.defaultCwd];

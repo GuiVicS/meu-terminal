@@ -1,0 +1,42 @@
+/**
+ * remote/shares.js
+ * Temporary download links for files on the server (share_link): /dl/<token>, random token,
+ * expires in minutes. Kept in memory - a restart ends every link, which is fine for "baixe isto agora".
+ */
+const crypto = require('crypto');
+
+const MAX_LINKS = 100;
+const MAX_MINUTES = 24 * 60;
+
+class Shares {
+    constructor({ now = Date.now } = {}) {
+        this.now = now;
+        this.links = new Map(); // token -> { source, path, expiresAt }
+    }
+
+    sweep() {
+        const now = this.now();
+        for (const [t, l] of this.links) if (l.expiresAt < now) this.links.delete(t);
+    }
+
+    create({ source, path, minutes = 30 }) {
+        this.sweep();
+        if (this.links.size >= MAX_LINKS) throw new Error('Links demais ativos. Espere alguns expirarem.');
+        const mins = Math.min(Math.max(Number(minutes) || 30, 1), MAX_MINUTES);
+        const token = crypto.randomBytes(24).toString('base64url');
+        const expiresAt = this.now() + mins * 60 * 1000;
+        this.links.set(token, { source, path, expiresAt });
+        return { token, expiresAt };
+    }
+
+    get(token) {
+        this.sweep();
+        return typeof token === 'string' ? this.links.get(token) || null : null;
+    }
+
+    revokeAll() {
+        this.links.clear();
+    }
+}
+
+module.exports = { Shares };

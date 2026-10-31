@@ -9,9 +9,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { createJsonRpcHandler } = require('./mcp-protocol');
 
 const SERVER_INFO = { name: 'meuterminal', version: require('../package.json').version };
-const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 const TOOLS = [
     {
@@ -460,64 +460,18 @@ function createMcpTools({
     };
 }
 
-/**
- * Express handler for POST /mcp (JSON-RPC 2.0). Responses are plain JSON (allowed by
- * the Streamable HTTP transport); no server-initiated messages are needed.
- */
+/** Express handler for POST /mcp: the local tools on top of mcp-protocol.js. */
 function createMcpHandler(deps) {
-    const tools = createMcpTools(deps);
-
-    async function handle(msg) {
-        const { id, method, params = {} } = msg || {};
-        const isNotification = id === undefined || id === null;
-        const reply = result => (isNotification ? null : { jsonrpc: '2.0', id, result });
-        const fail = (code, message) => (isNotification ? null : { jsonrpc: '2.0', id, error: { code, message } });
-
-        switch (method) {
-            case 'initialize': {
-                const asked = params.protocolVersion;
-                return reply({
-                    protocolVersion: SUPPORTED_VERSIONS.includes(asked) ? asked : SUPPORTED_VERSIONS[0],
-                    capabilities: { tools: { listChanged: false } },
-                    serverInfo: SERVER_INFO,
-                    instructions: 'Ferramentas do MeuTerminal: abra páginas (open_url) para o usuário ver o '
-                        + 'resultado (beside=true divide a tela com o seu terminal; live_preview = Live Server de uma pasta), mostre pastas '
-                        + 'no gerenciador de arquivos (open_folder; list_drives mostra o Google Drive/rclone), confira com screenshot/read_page '
-                        + 'e avise com notify (push com som no celular). Para começar um projeto novo com o usuário, use start_vibecoding. '
-                        + 'A sua aba de terminal está em $MEUTERMINAL_TAB_ID: passe como terminal_tab_id.',
-                });
-            }
-            case 'ping':
-                return reply({});
-            case 'tools/list':
-                return reply({ tools: TOOLS });
-            case 'tools/call': {
-                const tool = tools[params.name];
-                if (!tool) return fail(-32602, `Ferramenta desconhecida: ${params.name}`);
-                try {
-                    return reply(await tool(params.arguments || {}));
-                } catch (e) {
-                    // Tool errors go back to the agent as a result it can read, not a protocol error
-                    return reply({ content: [{ type: 'text', text: `Erro: ${e.message}` }], isError: true });
-                }
-            }
-            default:
-                if (method && method.startsWith('notifications/')) return null;
-                return fail(-32601, `Método não suportado: ${method}`);
-        }
-    }
-
-    return async (req, res) => {
-        const body = req.body;
-        if (Array.isArray(body)) {
-            const results = (await Promise.all(body.map(handle))).filter(Boolean);
-            if (!results.length) return res.status(202).end();
-            return res.json(results);
-        }
-        const result = await handle(body);
-        if (!result) return res.status(202).end(); // notification: accepted, no body
-        return res.json(result);
-    };
+    return createJsonRpcHandler({
+        tools: TOOLS,
+        impl: createMcpTools(deps),
+        serverInfo: SERVER_INFO,
+        instructions: 'Ferramentas do MeuTerminal: abra páginas (open_url) para o usuário ver o '
+            + 'resultado (beside=true divide a tela com o seu terminal; live_preview = Live Server de uma pasta), mostre pastas '
+            + 'no gerenciador de arquivos (open_folder; list_drives mostra o Google Drive/rclone), confira com screenshot/read_page '
+            + 'e avise com notify (push com som no celular). Para começar um projeto novo com o usuário, use start_vibecoding. '
+            + 'A sua aba de terminal está em $MEUTERMINAL_TAB_ID: passe como terminal_tab_id.',
+    });
 }
 
 /** Stable token for the MCP endpoint, created once and kept in the database. */
@@ -529,4 +483,4 @@ function mcpToken(store) {
     return token;
 }
 
-module.exports = { createMcpHandler, mcpToken };
+module.exports = { createMcpHandler, createMcpTools, mcpToken, TOOLS };

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark light">
+    <meta name="robots" content="noindex">
+    <!--BASE-->
+    <title>Conectar ao Claude — MeuTerminal</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/svg+xml" href="assets/terminal.svg">
+</head>
+<!-- Filled in by routes/remote.js (values HTML-escaped). oauth-authorize.js reads the OAuth
+     request from the address bar and posts it back with the credentials. -->
+<body class="page-login" data-mode="{{MODE}}" data-two-factor="{{TWO_FACTOR}}">
+    <main class="login">
+        <div class="login-card oauth-card">
+            <span class="brand-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor"
+                    stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 8l4 4-4 4"/><path d="M13 16h5"/>
+                </svg>
+            </span>
+            <h1 class="login-title">Conectar ao Claude</h1>
+
+            <div id="consent" hidden>
+                <p class="login-subtitle"><strong>{{CLIENT}}</strong> quer acesso a este servidor
+                    (volta para <strong>{{REDIRECT_HOST}}</strong>).</p>
+                <ul class="oauth-scope">
+                    <li>Rodar comandos e programas aqui, como você no terminal</li>
+                    <li>Ler e gravar arquivos, inclusive no Google Drive (rclone)</li>
+                    <li>Criar e ler suas anotações e mandar push para o celular</li>
+                </ul>
+                <p class="field-help">Comandos arriscados pedem a sua aprovação no celular. Dá para desligar ou revogar
+                    a qualquer momento em Configurações → Ponte com o Claude.</p>
+                <form id="consentForm" class="login-form" novalidate>
+                    <label class="field">
+                        <span class="field-label">Email</span>
+                        <input type="email" name="email" autocomplete="username" inputmode="email"
+                            autocapitalize="off" spellcheck="false" required>
+                    </label>
+                    <label class="field">
+                        <span class="field-label">Senha</span>
+                        <input type="password" name="password" autocomplete="current-password" required>
+                    </label>
+                    <label class="field" data-code hidden>
+                        <span class="field-label">Código do app autenticador</span>
+                        <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code"
+                            pattern="[0-9]*" maxlength="6" placeholder="000000" class="code-input">
+                    </label>
+                    <p class="login-error" id="consentError" role="alert"></p>
+                    <button type="submit" class="btn btn-primary">Permitir</button>
+                    <button type="button" class="btn btn-ghost" id="denyBtn">Recusar</button>
+                </form>
+            </div>
+
+            <div id="failure" hidden>
+                <p class="login-subtitle">Não foi possível continuar.</p>
+                <p class="login-error" style="display:block">{{ERROR}}</p>
+            </div>
+        </div>
+    </main>
+    <script src="oauth-authorize.js"></script>
+</body>
+</html>

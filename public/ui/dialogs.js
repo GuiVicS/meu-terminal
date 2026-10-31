@@ -483,10 +483,11 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
     const loadAgentPrefs = () => Promise.all([agentApi('GET', 'agents'), agentApi('GET', 'agent-prefs')])
         .then(([info, prefs]) => {
             agentList = info.agents;
-            body.querySelector('.agent-ui-section').hidden = !info.enabled;
+            // A class, not `hidden`: /admin's router owns `hidden` (which page is showing)
+            body.querySelector('.agent-ui-section').classList.toggle('is-off', !info.enabled);
             renderAgentPrefs(agentList, prefs);
         })
-        .catch(() => { body.querySelector('.agent-ui-section').hidden = true; });
+        .catch(() => { body.querySelector('.agent-ui-section').classList.add('is-off'); });
     const saveAgentPrefs = data => agentApi('PUT', 'agent-prefs', data)
         .then(prefs => renderAgentPrefs(agentList, prefs))
         .catch(e => toast(`Não foi possível salvar: ${e.message}`, { tone: 'error' }));
