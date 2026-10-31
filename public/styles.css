@@ -2857,12 +2857,14 @@ audio.fm-media { width: min(520px, 90%); }
 /* Pieces that only exist in the iPhone layout (created by agent/composer.js) */
 .ag-settings-btn[hidden],
 .ag-sheet-backdrop[hidden] { display: none !important; }
+.session-pill { display: none; }
 .ag-select-name { display: none; }
 
 @media (orientation: portrait) {
     [data-iphone] {
         /* The glass material, on the few elements that carry it */
         .topbar-actions .icon-btn,
+        .session-pill,
         .tabstrip,
         .shortcut-scroll,
         .shortcut-pinned,
@@ -2882,16 +2884,43 @@ audio.fm-media { width: min(520px, 90%); }
         /* ---------- terminal page ---------- */
         .app { background: var(--term-bg); }
 
-        /* Top: the title is plain text (navigation bars don't put glass behind titles);
-           actions are round glass buttons; the session tabs share one capsule. */
-        .topbar {
+        /* Top: always the compact "fullscreen" layout - no brand row, no tab strip, no fullscreen
+           button (an installed PWA on iPhone is already fullscreen). The current session is one
+           glass pill that opens the session sheet (ui/sessionSheet.js); ⋮ keeps the app menu. */
+        .topbar,
+        &[data-expanded] .topbar,
+        &[data-keyboard] .topbar {
             background: transparent;
             border-bottom: none;
-            padding: 4px 12px 8px;
-            grid-template-rows: 44px 48px;
-            row-gap: 6px;
+            padding: 4px 12px 6px;
+            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-rows: 48px;
+            grid-template-areas: "pill actions";
             column-gap: 8px;
         }
+        .brand,
+        .tabstrip,
+        #fullscreenBtn,
+        .topbar-divider { display: none !important; }
+        /* 48px capsule, 4px inset: the icon is a 40px circle (24 - 4 = 20) */
+        .session-pill {
+            grid-area: pill; justify-self: start; align-self: center; min-width: 0; max-width: 100%;
+            display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px 0 4px;
+            border-radius: 24px; color: var(--text);
+            transition: transform var(--dur) var(--ease);
+        }
+        .session-pill:active { transform: scale(0.97); }
+        .session-pill-icon {
+            width: 40px; height: 40px; flex-shrink: 0; display: grid; place-items: center; border-radius: 20px;
+            background: var(--accent); color: var(--accent-fg);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+        .session-pill-name { min-width: 0; font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .session-pill-chevron { display: inline-grid; flex-shrink: 0; color: var(--text-2); }
+        .session-pill[data-state="connecting"] .session-pill-icon,
+        .session-pill[data-state="reconnecting"] .session-pill-icon { animation: pulse 1.2s ease-in-out infinite; }
+        .session-pill[data-state="error"] .session-pill-icon { background: var(--danger); }
+        .topbar-actions { grid-area: actions; }
         .brand { padding: 0 2px; }
         .brand-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
         .brand-icon { border-radius: 50%; border: none; box-shadow: none; }
@@ -2931,10 +2960,7 @@ audio.fm-media { width: min(520px, 90%); }
         .shortcut-key.icon-key.recording { border: none; }
         .shortcut-key[data-key="more"][aria-expanded="true"] { background: var(--glass-fill-pressed); }
 
-        &[data-expanded] .topbar { grid-template-rows: 48px; padding-bottom: 6px; }
-        &[data-keyboard] .topbar { grid-template-rows: 38px 44px; row-gap: 4px; padding-top: 2px; padding-bottom: 6px; }
         &[data-keyboard] .topbar-actions .icon-btn { width: 38px; height: 38px; }
-        &[data-keyboard] .brand-title { font-size: 17px; }
         &[data-keyboard] .tabstrip { border-radius: 22px; }
         &[data-keyboard] .tab,
         &[data-keyboard] .new-tab { height: 36px; border-radius: 18px; }
@@ -3033,6 +3059,38 @@ audio.fm-media { width: min(520px, 90%); }
 .ag-sheet .ag-select:has(.ui-select.open) { color: var(--text); box-shadow: none; }
 .ag-sheet .ag-select select { max-width: 62%; font-size: 16px; }
 .ag-sheet .ag-toggle input { order: 2; margin-left: auto; width: 22px; height: 22px; accent-color: var(--accent); }
+/* Session sheet (ui/sessionSheet.js): sheet radius 34px, 16px inset -> 18px rows */
+.sessions-sheet .ss-add { border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.ss-list { display: flex; flex-direction: column; gap: 8px; }
+.ss-row {
+    --c: var(--c-green);
+    display: flex; align-items: center; gap: 12px; min-height: 66px; padding: 0 6px 0 16px;
+    border-radius: 18px; background: var(--glass-fill); cursor: pointer;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.ss-row:active { transform: scale(0.98); }
+.ss-row.active { background: var(--accent-soft); box-shadow: inset 0 1px 0 var(--glass-rim); }
+.ss-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex-shrink: 0; }
+.ss-row[data-state="disconnected"] .ss-dot,
+.ss-row[data-state="exited"] .ss-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.ss-row[data-state="error"] .ss-dot { background: var(--danger); }
+.ss-icon {
+    width: 42px; height: 42px; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%;
+    background: var(--glass-fill); color: var(--text);
+}
+.ss-row.active .ss-icon { background: var(--glass-bg-dense); color: var(--accent); }
+.ss-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ss-text b { font-size: 16.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-text small { font-size: 13.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-check { display: inline-grid; color: var(--accent); flex-shrink: 0; }
+.ss-close { width: 44px; height: 44px; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; color: var(--text-2); }
+.ss-close:active { background: var(--glass-fill-pressed); }
+.ss-new {
+    width: 100%; height: 54px; margin-top: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;
+    border-radius: 18px; background: var(--accent-soft); color: var(--accent); font-size: 16px; font-weight: 600;
+}
+.ss-new:active { transform: scale(0.98); }
 @media (prefers-reduced-motion: reduce) {
     .ag-sheet, .ag-sheet-backdrop { transition: none; }
 }

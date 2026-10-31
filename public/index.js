@@ -17,6 +17,7 @@ import ShortcutBar from './ui/shortcutBar.js';
 import { createSettingsDialog, createShortcutsDialog } from './ui/dialogs.js';
 import { showMenu } from './ui/contextMenu.js';
 import { icon } from './ui/icons.js';
+import { sessionIcon } from './ui/sessionSheet.js';
 import VibeForm from './ui/vibeForm.js';
 import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
@@ -185,7 +186,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     const statusBar = new StatusBar(document.getElementById('statusBar'), {
         onSessions: anchor => workspace.openSessionList(anchor),
     });
+    // iPhone session pill (top of the screen): icon, name and color of the current session
+    const sessionPill = document.getElementById('sessionPill');
+    sessionPill.querySelector('.session-pill-chevron').innerHTML = icon('chevronDown', 18);
+    sessionPill.addEventListener('click', () => workspace?.openSessionList(sessionPill));
+    const renderPill = session => {
+        if (!session) return;
+        sessionPill.querySelector('.session-pill-icon').innerHTML = icon(sessionIcon(session), 20);
+        sessionPill.querySelector('.session-pill-name').textContent = session.name;
+        sessionPill.style.setProperty('--c', `var(--c-${session.color || 'green'})`);
+        sessionPill.dataset.state = session.state;
+        sessionPill.setAttribute('aria-label', `Sessão atual: ${session.name}. Toque para ver as sessões abertas`);
+    };
+
     const renderActive = session => {
+        renderPill(session);
         statusBar.render(session);
         if (typeof updateShortcutBar === 'function') updateShortcutBar();
         brandConn.dataset.state = session.state;

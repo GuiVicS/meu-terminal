@@ -14,6 +14,7 @@ import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
 import { showMenu } from '../ui/contextMenu.js';
+import { openSessionSheet, sessionIcon } from '../ui/sessionSheet.js';
 import { toast } from '../ui/toast.js';
 import { playChime } from '../ui/sound.js';
 
@@ -718,13 +719,26 @@ export default class TerminalManager {
         ], { x, y, label: `Ações de ${s.name}`, restoreFocus: anchor });
     }
 
-    /** Session switcher (mobile status bar button). */
+    /** Session switcher (mobile status bar button; on iPhones also the session pill, as a sheet). */
     openSessionList(anchor) {
+        if (document.documentElement.hasAttribute('data-iphone')) {
+            openSessionSheet({
+                getItems: () => this.order.map(id => {
+                    const s = this.sessions.get(id);
+                    return { id, name: s.name, sub: s.displayCwd(), icon: sessionIcon(s), color: s.color, state: s.state, active: id === this.activeId };
+                }),
+                onPick: id => this.activate(id),
+                onClose: id => this.close(id),
+                onNew: () => this.openNewSessionPage(),
+                onMenu: (id, pos) => this.openTabMenu(id, pos),
+            });
+            return;
+        }
         showMenu(this.order.map(id => {
             const s = this.sessions.get(id);
             return {
                 label: s.name,
-                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : s.kind === 'notes' ? 'notes' : s.kind === 'agent' ? 'bot' : 'terminal',
+                icon: sessionIcon(s),
                 hint: s.displayCwd(),
                 checked: id === this.activeId,
                 run: () => this.activate(id),

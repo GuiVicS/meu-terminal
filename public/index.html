@@ -62,6 +62,13 @@
                 <span class="brand-conn" id="brandConn" data-state="connecting" role="img" aria-label="Conectando"></span>
             </div>
 
+            <!-- iPhone: the current session as one pill; tap for the session sheet (ui/sessionSheet.js) -->
+            <button type="button" class="session-pill" id="sessionPill" aria-haspopup="dialog" aria-label="Sessões abertas">
+                <span class="session-pill-icon" aria-hidden="true"></span>
+                <span class="session-pill-name"></span>
+                <span class="session-pill-chevron" aria-hidden="true"></span>
+            </button>
+
             <div class="tabstrip">
                 <button type="button" class="icon-btn new-tab" id="newTabBtn" aria-label="Nova sessão"></button>
                 <div class="tab-list" id="tabList" role="tablist" aria-label="Sessões de terminal"></div>
