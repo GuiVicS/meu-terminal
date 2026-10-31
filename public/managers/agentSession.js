@@ -13,6 +13,7 @@ import Conversation from '../agent/conversation.js';
 import Composer from '../agent/composer.js';
 import SidePanel from '../agent/sidepanel.js';
 import { esc } from '../agent/markdown.js';
+import { isIphonePortrait } from '../ui/device.js';
 
 const MAX_RECONNECT_ATTEMPTS = 8;
 const CLOSE_SESSION_GONE = 4404;
@@ -127,14 +128,21 @@ export default class AgentSession {
                     <div class="ag-composer"></div>
                 </div>
                 <aside class="ag-side" aria-label="Painel do agente"></aside>
+                <div class="ag-side-scrim" hidden></div>
             </div>`;
         const q = sel => this.panel.querySelector(sel);
         this.el = {
             title: q('.ag-head-title'), agent: q('.ag-agent'), cwd: q('.ag-cwd'), status: q('.ag-status'),
             banner: q('.ag-banner'), body: q('.ag-body'), log: q('.ag-log'), jump: q('.ag-jump'),
             pending: q('.ag-pending'), side: q('.ag-side'), panelBtn: q('[data-act="panel"]'),
+            scrim: q('.ag-side-scrim'),
             vibeBtn: q('[data-act="vibe-agent"]'), publishBtn: q('[data-act="vibe-publish"]'),
         };
+        // On the iPhone the panel is a sheet: tapping outside closes it, like every other sheet
+        this.el.scrim.addEventListener('click', () => {
+            this.panelOpen = false;
+            this.applyPanel();
+        });
         this.vibeProject = null; // set once checkVibeProject() resolves, if this tab belongs to one
         this.conversation = new Conversation(this.el.log, {
             cwd: () => this.cwd,
@@ -314,6 +322,10 @@ export default class AgentSession {
         const open = this.isPanelOpen();
         this.el.body.classList.toggle('side-open', open);
         this.el.panelBtn.setAttribute('aria-expanded', String(open));
+        // Only the iPhone turns the column into a modal sheet; elsewhere the panel stays as it was
+        const sheet = open && isIphonePortrait();
+        this.el.scrim.hidden = !sheet;
+        this.el.side.setAttribute('aria-modal', String(sheet));
     }
 
     // ---------- connection ----------

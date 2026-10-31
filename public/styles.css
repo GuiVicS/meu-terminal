@@ -3331,3 +3331,163 @@ audio.fm-media { width: min(520px, 90%); }
         font-size: max(16px, 1em) !important;
     }
 }
+
+/* ---------- iPhone: the screens that were still desktop (files, notes, sheets, search) ----------
+   Same rules as the rest of the iPhone layout: glass only on controls, 44px+ targets, 34px sheets
+   away from the edges, content scrolling under floating bars. Desktop and other phones untouched. */
+@keyframes iphone-sheet-up { from { opacity: 0; transform: translateY(24px); } }
+@keyframes iphone-sheet-down { from { opacity: 0; transform: translateY(100%); } }
+
+@media (orientation: portrait) {
+    [data-iphone] {
+        /* ---- Arquivos ---- */
+        .fm-toolbar {
+            flex-shrink: 0; margin: 8px 10px 0; padding: 2px 4px; min-height: 48px;
+            background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border); border-radius: 24px;
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .fm-toolbar .icon-btn { width: 44px; height: 44px; border-radius: 50%; color: var(--text); }
+        .fm-crumbs { padding-left: 4px; margin: 0 2px; }
+        .fm-crumb { height: 40px; border-radius: 20px; font-size: 14px; }
+        .fm-crumb:hover { background: var(--glass-fill); }
+        .fm-list {
+            margin: 8px 10px 0; padding: 4px 4px calc(92px + var(--safe-bottom));
+            background: var(--surface); border: 0.5px solid var(--border); border-radius: 20px;
+        }
+        .fm-row { min-height: 56px; border-radius: 14px; }
+        .fm-row:hover { background: transparent; }
+        .fm-more { width: 44px; height: 44px; border-radius: 50%; }
+        .fm-bars { bottom: calc(12px + var(--safe-bottom)); }
+        .fm-selbar, .fm-pastebar {
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border); border-radius: 22px;
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .fm-selbar .icon-btn { width: 44px; height: 44px; }
+        .fm-fab { bottom: calc(18px + var(--safe-bottom)); right: 18px; border: none; box-shadow: var(--glass-shadow); }
+        .fm.has-bars .fm-fab { bottom: calc(84px + var(--safe-bottom)); }
+        /* the places drawer becomes a sheet, like every other secondary surface */
+        .fm-side {
+            position: fixed; inset: auto 8px calc(8px + var(--safe-bottom)) 8px; width: auto;
+            max-height: 72dvh; z-index: 40; padding: 14px 12px 22px; border: 0.5px solid var(--glass-border);
+            border-radius: 34px; background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow); transform: translateY(calc(100% + 16px));
+        }
+        .fm.side-open .fm-side { transform: none; animation: iphone-sheet-down 220ms var(--ease); }
+        .fm-side-close { width: 44px; height: 44px; border-radius: 50%; }
+        .fm-side-item { min-height: 52px; border-radius: 14px; }
+        .fm-scrim:not([hidden]) { position: fixed; inset: 0; z-index: 35; background: var(--backdrop); }
+        .fm-viewer-bar { min-height: 56px; padding: 6px 8px; background: var(--glass-bg-dense); border-bottom: 0.5px solid var(--border); }
+        .fm-viewer { padding-top: var(--safe-top); }
+        .fm-viewer-bar .icon-btn { width: 44px; height: 44px; border-radius: 50%; }
+        .fm-editor { font-size: 16px; }
+
+        /* ---- Anotações ---- */
+        .nt-toolbar {
+            flex-shrink: 0; margin: 8px 10px 0; padding: 2px 4px; min-height: 48px; border: 0.5px solid var(--glass-border);
+            border-radius: 24px; background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .nt-toolbar .icon-btn { width: 44px; height: 44px; border-radius: 50%; color: var(--text); }
+        .nt-search { padding-left: 4px; }
+        .nt-search input {
+            height: 40px; border: 0; border-radius: 20px; background: var(--glass-fill);
+            padding: 0 14px; box-shadow: none;
+        }
+        .nt-search input:focus { background: var(--glass-fill-pressed); box-shadow: none; }
+        .nt-tags { padding: 8px 12px; border-bottom: none; }
+        .nt-chip { min-height: 34px; border-radius: 17px; }
+        .nt-list { padding: 4px 10px calc(100px + var(--safe-bottom)); }
+        .nt-row-fg { border-radius: 16px; }
+        .nt-item { min-height: 60px; padding: 10px 4px 10px 14px; }
+        .nt-more { width: 44px; height: 44px; border-radius: 50%; }
+        .nt-fab { right: 18px; bottom: calc(18px + var(--safe-bottom)); border: none; box-shadow: var(--glass-shadow); }
+        .nt-ehead {
+            min-height: 56px; padding: 4px 8px; border-bottom: 0.5px solid var(--divider);
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+        }
+        .nt-ehead .icon-btn { width: 44px; height: 44px; border-radius: 50%; }
+        .nt-title { padding: 14px 18px 6px; }
+        .nt-tagsline { padding: 0 18px 10px; }
+        .nt-doc-wrap { padding: 12px 18px 24px; }
+        .nt-fbar {
+            left: 8px; right: 8px; bottom: calc(8px + var(--safe-bottom)); margin: 0;
+            border: 0.5px solid var(--glass-border); border-radius: 22px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .nt-fbtn { width: 44px; height: 44px; border-radius: 12px; }
+        /* standalone /notas has no app topbar: the toolbar takes the safe area itself */
+        .page-terminal:not(:has(.topbar)) .nt-toolbar { margin-top: calc(8px + var(--safe-top)); }
+
+        /* ---- Diálogos e folhas (Configurações, comandos, prompts) ---- */
+        .dialog {
+            width: calc(100vw - 16px); max-height: 88dvh; margin: auto auto calc(8px + var(--safe-bottom));
+            border: 0.5px solid var(--glass-border); border-radius: 34px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow); padding-bottom: 0;
+        }
+        .dialog[open] { animation: iphone-sheet-up 220ms var(--ease); }
+        .dialog-header { min-height: 60px; padding: 8px 10px 8px 22px; border-bottom: 0.5px solid var(--divider); }
+        .dialog-title { font-size: 17px; }
+        .dialog-header .icon-btn { width: 44px; height: 44px; border-radius: 50%; }
+        .dialog-body { padding: 8px 22px calc(24px + var(--safe-bottom)); }
+        .prompt-actions { padding: 0 22px calc(18px + var(--safe-bottom)); }
+        .prompt-actions .btn { min-height: 48px; border-radius: 24px; }
+        .prompt-dialog .field input { height: 48px; border-radius: 24px; }
+        .setting { min-height: 56px; }
+        .settings-section { margin-top: 22px; }
+
+        /* ---- Avisos ---- */
+        .toast-region { bottom: calc(var(--safe-bottom) + 104px); max-width: calc(100vw - 32px); }
+        .toast {
+            padding: 12px 12px 12px 18px; border: 0.5px solid var(--glass-border); border-radius: 22px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow); font-size: 14.5px;
+        }
+        .toast-action { height: 36px; border-radius: 18px; font-size: 14px; }
+
+        /* ---- Busca no terminal: a floating glass capsule ---- */
+        .search-bar {
+            top: 10px; left: 12px; right: 12px; width: auto; height: 48px; padding: 0 4px 0 16px;
+            border: 0.5px solid var(--glass-border); border-radius: 24px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .search-bar .icon-btn { width: 40px; height: 40px; }
+        .search-bar input { font-size: 16px; }
+
+        /* ---- Painel do agente: sheet at the bottom instead of a side column ---- */
+        .ag-side {
+            position: absolute; left: 8px; right: 8px; bottom: calc(8px + var(--safe-bottom)); top: auto;
+            width: auto; max-height: 72%; z-index: 8; padding: 18px 18px 22px;
+            border: 0.5px solid var(--glass-border); border-left: 0.5px solid var(--glass-border); border-radius: 34px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow);
+        }
+        .ag-body.side-open .ag-side { animation: iphone-sheet-down 220ms var(--ease); }
+        .ag-side h3 { text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 600; color: var(--text-2); }
+        .sp-list button { min-height: 48px; border-radius: 14px; }
+        .ag-side-scrim:not([hidden]) { position: absolute; inset: 0; z-index: 7; background: var(--backdrop); }
+
+        /* ---- Login e /admin: only corners and breathing room (they are content, not glass) ---- */
+        .page-login .login { padding: calc(20px + var(--safe-top)) 14px calc(20px + var(--safe-bottom)); }
+        .page-login .login-card { width: 100%; max-width: 440px; padding: 30px 22px 26px; border-radius: 30px; border-width: 0.5px; }
+        .page-login .login-form .btn { height: 50px; border-radius: 25px; }
+        .page-admin .admin-topbar { height: calc(56px + var(--safe-top)); padding-top: var(--safe-top); }
+        .page-admin .admin-page { padding: 20px 16px calc(80px + var(--safe-bottom)); }
+    }
+}

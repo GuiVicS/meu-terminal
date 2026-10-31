@@ -8,6 +8,8 @@
         // this is the safety net. On iOS maximum-scale only stops that automatic zoom (pinch zoom keeps
         // working), so it's set on iPhones only - on Android it would block pinch zoom.
         if (/iPhone|iPod/.test(navigator.userAgent)) document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+        // Same switch as index.html: only the iPhone gets the iPhone-only visual adjustments.
+        if (/iPhone|iPod/.test(navigator.userAgent)) document.documentElement.setAttribute('data-iphone', '');
     </script>
     <meta name="theme-color" content="#0B0D10">
     <meta name="color-scheme" content="dark light">
