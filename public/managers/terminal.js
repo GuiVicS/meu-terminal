@@ -722,7 +722,7 @@ export default class TerminalManager {
     /** Session switcher (mobile status bar button; on iPhones also the session pill, as a sheet). */
     openSessionList(anchor) {
         if (document.documentElement.hasAttribute('data-iphone')) {
-            openSessionSheet({
+            const sheet = openSessionSheet({
                 getItems: () => this.order.map(id => {
                     const s = this.sessions.get(id);
                     return { id, name: s.name, sub: s.displayCwd(), icon: sessionIcon(s), color: s.color, state: s.state, active: id === this.activeId };
@@ -731,7 +731,19 @@ export default class TerminalManager {
                 onClose: id => this.close(id),
                 onNew: () => this.openNewSessionPage(),
                 onMenu: (id, pos) => this.openTabMenu(id, pos),
+                // Tab history: the same "recent" list as the new session page
+                getRecents: () => this.recents.map(r => ({
+                    id: r.id, name: r.name, color: r.color, closedAt: r.closedAt,
+                    sub: r.cwd || '', icon: sessionIcon({ kind: r.kind }),
+                })),
+                onReopen: id => this.create({ reopenId: id }),
+                onForget: id => this.forgetRecent(this.recents.findIndex(r => r.id === id)),
             });
+            // Refresh the history from the server (it may include tabs closed on other devices)
+            api('GET', 'sessions').then(data => {
+                this.recents = data.recent || [];
+                sheet.refresh();
+            }).catch(() => { /* keep what we have */ });
             return;
         }
         showMenu(this.order.map(id => {

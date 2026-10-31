@@ -1,12 +1,14 @@
 /**
  * sessionSheet.js
  * iPhone session switcher: a bottom sheet ("Sessões abertas") listing the open sessions - tap to
- * switch, ✕ to close, hold for the tab menu (rename, pin, split...) - plus "Nova sessão". Opened
+ * switch, ✕ to close, hold for the tab menu (rename, pin, split...) - plus "Nova sessão" and the
+ * tab history ("Fechadas recentemente": tap to reopen, ✕ to forget). Opened
  * from the session pill at the top and from the status bar's list button. Same look as the agent
  * settings sheet (.ag-sheet in styles.css).
  */
 import { icon } from './icons.js';
 import { esc } from '../agent/markdown.js';
+import { relativeTime } from './newSession.js';
 
 const LONG_PRESS_MS = 500;
 let current = null;
@@ -33,8 +35,12 @@ export function closeSessionSheet() {
  * @param {(id: string) => Promise<any>} opts.onClose - resolves once the session is gone (or kept)
  * @param {() => void} opts.onNew
  * @param {(id: string, pos: {x: number, y: number, anchor: Element}) => void} opts.onMenu
+ * @param {() => Array<{id: string, name: string, sub: string, icon: string, color: string, closedAt: number}>} [opts.getRecents]
+ * @param {(id: string) => void} [opts.onReopen]
+ * @param {(id: string) => Promise<any>} [opts.onForget]
+ * @returns {{ refresh: () => void }} - call refresh() when the lists change (e.g. recents arrive)
  */
-export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu }) {
+export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu, getRecents = () => [], onReopen, onForget }) {
     closeSessionSheet();
     const backdrop = document.createElement('div');
     backdrop.className = 'ag-sheet-backdrop sessions-sheet';
@@ -45,14 +51,19 @@ export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu }) {
                 <button type="button" class="icon-btn ss-add" aria-label="Nova sessão">${icon('plus', 22)}</button></div>
             <div class="ss-list" role="list"></div>
             <button type="button" class="ss-new">${icon('plus', 20)} Nova sessão</button>
+            <section class="ss-history" hidden>
+                <h4 class="ss-section">Fechadas recentemente</h4>
+                <div class="ss-recent-list" role="list"></div>
+            </section>
         </div>`;
     document.body.appendChild(backdrop);
     const list = backdrop.querySelector('.ss-list');
+    const history = backdrop.querySelector('.ss-history');
+    const recentList = backdrop.querySelector('.ss-recent-list');
     const sheet = backdrop.querySelector('.ag-sheet');
 
     const render = () => {
         const items = getItems();
-        if (!items.length) return closeSessionSheet();
         list.innerHTML = items.map(s => `
             <div class="ss-row${s.active ? ' active' : ''}" role="listitem" data-id="${esc(s.id)}" data-state="${esc(s.state || '')}"
                 style="--c: var(--c-${esc(s.color || 'green')})" tabindex="0" aria-current="${s.active ? 'true' : 'false'}">
@@ -62,8 +73,38 @@ export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu }) {
                 ${s.active ? `<span class="ss-check" aria-hidden="true">${icon('check', 22)}</span>` : ''}
                 <button type="button" class="ss-close" aria-label="Fechar ${esc(s.name)}">${icon('x', 20)}</button>
             </div>`).join('');
+        const recents = getRecents();
+        history.hidden = !recents.length;
+        recentList.innerHTML = recents.map(r => `
+            <div class="ss-row ss-recent" role="listitem" data-id="${esc(r.id)}" style="--c: var(--c-${esc(r.color || 'green')})" tabindex="0">
+                <span class="ss-dot" aria-hidden="true"></span>
+                <span class="ss-icon" aria-hidden="true">${icon(r.icon, 20)}</span>
+                <span class="ss-text"><b>${esc(r.name)}</b><small>${esc([r.sub, r.closedAt ? relativeTime(r.closedAt) : ''].filter(Boolean).join(' · '))}</small></span>
+                <span class="ss-reopen" aria-hidden="true">${icon('history', 18)}</span>
+                <button type="button" class="ss-close" aria-label="Tirar ${esc(r.name)} do histórico">${icon('x', 20)}</button>
+            </div>`).join('');
     };
     render();
+
+    // Tab history: tap reopens (same tab, same folder/page), ✕ forgets it
+    recentList.addEventListener('click', async e => {
+        const row = e.target.closest('.ss-recent');
+        if (!row) return;
+        if (e.target.closest('.ss-close')) {
+            await onForget?.(row.dataset.id);
+            if (current) render();
+            return;
+        }
+        closeSessionSheet();
+        onReopen?.(row.dataset.id);
+    });
+    recentList.addEventListener('keydown', e => {
+        const row = e.target.closest('.ss-recent');
+        if (row && e.key === 'Enter') {
+            closeSessionSheet();
+            onReopen?.(row.dataset.id);
+        }
+    });
 
     const newSession = () => {
         closeSessionSheet();
@@ -139,4 +180,5 @@ export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu }) {
 
     current = { backdrop, onKey };
     requestAnimationFrame(() => requestAnimationFrame(() => backdrop.classList.add('open')));
+    return { refresh: () => { if (current && current.backdrop === backdrop) render(); } };
 }
