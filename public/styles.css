@@ -2994,8 +2994,8 @@ audio.fm-media { width: min(520px, 90%); }
         .ag-selectors { margin: 0; }
         .ag-input-row {
             display: grid;
-            grid-template-columns: auto minmax(0, 1fr) auto auto;
-            grid-template-areas: "text text text text" "attach settings stop send";
+            grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+            grid-template-areas: "text text text text text" "attach settings mic stop send";
             align-items: center;
             gap: 8px;
         }
@@ -3007,6 +3007,9 @@ audio.fm-media { width: min(520px, 90%); }
         .ag-input-row .icon-btn { width: 44px; height: 44px; border-radius: 22px; }
         .ag-attach-btn { grid-area: attach; background: var(--glass-fill); color: var(--text); }
         .ag-stop { grid-area: stop; background: var(--glass-fill); }
+        .ag-mic { grid-area: mic; background: var(--glass-fill); color: var(--text); }
+        /* Recording: red and pulsing, the same signal as the terminal's dictation key */
+        .ag-mic.recording { background: var(--danger); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
         .ag-send { grid-area: send; }
         .ag-settings-btn {
             grid-area: settings; justify-self: start; min-width: 0; max-width: 100%;

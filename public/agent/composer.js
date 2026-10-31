@@ -11,6 +11,7 @@ import { showMenu } from '../ui/contextMenu.js';
 import { pickServerFiles, serverFileUrl } from '../ui/filePicker.js';
 import { toast } from '../ui/toast.js';
 import { esc } from './markdown.js';
+import Dictation from '../ui/dictation.js';
 
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
 // iPhone layout: floating box + settings sheet (attribute set in index.html before first paint)
@@ -184,6 +185,10 @@ export default class Composer {
             if (dragged > 80) this.closeSheet();
         });
 
+        // Dictation, like the Claude app: a round mic between the settings pill and send. One
+        // phrase per tap; the words land in the box so the user reviews before sending.
+        this.setupDictation();
+
         // The conversation scrolls under the floating box: its height goes into --ag-composer-h on
         // the parent, so the last message, the pending bar and the "jump" button stay clear of it.
         const host = this.el.parentElement;
@@ -191,6 +196,52 @@ export default class Composer {
             this.resizeObserver = new ResizeObserver(() => host.style.setProperty('--ag-composer-h', `${this.el.offsetHeight}px`));
             this.resizeObserver.observe(this.el);
         }
+    }
+
+    setupDictation() {
+        if (!Dictation.supported) return; // no microphone button when the browser cannot transcribe
+        const mic = document.createElement('button');
+        mic.type = 'button';
+        mic.className = 'icon-btn ag-mic';
+        mic.setAttribute('aria-label', 'Transcrever voz');
+        mic.setAttribute('aria-pressed', 'false');
+        mic.title = 'Transcrever voz';
+        mic.innerHTML = icon('mic', 20);
+        this.ui.form.insertBefore(mic, this.ui.send);
+        this.ui.mic = mic;
+
+        this.dictation = new Dictation({
+            // While listening the box shows "what was already written + what is being heard", so a
+            // half sentence is not lost; the text before the mic was tapped is the base.
+            onInterim: text => {
+                const input = this.ui.input;
+                input.value = (this.micBase || '') + text;
+                this.autosize();
+            },
+            onFinal: text => {
+                const input = this.ui.input;
+                input.value = (this.micBase || '') + text;
+                this.micBase = null;
+                this.autosize();
+                this.saveDraftSoon();
+            },
+            onStateChange: listening => {
+                mic.classList.toggle('recording', listening);
+                mic.setAttribute('aria-pressed', String(listening));
+                mic.setAttribute('aria-label', listening ? 'Parar transcrição' : 'Transcrever voz');
+                if (listening) {
+                    const value = this.ui.input.value;
+                    this.micBase = value ? value.replace(/\s*$/, ' ') : '';
+                } else if (this.micBase !== null) {
+                    // Nothing was recognized: put the box back the way it was
+                    if (this.ui.input.value === this.micBase) this.ui.input.value = this.micBase.trimEnd();
+                    this.micBase = null;
+                    this.autosize();
+                }
+            },
+            onError: message => toast(message, { tone: 'error' }),
+        });
+        mic.addEventListener('click', () => this.dictation.toggle());
     }
 
     openSheet() {
@@ -224,6 +275,7 @@ export default class Composer {
 
     /** Removes what lives outside the composer's own element (the iPhone sheet). */
     dispose() {
+        this.dictation?.stop();
         this.resizeObserver?.disconnect();
         if (this.onSheetKey) document.removeEventListener('keydown', this.onSheetKey);
         this.ui.sheet?.remove();
