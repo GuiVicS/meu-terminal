@@ -3276,3 +3276,15 @@ audio.fm-media { width: min(520px, 90%); }
 }
 .edge-swipe-hint.from-right { left: auto; right: 0; }
 .edge-swipe-hint.ready { background-color: var(--accent); color: var(--accent-fg); }
+
+/* ---------- No zoom on focus (touch screens, any orientation) ----------
+   iOS Safari zooms into any focused field whose text is under 16px, and the user has to pinch back
+   out every time. Every place you type keeps 16px+ on touch screens (xterm's hidden textarea too:
+   it takes the focus when the terminal is tapped). Checkboxes, switches and sliders don't zoom, so
+   they're left alone. index.html also sets maximum-scale=1 on iPhones as a safety net. */
+@media (pointer: coarse) {
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="color"], [type="file"]),
+    textarea, select, [contenteditable="true"], .ProseMirror, .xterm-helper-textarea {
+        font-size: max(16px, 1em) !important;
+    }
+}

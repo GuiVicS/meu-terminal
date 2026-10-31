@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <!-- viewport-fit=cover: draw under notches/home indicator; safe areas are padded in CSS -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <script>
+        // iPhone: Safari zooms into any focused field under 16px. styles.css keeps fields at 16px+ on touch;
+        // this is the safety net. On iOS maximum-scale only stops that automatic zoom (pinch zoom keeps
+        // working), so it's set on iPhones only - on Android it would block pinch zoom.
+        if (/iPhone|iPod/.test(navigator.userAgent)) document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+    </script>
     <meta name="theme-color" content="#0B0D10">
     <meta name="color-scheme" content="dark light">
     <meta name="apple-mobile-web-app-capable" content="yes">
