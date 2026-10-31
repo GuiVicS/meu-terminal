@@ -1013,6 +1013,8 @@ kbd {
    ========================================================= */
 @keyframes pulse { 50% { opacity: 0.35; } }
 @keyframes fade-in { from { opacity: 0; } }
+@keyframes session-pill-next { from { opacity: 0; transform: translateX(16px); } }
+@keyframes session-pill-prev { from { opacity: 0; transform: translateX(-16px); } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.97); } }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
@@ -2910,6 +2912,7 @@ audio.fm-media { width: min(520px, 90%); }
             grid-area: pill; justify-self: start; align-self: center; min-width: 0; max-width: 100%;
             display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px 0 4px;
             border-radius: 24px; color: var(--text);
+            touch-action: pan-y; /* horizontal swipes change session instead of scrolling (4.6) */
             transition: transform var(--dur) var(--ease);
         }
         .session-pill:active { transform: scale(0.97); }
@@ -2919,6 +2922,8 @@ audio.fm-media { width: min(520px, 90%); }
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
         }
         .session-pill-name { min-width: 0; font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .session-pill-name.swipe-next { animation: session-pill-next 200ms var(--ease); }
+        .session-pill-name.swipe-prev { animation: session-pill-prev 200ms var(--ease); }
         .session-pill-chevron { display: inline-grid; flex-shrink: 0; color: var(--text-2); }
         .session-pill[data-state="connecting"] .session-pill-icon,
         .session-pill[data-state="reconnecting"] .session-pill-icon { animation: pulse 1.2s ease-in-out infinite; }

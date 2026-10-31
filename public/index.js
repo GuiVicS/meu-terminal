@@ -192,7 +192,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     // iPhone session pill (top of the screen): icon, name and color of the current session
     const sessionPill = document.getElementById('sessionPill');
     sessionPill.querySelector('.session-pill-chevron').innerHTML = icon('chevronDown', 18);
-    sessionPill.addEventListener('click', () => workspace?.openSessionList(sessionPill));
+    // Swiping the pill left/right goes to the next/previous open session (iPhone, 4.6).
+    // The click that the browser fires after the drag must not open the session sheet.
+    let pillGesture = null;
+    let pillSwipedAt = 0;
+    sessionPill.addEventListener('pointerdown', e => {
+        if (e.pointerType === 'mouse' || !root.hasAttribute('data-iphone')) return;
+        pillGesture = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        try { sessionPill.setPointerCapture(e.pointerId); } catch { /* pointerup still bubbles */ }
+    });
+    const endPillGesture = e => {
+        const start = pillGesture;
+        pillGesture = null;
+        if (!start || start.id !== e.pointerId) return;
+        const dx = e.clientX - start.x;
+        const dy = e.clientY - start.y;
+        // Mostly horizontal and long enough, like a page swipe
+        if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        pillSwipedAt = performance.now();
+        workspace.cycle(dx < 0 ? 1 : -1);
+        const name = sessionPill.querySelector('.session-pill-name');
+        name.classList.remove('swipe-next', 'swipe-prev');
+        void name.offsetWidth; // restart the short entrance animation
+        name.classList.add(dx < 0 ? 'swipe-next' : 'swipe-prev');
+    };
+    sessionPill.addEventListener('pointerup', endPillGesture);
+    sessionPill.addEventListener('pointercancel', () => { pillGesture = null; });
+    sessionPill.addEventListener('click', e => {
+        if (performance.now() - pillSwipedAt < 600) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+        workspace?.openSessionList(sessionPill);
+    });
     const renderPill = session => {
         if (!session) return;
         sessionPill.querySelector('.session-pill-icon').innerHTML = icon(sessionIcon(session), 20);

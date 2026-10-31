@@ -591,11 +591,11 @@ export default class TerminalManager {
         this.tabBar.reorder(sorted);
     }
 
-    cycle(delta) {
+    cycle(delta, { focus = false } = {}) {
         const ids = this.order;
         if (ids.length < 2) return;
         const i = ids.indexOf(this.activeId);
-        this.activate(ids[(i + delta + ids.length) % ids.length], { focus: true });
+        this.activate(ids[(i + delta + ids.length) % ids.length], { focus });
     }
 
     selectIndex(n) {
@@ -898,8 +898,8 @@ export default class TerminalManager {
             case 'reopen': return this.restoreLastClosed();
             case 'close': return this.activeId !== null && this.close(this.activeId);
             case 'rename': return this.activeId !== null && this.startRename(this.activeId);
-            case 'next': return this.cycle(1);
-            case 'prev': return this.cycle(-1);
+            case 'next': return this.cycle(1, { focus: true });
+            case 'prev': return this.cycle(-1, { focus: true });
             case 'search':
                 // Browser tabs are images of a page: there's no text here to search
                 if (this.active?.kind === 'browser') return this.active.focus();
