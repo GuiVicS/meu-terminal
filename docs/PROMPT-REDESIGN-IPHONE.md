@@ -157,7 +157,21 @@ No Safari, deslizar para os lados na barra troca de aba. Faça o mesmo na **píl
 
 ### 4.6 Telas que ainda não foram adaptadas ao iPhone
 
-Aplique as regras da seção 3 a:
+**Primeiro, um ajuste pedido pelo dono no formulário de nova sessão** (`ui/newSession.js`):
+o controle segmentado **Terminal / Navegador / Arquivos / Anotações** (`.kind-toggle`) é
+**redundante**: o usuário já escolheu o tipo ao tocar no ícone do app na tela anterior
+(`showForm(tile.dataset.kind)`). No iPhone:
+- esconda o `.kind-toggle` quando o formulário vier de um ícone da grade;
+- o título passa a dizer o tipo escolhido ("Novo terminal", "Novo navegador", "Nova aba de
+  arquivos") em vez de "Nova sessão", para ficar claro o que vai ser criado;
+- quem quiser outro tipo volta pelo "‹ Início" (ou arrasta da borda), como em qualquer app de iPhone;
+- o único caminho que não tem tipo pré-escolhido é "Nova sessão com opções…" do menu ⋮
+  (`open({ advanced: true })`, que chama `showForm('terminal')`). Ali, decida com o dono: ou mostra
+  o seletor só nesse caso, ou esse item do menu passa a abrir a grade de apps.
+- Na mesma tela, o botão "Criar sessão" aparece com um anel roxo em volta (o `:focus-visible` ou a
+  borda do `.btn-primary`); remova no iPhone, o botão já é a ação principal pela cor.
+
+Depois, aplique as regras da seção 3 a:
 
 - [ ] **Arquivos** (`managers/filesSession.js`): barra de caminho e ações. Botão principal flutuante
       embaixo; ações secundárias num "•••"; lista com linhas de 56 px.
