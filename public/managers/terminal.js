@@ -14,6 +14,7 @@ import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
 import { showMenu } from '../ui/contextMenu.js';
+import { askText } from '../ui/prompt.js';
 import { openSessionSheet, sessionIcon } from '../ui/sessionSheet.js';
 import { toast } from '../ui/toast.js';
 import { playChime } from '../ui/sound.js';
@@ -715,7 +716,7 @@ export default class TerminalManager {
                 ? [{ label: 'Desfazer divisão', icon: 'panelLeft', run: () => this.clearSplit({ keep: id }) }]
                 : [{ label: 'Dividir tela com…', icon: 'panelLeft', run: () => this.openSplitMenu(id, { x, y, anchor }) }]),
             { label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) },
-            { label: 'Renomear', icon: 'edit', hint: k.rename, run: () => this.tabBar.startRename(id) },
+            { label: 'Renomear', icon: 'edit', hint: k.rename, run: () => this.startRename(id) },
             { label: s.pinned ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(id) },
             'separator',
             { label: 'Mover para a esquerda', icon: 'chevronLeft', disabled: i === 0, run: () => this.move(id, -1) },
@@ -727,6 +728,54 @@ export default class TerminalManager {
             { label: 'Fechar à direita', icon: 'arrowRightBar', disabled: !hasRight,
                 run: () => this.closeToTheRight(id) },
         ], { x, y, label: `Ações de ${s.name}`, restoreFocus: anchor });
+    }
+
+    /**
+     * Renames a tab in place on its tab; when the tab strip isn't on screen (iPhone: the session
+     * pill replaces it) asks for the name in a dialog instead of editing an invisible tab.
+     */
+    async startRename(id) {
+        const tab = this.tabBar.tabs.get(id);
+        if (tab && tab.offsetParent !== null) {
+            this.tabBar.startRename(id);
+            return;
+        }
+        const s = this.sessions.get(id);
+        if (!s) return;
+        const name = await askText({ title: 'Renomear sessão', label: 'Nome', value: s.name, confirm: 'Salvar' });
+        if (name && name.trim() && name.trim() !== s.name) this.rename(id, name.trim().slice(0, 60));
+        this.focusActive();
+    }
+
+    /**
+     * What the iPhone's ⋮ shows first: the actions of the current tab (its own and the tab menu's),
+     * so the menu is about what's on screen. Creating tabs lives on the apps page, reopening in the
+     * session sheet's history, quick commands/copied on the shortcut bar.
+     */
+    tabActions(id, anchor) {
+        const s = this.sessions.get(id);
+        if (!s) return [];
+        const folder = s.kind === 'terminal' ? (s.cwd || s.startCwd || undefined) : undefined;
+        const own = {
+            terminal: [
+                { label: 'Buscar no terminal', icon: 'search', run: () => this.run('search') },
+                { label: 'Nova conversa com agente aqui', icon: 'bot', run: () => this.openAgentMenu(anchor) },
+                ...(window.appConfig?.filesAvailable ? [{ label: 'Abrir pasta nos Arquivos', icon: 'folderOpen', run: () => this.createFiles(folder) }] : []),
+            ],
+            agent: s.kind === 'agent' && s.menuActions ? s.menuActions(anchor) : [],
+            browser: window.appConfig?.filesAvailable
+                ? [{ label: 'Abrir pasta nos Arquivos', icon: 'folderOpen', run: () => this.createFiles(this.hooks.suggestFolder(s)) }] : [],
+            files: [{ label: 'Buscar', icon: 'search', run: () => s.openFind() }],
+            notes: [{ label: 'Buscar nas anotações', icon: 'search', run: () => s.openFind() }],
+        }[s.kind] || [];
+        return [
+            ...own,
+            ...(own.length ? ['separator'] : []),
+            { label: 'Renomear', icon: 'edit', run: () => this.startRename(id) },
+            { label: s.pinned ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(id) },
+            ...(s.kind !== 'agent' ? [{ label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) }] : []),
+            { label: s.kind === 'terminal' ? 'Fechar (encerra o processo)' : 'Fechar', icon: 'x', run: () => this.close(id) },
+        ];
     }
 
     /** Session switcher (mobile status bar button; on iPhones also the session pill, as a sheet). */
@@ -845,7 +894,7 @@ export default class TerminalManager {
             case 'newPage': return this.openNewSessionPage();
             case 'reopen': return this.restoreLastClosed();
             case 'close': return this.activeId !== null && this.close(this.activeId);
-            case 'rename': return this.activeId !== null && this.tabBar.startRename(this.activeId);
+            case 'rename': return this.activeId !== null && this.startRename(this.activeId);
             case 'next': return this.cycle(1);
             case 'prev': return this.cycle(-1);
             case 'search':

@@ -280,6 +280,25 @@ export default class AgentSession {
         return this.cwd || 'agente';
     }
 
+    /**
+     * The header's actions as menu items, for the iPhone's contextual ⋮ menu (the header there
+     * only keeps the title and status). Same rules as the buttons: the vibecoding ones only
+     * exist in a vibecoding project. Popovers open anchored to `anchor` (the ⋮ button).
+     */
+    menuActions(anchor) {
+        const vibe = !this.el.vibeBtn.hidden;
+        return [
+            { label: 'Conversas anteriores', icon: 'history', run: () => this.openHistory(anchor) },
+            { label: 'Abrir terminal na pasta', icon: 'terminal', run: () => this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id }) },
+            { label: 'Abrir arquivos da pasta', icon: 'folder',
+                run: () => this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id }) },
+            ...(vibe ? [{ label: 'Trocar agente', icon: 'swap', run: () => this.openVibeAgentMenu(anchor) }] : []),
+            ...(!this.el.publishBtn.hidden ? [{ label: this.el.publishBtn.textContent.trim() || 'Publicar', icon: 'cloudUpload',
+                disabled: this.el.publishBtn.disabled, run: () => this.publishVibeProject() }] : []),
+            { label: 'Painel do agente', icon: 'panelLeft', checked: this.isPanelOpen(), run: () => this.togglePanel() },
+        ];
+    }
+
     // ---------- side panel ----------
 
     togglePanel() {

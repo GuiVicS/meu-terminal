@@ -55,7 +55,10 @@ async function waitForFonts() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     const config = window.appConfig || {};
-    const isMacOS = /Macintosh|Mac OS X/i.test(navigator.userAgent);
+    // iPhones say "like Mac OS X" too: they'd get ⌘ shortcut hints (a glyph their font lacks)
+    const isMacOS = /Macintosh|Mac OS X/i.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.userAgent);
+    /** The iPhone layout (styles.css [data-iphone], portrait only). */
+    const iphonePortrait = () => root.hasAttribute('data-iphone') && window.matchMedia('(orientation: portrait)').matches;
     const root = document.documentElement;
     const uiStorage = new StorageManager('meuterminal-');
 
@@ -260,6 +263,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ---------- dialogs ----------
     settingsDialog = createSettingsDialog(settings, () => workspace?.active, commands);
+    /** Configurações: the /admin page (the iPhone opens a sheet instead, inside the app). */
+    function openSettings() {
+        window.location.href = joinPath('admin');
+    }
     const vibeForm = new VibeForm();
     const agentLaunch = new AgentLaunch();
 
@@ -320,7 +327,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             },
             onAction: action => {
                 if (action === 'fullscreen') toggleFullscreen();
-                else if (action === 'settings') window.location.href = joinPath('admin');
+                else if (action === 'settings') openSettings();
                 else if (action === 'vibecode') vibeForm.open();
             },
         },
@@ -356,7 +363,23 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
     };
 
+    const appItems = () => [
+        { label: 'Configurações', icon: 'settings', run: () => openSettings() },
+        { label: 'Guia do app', icon: 'info', run: () => window.open(joinPath('guia'), '_blank', 'noopener') },
+        ...(config.isPinRequired ? [{ label: 'Sair', icon: 'logout', danger: true, run: logout }] : []),
+    ];
+
     menuBtn.addEventListener('click', () => {
+        // iPhone: the ⋮ is about the tab on screen (docs/ANALISE-UX.md, section 5) - its actions
+        // first, then the app's. Nothing is lost: creating tabs is on the apps page, reopening in
+        // the session sheet's history, quick commands and copied text on the shortcut bar, theme
+        // in Configurações, and the iPhone app is always fullscreen (no focus mode).
+        if (iphonePortrait()) {
+            const own = workspace.tabActions(workspace.activeId, menuBtn);
+            showMenu([...own, ...(own.length ? ['separator'] : []), ...appItems()],
+                { anchor: menuBtn, label: workspace.active ? `Ações de ${workspace.active.name}` : 'Mais ações' });
+            return;
+        }
         const k = workspace.shortcutLabels();
         const c = isMacOS ? '⌘' : 'Ctrl';
         const dark = settings.resolvedTheme() === 'dark';
@@ -383,7 +406,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             { label: dark ? 'Tema claro' : 'Tema escuro', icon: dark ? 'sun' : 'moon',
                 run: () => settings.set('theme', dark ? 'light' : 'dark') },
             'separator',
-            { label: 'Configurações', icon: 'settings', hint: `${c}+,`, run: () => { window.location.href = joinPath('admin'); } },
+            { label: 'Configurações', icon: 'settings', hint: `${c}+,`, run: () => openSettings() },
             { label: 'Guia do app', icon: 'info', run: () => window.open(joinPath('guia'), '_blank', 'noopener') },
         ];
         if (!window.matchMedia('(pointer: coarse)').matches) {

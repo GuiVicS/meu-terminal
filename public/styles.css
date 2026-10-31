@@ -2969,6 +2969,8 @@ audio.fm-media { width: min(520px, 90%); }
 
         /* ---------- agent chat: the message box floats over the conversation ---------- */
         .ag-head { border-bottom: 0.5px solid var(--glass-border); }
+        /* Header: just title and status - its actions are in the ⋮ (TerminalManager.tabActions) */
+        .ag-head > [data-act] { display: none; }
         .ag-main { --ag-composer-h: 120px; }
         .ag-log { padding-bottom: calc(var(--ag-composer-h) + 32px); }
         .ag-pending { margin-bottom: calc(var(--ag-composer-h) + 16px); }
