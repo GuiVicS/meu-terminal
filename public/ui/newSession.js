@@ -21,6 +21,9 @@ export function relativeTime(timestamp) {
     return 'agora';
 }
 
+// Kind of a closed tab -> its icon (shown in the iPhone layout of the recent list)
+const RECENT_ICONS = { terminal: 'terminal', browser: 'globe', files: 'folder', notes: 'notes', agent: 'bot' };
+
 // data-kind -> handlers.onCreate({ kind }); data-special -> its own handler. data-flag gates on appConfig.
 const APPS = [
     { kind: 'terminal', icon: 'terminal', label: 'Terminal', color: 'green' },
@@ -250,12 +253,14 @@ export default class NewSessionPage {
             li.innerHTML = `
                 <button type="button" class="recent-open">
                     <span class="recent-dot" aria-hidden="true"></span>
+                    <span class="recent-icon" aria-hidden="true">${icon(RECENT_ICONS[r.kind] || 'terminal', 18)}</span>
                     <span class="recent-text">
                         <span class="recent-name"></span>
                         <span class="recent-meta"><span class="recent-cwd mono"></span><span class="recent-time"></span></span>
                     </span>
                 </button>
                 <button type="button" class="icon-btn recent-forget">${icon('x', 14)}</button>`;
+            if (r.color) li.style.setProperty('--c', `var(--c-${r.color})`);
             li.querySelector('.recent-name').textContent = r.name;
             li.querySelector('.recent-cwd').textContent = r.cwd || '~';
             li.querySelector('.recent-time').textContent = relativeTime(r.closedAt);

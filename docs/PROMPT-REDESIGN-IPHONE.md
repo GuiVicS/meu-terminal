@@ -31,6 +31,7 @@ Commits (do mais antigo ao mais novo):
 3. `feat: aba de navegador no estilo do Safari do iOS 26 (iPhone)`.
 4. `feat: abas do iPhone como pílula da sessão atual + folha de sessões`.
 5. `feat: histórico de abas na folha de sessões do iPhone`.
+6. `feat: página inicial de apps no estilo da tela de início do iOS 26 (iPhone)`.
 
 ### 2.1 Como o "modo iPhone" liga
 
@@ -60,6 +61,7 @@ Há variantes claro/escuro, um `@supports` para `backdrop-filter` e um fallback 
 | Chat do agente | Caixa de mensagem **flutuante** (cartão de vidro, raio 32), conversa passa por baixo com fade. Texto em cima; embaixo ＋ (anexar), pílula de resumo "Modelo · Modo" e enviar. Os seletores do agente foram para uma **folha deslizante** ("Modelo e configurações") aberta pela pílula. | `composer.js` (`setupIphone`, `settingsSummary`, `openSheet`, `dispose`), CSS |
 | Navegador | Estilo **Safari compacto do iOS 26**: barra flutuante embaixo com voltar, pílula do endereço (mostra só o domínio; editar mostra o endereço completo e ocupa a barra) com recarregar dentro, e "•••" com Avançar, Teclado, Portas abertas e Tamanho e qualidade. Página ocupa a aba inteira. | `browserSession.js` (`.browser-pill`, `.browser-host`, `openMoreMenu`), CSS |
 | Menus (`.menu`) | Popovers de vidro com cantos 22 px e itens de 44 px. | CSS |
+| Página inicial de apps ("Nova sessão") | Título grande à esquerda; ícones de app como na tela de início (68 px, gradiente da cor do app, glifo branco, sem cartão em volta, rótulo embaixo); "Sessões recentes" como lista agrupada com ícone do tipo; formulário com controle segmentado, campos de 50 px e botões em cápsula; configurações e fechar como círculos de vidro; fundo com leve gradiente. | `ui/newSession.js` (`RECENT_ICONS`, `.recent-icon`), CSS |
 
 No desktop o navegador mantém a ordem antiga graças a `.browser-pill { display: contents }` e
 `order` nos botões. Não quebre isso.
@@ -153,8 +155,6 @@ No Safari, deslizar para os lados na barra troca de aba. Faça o mesmo na **píl
 
 Aplique as regras da seção 3 a:
 
-- [ ] **Nova sessão** (`ui/newSession.js`, `.new-session`): grade de apps e "Sessões recentes" como
-      lista agrupada (cantos 22, linhas altas); botão fechar redondo de vidro.
 - [ ] **Arquivos** (`managers/filesSession.js`): barra de caminho e ações. Botão principal flutuante
       embaixo; ações secundárias num "•••"; lista com linhas de 56 px.
 - [ ] **Anotações** (`managers/notesSession.js` e o PWA separado `/notas`): barra de busca/filtro
