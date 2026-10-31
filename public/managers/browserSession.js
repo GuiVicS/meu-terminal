@@ -99,15 +99,19 @@ export default class BrowserSession {
             <div class="browser-toolbar">
                 <button type="button" class="icon-btn" data-act="back" aria-label="Voltar" disabled>${icon('chevronLeft', 18)}</button>
                 <button type="button" class="icon-btn" data-act="forward" aria-label="Avançar" disabled>${icon('chevronRight', 18)}</button>
-                <button type="button" class="icon-btn" data-act="reload" aria-label="Recarregar">${icon('refresh', 17)}</button>
-                <button type="button" class="browser-live" data-act="live" hidden><span>ao vivo</span></button>
-                <form class="browser-address" autocomplete="off">
-                    <input type="text" inputmode="url" enterkeyhint="go" spellcheck="false" autocapitalize="off"
-                        autocorrect="off" placeholder="localhost:5173 ou endereço" aria-label="Endereço">
-                </form>
+                <div class="browser-pill">
+                    <button type="button" class="browser-live" data-act="live" hidden><span>ao vivo</span></button>
+                    <form class="browser-address" autocomplete="off">
+                        <input type="text" inputmode="url" enterkeyhint="go" spellcheck="false" autocapitalize="off"
+                            autocorrect="off" placeholder="localhost:5173 ou endereço" aria-label="Endereço">
+                        <span class="browser-host" aria-hidden="true"></span>
+                    </form>
+                    <button type="button" class="icon-btn" data-act="reload" aria-label="Recarregar">${icon('refresh', 17)}</button>
+                </div>
                 <button type="button" class="icon-btn" data-act="ports" aria-label="Portas abertas no servidor">${icon('activity', 17)}</button>
                 <button type="button" class="icon-btn" data-act="view" aria-label="Tamanho e qualidade">${icon('settings', 17)}</button>
                 <button type="button" class="icon-btn browser-kbd-btn" data-act="keyboard" aria-label="Abrir teclado">${icon('keyboard', 18)}</button>
+                <button type="button" class="icon-btn browser-more" data-act="more" aria-label="Mais ações" aria-haspopup="menu">${icon('more', 20)}</button>
             </div>
             <div class="browser-progress" hidden></div>
             <div class="browser-viewer">
@@ -126,6 +130,7 @@ export default class BrowserSession {
             forward: q('[data-act="forward"]'),
             reload: q('[data-act="reload"]'),
             live: q('[data-act="live"]'),
+            host: q('.browser-host'),
             progress: q('.browser-progress'),
             viewer: q('.browser-viewer'),
             surface: q('.browser-surface'),
@@ -305,6 +310,12 @@ export default class BrowserSession {
         if (document.activeElement !== this.el.address) {
             this.el.address.value = s.url && s.url !== 'about:blank' ? s.url : '';
         }
+        // Domain only, like Safari (shown instead of the full address on iPhones, see styles.css)
+        let host = '';
+        try {
+            host = s.url && s.url !== 'about:blank' ? new URL(s.url).host : '';
+        } catch { /* not a URL: leave it empty */ }
+        this.el.host.textContent = host;
         this.el.back.disabled = !s.canGoBack;
         this.el.forward.disabled = !s.canGoForward;
         this.el.reload.innerHTML = s.loading ? icon('x', 17) : icon('refresh', 17);
@@ -400,6 +411,7 @@ export default class BrowserSession {
             } else if (act === 'ports') this.send({ type: 'ports' }) || this.showStatus('Sem conexão');
             else if (act === 'view') this.openViewMenu(btn);
             else if (act === 'live') this.openLiveMenu(btn);
+            else if (act === 'more') this.openMoreMenu(btn);
             else if (act === 'keyboard') {
                 if (document.activeElement === this.el.kbd) this.el.kbd.blur();
                 else this.openKeyboard();
@@ -423,6 +435,20 @@ export default class BrowserSession {
                 ? { label: 'Parar de recarregar ao salvar', icon: 'eyeOff', run: () => this.send({ type: 'live', path: null }) }
                 : { label: 'Recarregar ao salvar arquivos…', icon: 'refresh', run: () => this.askLiveFolder() },
         ], { anchor, label: 'Tamanho e qualidade' });
+    }
+
+    /**
+     * "•••" (iPhone, Safari-style bottom bar): the toolbar buttons that don't fit next to the
+     * address pill. Hidden elsewhere, where those buttons are on the toolbar itself.
+     */
+    openMoreMenu(anchor) {
+        showMenu([
+            { label: 'Avançar', icon: 'chevronRight', disabled: !this.nav.canGoForward, run: () => this.send({ type: 'forward' }) },
+            { label: 'Teclado', icon: 'keyboard', run: () => this.openKeyboard() },
+            { label: 'Portas abertas no servidor', icon: 'activity', run: () => this.send({ type: 'ports' }) || this.showStatus('Sem conexão') },
+            'separator',
+            { label: 'Tamanho e qualidade…', icon: 'settings', run: () => this.openViewMenu(anchor) },
+        ], { anchor, label: 'Mais ações' });
     }
 
     /** Live reload: the page reloads when a file of a folder is saved (like VS Code's Live Server). */
@@ -452,7 +478,9 @@ export default class BrowserSession {
     }
 
     showPorts(ports) {
-        const anchor = this.panel.querySelector('[data-act="ports"]');
+        // The ports button, or "•••" where the ports button is folded into it (iPhone)
+        const anchor = ['ports', 'more'].map(act => this.panel.querySelector(`[data-act="${act}"]`))
+            .find(btn => btn && btn.offsetParent) || null;
         const items = ports.map(({ port, name }) => ({
             label: `localhost:${port}`,
             hint: name,

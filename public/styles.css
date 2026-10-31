@@ -1244,6 +1244,18 @@ body.page-login { overflow: auto; }
 }
 .browser-address input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .browser-kbd-btn { display: none; }
+/* Address pill wrapper and "•••" only matter in the iPhone (Safari-style) layout; elsewhere the
+   wrapper disappears from layout and `order` keeps the toolbar in its usual sequence. */
+.browser-pill { display: contents; }
+.browser-host, .browser-more { display: none; }
+.browser-toolbar [data-act="back"] { order: 1; }
+.browser-toolbar [data-act="forward"] { order: 2; }
+.browser-toolbar [data-act="reload"] { order: 3; }
+.browser-toolbar [data-act="live"] { order: 4; }
+.browser-toolbar .browser-address { order: 5; }
+.browser-toolbar [data-act="ports"] { order: 6; }
+.browser-toolbar [data-act="view"] { order: 7; }
+.browser-toolbar [data-act="keyboard"] { order: 8; }
 .browser-progress {
     flex-shrink: 0;
     height: 2px;
@@ -3023,4 +3035,74 @@ audio.fm-media { width: min(520px, 90%); }
 .ag-sheet .ag-toggle input { order: 2; margin-left: auto; width: 22px; height: 22px; accent-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
     .ag-sheet, .ag-sheet-backdrop { transition: none; }
+}
+
+/* ---------- iPhone: the browser tab as Safari's compact layout (iOS 26) ----------
+   One floating bar at the bottom, detached from the edges: back (glass circle), the address
+   pill showing just the domain with reload inside it, and "•••" with the rest (forward,
+   keyboard, ports, size/quality). The page fills the whole tab and runs under the bar. */
+@media (orientation: portrait) {
+    [data-iphone] {
+        .browser-toolbar {
+            position: absolute; left: 10px; right: 10px; bottom: 8px; z-index: 5;
+            gap: 8px; padding: 0; background: transparent; border: none;
+        }
+        .browser-toolbar [data-act="forward"],
+        .browser-toolbar [data-act="ports"],
+        .browser-toolbar [data-act="view"],
+        .browser-toolbar [data-act="keyboard"] { display: none; }
+
+        .browser-toolbar [data-act="back"],
+        .browser-more,
+        .browser-pill {
+            background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur);
+            backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border);
+            box-shadow: inset 0 1px 0 var(--glass-rim), inset 0 -1px 1px var(--glass-rim-low), var(--glass-shadow);
+        }
+        .browser-toolbar [data-act="back"],
+        .browser-more { display: inline-grid; width: 48px; height: 48px; border-radius: 50%; color: var(--text); }
+        .browser-toolbar [data-act="back"]:disabled { opacity: 1; color: var(--text-3); }
+        .browser-more { order: 9; }
+        .browser-more .icon { transform: rotate(90deg); } /* Safari's "•••" is horizontal */
+
+        /* 48px capsule, 4px inset: reload is a 40px circle inside it (24 - 4 = 20) */
+        .browser-pill {
+            order: 5; flex: 1; min-width: 0; height: 48px; display: flex; align-items: center;
+            padding: 4px; border-radius: 24px;
+        }
+        .browser-pill [data-act="reload"] { order: 3; width: 40px; height: 40px; border-radius: 20px; color: var(--text-2); }
+        .browser-pill .browser-live { order: 1; margin-left: 6px; }
+        .browser-address { order: 2; position: relative; flex: 1; min-width: 0; margin: 0; }
+        .browser-address input {
+            height: 40px; padding: 0 8px 0 12px; border: none; border-radius: 20px;
+            background: transparent; box-shadow: none; font-size: 16px; text-align: center;
+        }
+        .browser-address input:focus { text-align: left; background: var(--glass-fill); box-shadow: none; }
+        /* Not editing: the domain, centered, over the (transparent) full address */
+        .browser-host {
+            display: block; position: absolute; inset: 0; padding: 0 8px; pointer-events: none;
+            font-size: 16px; font-weight: 500; line-height: 40px; text-align: center; color: var(--text);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .browser-address:not(:focus-within):has(.browser-host:not(:empty)) input { color: transparent; }
+        .browser-address:focus-within .browser-host { display: none; }
+        /* Editing the address: the field takes the whole bar, like Safari */
+        .browser-toolbar:has(.browser-address:focus-within) [data-act="back"],
+        .browser-toolbar:has(.browser-address:focus-within) .browser-more { display: none; }
+
+        /* Loading: a thin line along the top edge of the page */
+        .browser-progress { position: absolute; top: 0; left: 0; right: 0; z-index: 5; }
+
+        /* Menus (••• and the rest of the app) as glass popovers */
+        .menu {
+            border: 0.5px solid var(--glass-border); border-radius: 22px; padding: 6px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .menu-item { height: 44px; border-radius: 16px; font-size: 15px; }
+    }
 }
