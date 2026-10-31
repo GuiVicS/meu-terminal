@@ -40,4 +40,5 @@ test('isAppSecret / appSecretValues', () => {
     assert.ok(values.includes('senha-forte'));
     assert.ok(values.includes('vercel-123'));
     assert.ok(!values.includes('/usr/bin'));
+    assert.ok(!values.includes('eu@exemplo.com'), 'the email is not a secret to mask');
 });

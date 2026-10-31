@@ -41,13 +41,16 @@ function killGroup(child) {
  * @param {NodeJS.ProcessEnv} opts.env - the complete environment (nothing is inherited)
  * @param {number} opts.timeoutMs
  * @param {number} [opts.maxOutputBytes]
+ * @param {boolean} [opts.headTail] - over the cap, keep the start and the end (default: just the start)
+ * @param {number} [opts.uid] - run as this user (with opts.gid)
+ * @param {number} [opts.gid]
  * @param {string[]} [opts.secrets] - values masked in the output
  * @param {(child: import('child_process').ChildProcess) => void} [opts.onSpawn] - e.g. to cancel it from outside
  * @returns {Promise<{ exitCode: number|null, output: string, truncated: boolean, timedOut: boolean, durationMs: number }>}
  */
 async function runProcess({
     command, args = [], cwd = os.homedir(), env, timeoutMs,
-    maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES, secrets = [], onSpawn,
+    maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES, headTail = false, uid, gid, secrets = [], onSpawn,
 }) {
     const startedAt = Date.now();
     const child = spawn(command, args, {
@@ -55,14 +58,36 @@ async function runProcess({
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: process.platform !== 'win32',
+        ...(uid !== undefined ? { uid, gid } : {}),
     });
     onSpawn?.(child);
 
     let output = '';
+    let tail = '';
+    let dropped = 0;
     let truncated = false;
+    const half = Math.floor(maxOutputBytes / 2);
     const onData = d => {
-        if (output.length >= maxOutputBytes) { truncated = true; return; }
-        output += d.toString('utf8');
+        const chunk = d.toString('utf8');
+        if (!headTail) {
+            if (output.length >= maxOutputBytes) { truncated = true; return; }
+            output += chunk;
+            return;
+        }
+        // Head + tail: the first half stays, the rest is a rolling window of the latest output
+        if (output.length < half) {
+            const room = half - output.length;
+            output += chunk.slice(0, room);
+            if (chunk.length <= room) return;
+            tail += chunk.slice(room);
+        } else {
+            tail += chunk;
+        }
+        if (tail.length > half) {
+            truncated = true;
+            dropped += tail.length - half;
+            tail = tail.slice(-half);
+        }
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
@@ -77,7 +102,8 @@ async function runProcess({
     }).catch(e => { output += `\n[erro ao iniciar: ${e.message}]`; return null; });
     clearTimeout(timer);
 
-    if (truncated) output += '\n[saída truncada]';
+    if (headTail) output = dropped ? `${output}\n[… ${dropped} caracteres omitidos …]\n${tail}` : output + tail;
+    else if (truncated) output += '\n[saída truncada]';
     return { exitCode, output: mask(output, secrets), truncated, timedOut, durationMs: Date.now() - startedAt };
 }
 

@@ -75,7 +75,13 @@ class PushNotifier {
      * Sends a notification to every subscribed device. Dead subscriptions (uninstalled
      * app, revoked permission) are removed. Returns { sent, failed, devices }.
      */
-    async send({ title = 'MeuTerminal', body = '', sound = true, url = '/', tag } = {}) {
+    /**
+     * @param {object} msg
+     * @param {{action: string, title: string}[]} [msg.actions] - notification buttons (Android/desktop)
+     * @param {string} [msg.approvalId] - the Claude bridge approval the buttons answer (service-worker.js)
+     * @param {boolean} [msg.always] - show it even when the app is open on screen
+     */
+    async send({ title = 'MeuTerminal', body = '', sound = true, url = '/', tag, actions, approvalId, always } = {}) {
         const list = this.subscriptions();
         if (!list.length) return { sent: 0, failed: 0, devices: 0 };
         const payload = JSON.stringify({
@@ -84,6 +90,9 @@ class PushNotifier {
             sound: sound !== false,
             url,
             tag: tag || `mt-${Date.now()}`,
+            ...(Array.isArray(actions) ? { actions: actions.slice(0, 2) } : {}),
+            ...(approvalId ? { approvalId } : {}),
+            ...(always ? { always: true } : {}),
         });
         let sent = 0;
         let failed = 0;

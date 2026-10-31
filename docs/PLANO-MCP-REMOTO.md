@@ -1,6 +1,6 @@
 # Plano de ação: ponte MCP entre o Claude (claude.ai) e o MeuTerminal
 
-Status: **fase 0 implementada** (branch `feat/ponte-mcp-fase0`); fases 1 a 3 pendentes.
+Status: **fases 0 a 3 implementadas** (v2.8.0). Ver "O que foi feito" no fim da seção 7.
 
 Objetivo: o Claude do claude.ai (chat, app do celular) usar o servidor do MeuTerminal como uma
 **extensão do próprio ambiente**. O ambiente do Claude tem a rede bloqueada (sem npm, pip, apt,
@@ -266,6 +266,41 @@ Em paralelo, quando convier: quebrar o resto do `server.js` em `routes/` (2.4).
 - `scripts/process-runner.js` (usado pelo `WebhookRunner`) e `scripts/mcp-protocol.js` (usado pelo
   `/mcp`), prontos para a ponte reaproveitar.
 - Testes novos: `auth`, `child-env`, `process-runner`, `mcp-protocol`.
+
+### Fases 1 a 3: o que foi feito
+
+Decisões da seção 9 confirmadas: modo **A** (configurável com `REMOTE_MCP_RUN_AS`), aprovação
+**só perigosos** (padrão; muda no `/admin`), OAuth **à mão**, sem dependências novas.
+
+- `routes/remote.js` monta tudo só com `REMOTE_MCP_ENABLED=true` **e** login por email; com PIN,
+  sem login ou no modo demo a ponte não liga (e as rotas nem existem).
+- `scripts/remote/oauth.js`: metadados (RFC 8414 / 9728), código de uso único (60 s) com PKCE S256,
+  access token de 1 h, refresh de 30 dias que **roda** a cada uso (reuso de um refresh antigo revoga a
+  autorização inteira), revogação (RFC 7009), cliente fixo do `.env` e **DCR**. Só hashes no banco;
+  trocar senha/2FA invalida tudo.
+- `scripts/remote/tools.js`: as ferramentas das fases 1, 2 e 3 (seção 6). As de terminal só existem
+  quando os comandos rodam como o usuário do servidor, e `terminal_send/read` só mexem em abas abertas
+  pela própria ponte.
+- `scripts/remote/approvals.js`: aprovação presa ao comando exato (hash de ferramenta + argumentos),
+  uso único, expira em 10 min. Push com botões Aprovar/Recusar (service worker) e lista no `/admin`.
+  A chamada espera até ~40 s pela resposta antes de devolver "aguardando aprovação".
+- `scripts/remote/jobs.js`, `audit.js`, `exec.js`, `shares.js`, `risk.js` (reaproveita
+  `public/agent/risk.js` + padrões só da ponte: credenciais, docker rm, firewall, rclone delete...).
+- `/admin` → Ponte com o Claude: interruptor, modo de aprovação, como conectar, aprovações pendentes,
+  clientes (revogar / desconectar todos), jobs (saída, encerrar) e auditoria. Ligar a ponte ou
+  afrouxar a aprovação pede a senha de novo (step-up).
+
+Diferenças em relação ao texto do plano:
+- **Consentimento pede email + senha (+ 2FA) na própria página**, em vez de depender da sessão: o
+  cookie de login é `SameSite=Strict` e não chega quando o claude.ai redireciona para cá. Na prática é
+  o mesmo step-up previsto.
+- **DCR ligado por padrão** (`REMOTE_MCP_DCR=false` desliga): registrar um cliente não dá acesso a
+  nada sem passar pelo consentimento, e os `redirect_uri` ficam presos ao claude.ai/claude.com
+  (mais `REMOTE_MCP_REDIRECT_URIS`, para o MCP Inspector).
+- Aprovações pendentes e links de `share_link` ficam em memória: um reinício só significa pedir de novo.
+- 2.4 só começou: a ponte já nasceu em `routes/remote.js`; o resto do `server.js` continua lá.
+- De brinde: a seção "Agentes" aparecia em todas as páginas do `/admin` (o fetch dela reexibia a
+  seção por cima do roteamento). Corrigido.
 
 Estimativa de tamanho: fase 0 ~300 linhas (boa parte é mover código), fase 1 ~800 linhas com
 testes, fase 2 ~600 linhas.

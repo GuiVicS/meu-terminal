@@ -54,6 +54,23 @@ npm start
 | `ALLOW_NO_LOGIN` | `true` permite subir sem login nenhum (sem ele, o app se recusa a subir desprotegido) |
 | `WEBHOOKS_ENABLED` | `true` liga a aba Webhooks em Configurações (padrão: desligada) |
 | `VERCEL_TOKEN` | Publicar projetos de vibecoding na Vercel com um clique |
+| `REMOTE_MCP_ENABLED` | `true` liga a Ponte com o Claude (padrão: desligada) |
+
+## Ponte com o Claude
+
+Deixa o Claude do claude.ai (chat e app do celular) usar este servidor como extensão do ambiente
+dele: rodar comandos e programas instalados aqui, instalar pacotes, baixar arquivos, ler e gravar
+arquivos (inclusive Google Drive via rclone), salvar anotações, abrir páginas no Chromium e ver o
+screenshot, rodar jobs longos e mandar push no celular.
+
+1. Com login por email e senha (de preferência com 2FA), defina `REMOTE_MCP_ENABLED=true` e reinicie.
+2. No claude.ai: Configurações → Conectores → Adicionar conector personalizado, com a URL que aparece
+   em `/admin` → Ponte com o Claude (`<BASE_URL>/mcp/remote`).
+3. Ao conectar, o MeuTerminal pede email, senha e o código do autenticador.
+
+Comandos arriscados pedem aprovação no celular (push com Aprovar/Recusar); tudo fica na auditoria do
+`/admin`, onde também dá para desligar a ponte na hora e revogar clientes. Detalhes e as outras
+variáveis (`REMOTE_MCP_*`): `.env.example` e `docs/PLANO-MCP-REMOTO.md`.
 
 A lista completa está no `.env.example` e no guia.
 

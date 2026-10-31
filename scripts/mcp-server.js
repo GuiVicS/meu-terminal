@@ -483,4 +483,4 @@ function mcpToken(store) {
     return token;
 }
 
-module.exports = { createMcpHandler, mcpToken };
+module.exports = { createMcpHandler, createMcpTools, mcpToken, TOOLS };

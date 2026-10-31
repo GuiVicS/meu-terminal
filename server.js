@@ -27,7 +27,8 @@ const webhookPresets = require('./scripts/webhook-presets');
 const { resolveInputs } = require('./scripts/webhook-inputs');
 const { verifyHmacSignature } = require('./scripts/webhook-crypto');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
-const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
+const { createMcpHandler, createMcpTools, mcpToken } = require('./scripts/mcp-server');
+const { registerRemote, REMOTE_PUBLIC_PATHS, REMOTE_CROSS_ORIGIN_PATHS } = require('./routes/remote');
 const { FileManager, FileError } = require('./scripts/file-manager');
 const { LiveServers } = require('./scripts/live-server');
 const { Vibe } = require('./scripts/vibe');
@@ -128,6 +129,15 @@ if (!isAuthRequired && !DEMO_MODE && process.env.ALLOW_NO_LOGIN !== 'true') {
     process.exit(1);
 }
 
+// Claude bridge (routes/remote.js, docs/PLANO-MCP-REMOTO.md): claude.ai drives this server through
+// /mcp/remote. Off by default, and only with email + password (its consent page asks for them).
+const REMOTE_MCP_REQUESTED = process.env.REMOTE_MCP_ENABLED === 'true';
+const REMOTE_MCP_ENABLED = REMOTE_MCP_REQUESTED && AUTH_MODE === 'email' && !DEMO_MODE;
+const REMOTE_MCP_DISABLED_REASON = !REMOTE_MCP_REQUESTED ? 'REMOTE_MCP_ENABLED não está como true.'
+    : DEMO_MODE ? 'Indisponível no modo demonstração.'
+    : 'A ponte exige login com email e senha (AUTH_EMAIL e AUTH_PASSWORD); com PIN ou sem login ela não liga.';
+if (REMOTE_MCP_REQUESTED && !REMOTE_MCP_ENABLED) console.warn(`Ponte com o Claude não ligada: ${REMOTE_MCP_DISABLED_REASON}`);
+
 // Log which protection is enabled
 if (isEmailAuth) {
     debugLog('Email/password login is enabled for:', AUTH_EMAIL, totp ? '(with 2FA)' : '');
@@ -191,7 +201,13 @@ const captureRawBody = (req, res, buf) => { req.rawBody = buf; };
 const jsonWebhook = express.json({ limit: '64kb', verify: captureRawBody });
 const urlencodedWebhook = express.urlencoded({ extended: false, limit: '64kb', verify: captureRawBody });
 const HOOK_PATH_RE = /\/hooks\/[^/]+$/;
+// OAuth endpoints of the Claude bridge: clients send application/x-www-form-urlencoded (RFC 6749)
+const OAUTH_FORM_RE = /\/oauth\/(token|revoke|register)$/;
+const urlencodedOAuth = express.urlencoded({ extended: false, limit: '16kb' });
 app.use((req, res, next) => {
+    if (req.method === 'POST' && OAUTH_FORM_RE.test(req.path) && String(req.headers['content-type'] || '').includes('urlencoded')) {
+        return urlencodedOAuth(req, res, next);
+    }
     if (/\/api\/agent-sessions\/[^/]+\/prompt$/.test(req.path)) return jsonAgentPrompt(req, res, next);
     if (req.method === 'POST' && HOOK_PATH_RE.test(req.path)) {
         const parser = String(req.headers['content-type'] || '').includes('urlencoded') ? urlencodedWebhook : jsonWebhook;
@@ -260,7 +276,9 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // Global middleware for origin validation and authentication
 app.use(BASE_PATH, (req, res, next) => {
     // /mcp and /api/agent-launch: server-local + token (and /mcp refuses any Origin)
-    if (!SAFE_METHODS.has(req.method) && req.path !== '/mcp' && req.path !== '/api/agent-launch' && !req.path.startsWith('/hooks/') && !isSameOrigin(req)) {
+    const remoteCrossOrigin = REMOTE_MCP_ENABLED && REMOTE_CROSS_ORIGIN_PATHS.includes(req.path); // own credentials, no cookies
+    if (!SAFE_METHODS.has(req.method) && req.path !== '/mcp' && req.path !== '/api/agent-launch' && !req.path.startsWith('/hooks/')
+        && !remoteCrossOrigin && !isSameOrigin(req)) {
         console.warn('Blocked cross-site request:', req.method, req.path, 'from', req.headers.origin);
         return res.status(403).json({ error: 'Origem não permitida.' });
     }
@@ -287,6 +305,8 @@ app.use(BASE_PATH, (req, res, next) => {
         '/mcp',
         // Public webhook triggers: own check (bearer token or HMAC signature), not the app login
         '/hooks/',
+        // Claude bridge (only while on): OAuth endpoints, /mcp/remote (OAuth token), /dl/ links
+        ...(REMOTE_MCP_ENABLED ? REMOTE_PUBLIC_PATHS : []),
     ];
 
     // Check if the current path matches any of the public paths
@@ -786,11 +806,12 @@ const vibe = new Vibe({
     deployer: new VercelDeploy({ token: process.env.VERCEL_TOKEN }), log: debugLog,
 });
 
-const mcpHandler = createMcpHandler({
+const mcpDeps = {
     sessions, store: sessionStore, browsers, files: FILES_ENABLED ? files : null,
     listPorts: exclude => listPorts([...exclude, ...live.ports]), normalizeUrl, port: Number(PORT),
     live, vibe, setLiveReload, agentTerminal, notifier: () => notifier,
-});
+};
+const mcpHandler = createMcpHandler(mcpDeps);
 
 /**
  * Agents run on this machine: only loopback connections with the token are accepted.
@@ -1678,6 +1699,49 @@ app.post(BASE_PATH + '/logout', (req, res) => {
 });
 
 // WebSocket server configuration
+// ---------- Claude bridge (routes/remote.js) ----------
+
+/** Email + password (+ 2FA) check for the bridge's consent page: same rules as POST /login. */
+function verifyLoginCredentials({ email, password, code }) {
+    if (AUTH_MODE !== 'email') return { error: 'Login por email desligado.' };
+    const emailOk = typeof email === 'string' && safeEqual(email.trim().toLowerCase(), AUTH_EMAIL);
+    const passwordOk = typeof password === 'string' && safeEqual(password, AUTH_PASSWORD);
+    if (!emailOk || !passwordOk) return { error: 'Email ou senha incorretos.' };
+    if (totp) {
+        if (typeof code !== 'string' || !code.trim()) return { needCode: true };
+        if (!totp.verify(code)) return { needCode: true, error: 'Código inválido ou já usado.' };
+    }
+    return { ok: true };
+}
+
+registerRemote(app, {
+    enabled: REMOTE_MCP_ENABLED,
+    disabledReason: REMOTE_MCP_DISABLED_REASON,
+    basePath: BASE_PATH,
+    baseUrl: BASE_URL,
+    db: sessionStore.db,
+    fingerprint: tokens.fingerprint,
+    verifyCredentials: verifyLoginCredentials,
+    twoFactor: !!totp,
+    requireReauth,
+    lockoutMs: LOCKOUT_TIME,
+    sessions,
+    notes: NOTES_ENABLED ? notes : null,
+    notesChanged,
+    notifier: () => notifier,
+    localTools: REMOTE_MCP_ENABLED ? createMcpTools(mcpDeps) : null,
+    browserAvailable: browsers.available,
+    prefs: {
+        get: key => { const v = sessionStore.getMeta(key); try { return JSON.parse(v); } catch { return v; } },
+        set: (key, value) => sessionStore.setMeta(key, JSON.stringify(value)),
+    },
+    dataDir: path.dirname(DB_PATH),
+    publicDir: PUBLIC_DIR,
+    version: APP_VERSION,
+    env: process.env,
+    log: debugLog,
+});
+
 const wss = new WebSocketServer({ 
     server,
     verifyClient: (info, callback) => {

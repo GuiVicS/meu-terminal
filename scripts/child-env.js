@@ -31,10 +31,13 @@ function childEnv(extra = {}, base = process.env) {
     return { ...env, ...extra };
 }
 
+/** Kept out of children, but not masked: an email shows up legitimately (git log, config files...). */
+const NOT_MASKED = new Set(['AUTH_EMAIL']);
+
 /** Non-empty values of the app's secrets, for masking them in output shown elsewhere. */
 function appSecretValues(base = process.env) {
     return Object.entries(base)
-        .filter(([name, value]) => isAppSecret(name) && typeof value === 'string' && value.length >= 4)
+        .filter(([name, value]) => isAppSecret(name) && !NOT_MASKED.has(name) && typeof value === 'string' && value.length >= 4)
         .map(([, value]) => value);
 }
 

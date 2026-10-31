@@ -41,6 +41,15 @@ services:
       # Webhooks that run a server-side script (off by default - see /admin → Webhooks)
       WEBHOOKS_ENABLED: ${WEBHOOKS_ENABLED:-}
       WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:-}
+      # Claude bridge: claude.ai uses this server through an MCP connector (off by default;
+      # needs AUTH_EMAIL/AUTH_PASSWORD - see /admin → Ponte com o Claude and .env.example)
+      REMOTE_MCP_ENABLED: ${REMOTE_MCP_ENABLED:-}
+      REMOTE_MCP_RUN_AS: ${REMOTE_MCP_RUN_AS:-}
+      REMOTE_MCP_WORKDIR: ${REMOTE_MCP_WORKDIR:-}
+      REMOTE_MCP_APPROVAL: ${REMOTE_MCP_APPROVAL:-}
+      REMOTE_MCP_CLIENT_ID: ${REMOTE_MCP_CLIENT_ID:-}
+      REMOTE_MCP_CLIENT_SECRET: ${REMOTE_MCP_CLIENT_SECRET:-}
+      REMOTE_MCP_DCR: ${REMOTE_MCP_DCR:-}
 
       # (OPTIONAL) Comma-separated list of allowed origins, e.g.
       # https://terminal.example.com,http://192.168.0.10:3000 (unset = allow all)

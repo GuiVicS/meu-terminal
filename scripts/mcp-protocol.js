@@ -11,14 +11,16 @@ const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-0
 /**
  * @param {object} opts
  * @param {object[]} opts.tools - tool definitions returned by tools/list
- * @param {Record<string, (args: object) => Promise<object>|object>} opts.impl - name -> implementation
+ * @param {Record<string, (args: object, ctx: {req: object}) => Promise<object>|object>} opts.impl - name -> implementation
  * @param {{ name: string, version: string }} opts.serverInfo
  * @param {string} [opts.instructions]
- * @param {(name: string, args: object, outcome: { ok: boolean, ms: number }) => void} [opts.onCall]
+ * @param {(name: string, args: object, outcome: { ok: boolean, ms: number, result?: object, error?: Error }, ctx: {req: object}) => void} [opts.onCall]
  * @returns {(req, res) => Promise<void>} Express handler for POST
  */
 function createJsonRpcHandler({ tools, impl, serverInfo, instructions, onCall }) {
-    async function handle(msg) {
+    const listed = () => (typeof tools === 'function' ? tools() : tools);
+
+    async function handle(msg, ctx) {
         const { id, method, params = {} } = msg || {};
         const isNotification = id === undefined || id === null;
         const reply = result => (isNotification ? null : { jsonrpc: '2.0', id, result });
@@ -37,18 +39,18 @@ function createJsonRpcHandler({ tools, impl, serverInfo, instructions, onCall })
             case 'ping':
                 return reply({});
             case 'tools/list':
-                return reply({ tools });
+                return reply({ tools: listed() });
             case 'tools/call': {
-                const tool = Object.hasOwn(impl, params.name) ? impl[params.name] : null;
+                const tool = typeof params.name === 'string' && Object.hasOwn(impl, params.name) ? impl[params.name] : null;
                 if (!tool) return fail(-32602, `Ferramenta desconhecida: ${params.name}`);
-                const args = params.arguments || {};
+                const args = params.arguments && typeof params.arguments === 'object' ? params.arguments : {};
                 const startedAt = Date.now();
                 try {
-                    const result = await tool(args);
-                    onCall?.(params.name, args, { ok: !result?.isError, ms: Date.now() - startedAt });
+                    const result = await tool(args, ctx);
+                    onCall?.(params.name, args, { ok: !result?.isError, ms: Date.now() - startedAt, result }, ctx);
                     return reply(result);
                 } catch (e) {
-                    onCall?.(params.name, args, { ok: false, ms: Date.now() - startedAt });
+                    onCall?.(params.name, args, { ok: false, ms: Date.now() - startedAt, error: e }, ctx);
                     // Tool errors go back to the agent as a result it can read, not a protocol error
                     return reply({ content: [{ type: 'text', text: `Erro: ${e.message}` }], isError: true });
                 }
@@ -61,12 +63,13 @@ function createJsonRpcHandler({ tools, impl, serverInfo, instructions, onCall })
 
     return async (req, res) => {
         const body = req.body;
+        const ctx = { req };
         if (Array.isArray(body)) {
-            const results = (await Promise.all(body.map(handle))).filter(Boolean);
+            const results = (await Promise.all(body.map(m => handle(m, ctx)))).filter(Boolean);
             if (!results.length) return res.status(202).end();
             return res.json(results);
         }
-        const result = await handle(body);
+        const result = await handle(body, ctx);
         if (!result) return res.status(202).end(); // notification: accepted, no body
         return res.json(result);
     };

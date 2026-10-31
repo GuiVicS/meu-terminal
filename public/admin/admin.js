@@ -9,6 +9,7 @@ import SettingsManager from '../managers/settings.js';
 import CommandsManager from '../managers/commands.js';
 import { mountSettingsSections } from '../ui/dialogs.js';
 import { mountWebhooksSection } from './webhooks.js';
+import { mountRemoteSection } from './remote.js';
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
 
@@ -19,6 +20,7 @@ const NAV = [
     { slug: 'sessoes', label: 'Sessão', icon: 'history' },
     { slug: 'backup', label: 'Backup', icon: 'cloudUpload' },
     { slug: 'webhooks', label: 'Webhooks', icon: 'webhook', flag: 'webhooksAvailable' },
+    { slug: 'ponte', label: 'Ponte com o Claude', icon: 'link' },
     { slug: 'aparelhos', label: 'Aparelhos', icon: 'smartphone' },
     { slug: 'notificacoes', label: 'Notificações', icon: 'bell' },
     { slug: 'agentes', label: 'Agentes', icon: 'bot' },
@@ -257,6 +259,9 @@ async function main() {
         page.insertAdjacentHTML('beforeend', '<section class="settings-section wh-section" data-page="webhooks"></section>');
         mountWebhooksSection(page.querySelector('[data-page="webhooks"]'));
     }
+
+    page.insertAdjacentHTML('beforeend', '<section class="settings-section rm-section" data-page="ponte"></section>');
+    mountRemoteSection(page.querySelector('[data-page="ponte"]'));
 
     navList.addEventListener('click', e => {
         const a = e.target.closest('a[data-slug]');
