@@ -513,6 +513,8 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 }
 .new-session-title { text-align: center; font-size: 22px; font-weight: 600; margin-bottom: 24px; letter-spacing: -0.02em; }
 .new-session-form { display: flex; flex-direction: column; gap: 16px; }
+/* Phones: the type was already picked on the app icon, so the segmented control is redundant */
+.new-session-form[data-fixed-kind] .kind-toggle { display: none; }
 .new-session-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 
 /* App grid: the home screen shown while no tab is open, like a phone's springboard */
@@ -3259,8 +3261,6 @@ audio.fm-media { width: min(520px, 90%); }
         .field input:focus { box-shadow: 0 0 0 2px var(--accent); }
         .new-session-actions { flex-direction: column-reverse; gap: 10px; margin-top: 8px; }
         .new-session-actions .btn { flex: none; width: 100%; height: 52px; border-radius: 26px; font-size: 16px; }
-        /* The type was picked on the icon: no selector, the title says what is being created */
-        .new-session-form[data-fixed-kind] .kind-toggle { display: none; }
         /* The color already makes it the main action: no glow ring around it */
         .new-session-actions .btn-primary,
         .new-session-actions .btn-primary:focus-visible { box-shadow: none; outline: none; border: none; }

@@ -18,6 +18,7 @@ import { askText } from '../ui/prompt.js';
 import { openSessionSheet, sessionIcon } from '../ui/sessionSheet.js';
 import { toast } from '../ui/toast.js';
 import { playChime } from '../ui/sound.js';
+import { isHandset } from '../ui/device.js';
 
 const RECONCILE_DELAY = 250;
 
@@ -705,25 +706,27 @@ export default class TerminalManager {
         const hasRight = ids.slice(i + 1).some(o => !this.sessions.get(o).pinned);
         const hasOthers = ids.some(o => o !== id && !this.sessions.get(o).pinned);
         const k = this.shortcutLabels();
+        // A phone has no physical keyboard: the Ctrl+key hints would only take space
+        const hint = text => (isHandset() ? undefined : text);
         showMenu([
-            { label: 'Nova sessão', icon: 'plus', hint: k.newTab, run: () => this.create() },
-            { label: 'Nova aba de navegador', icon: 'globe', hint: `${k.mod}+B`, run: () => this.createBrowser() },
-            { label: 'Novo gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`, run: () => this.createFiles() },
-            ...(window.appConfig?.notesAvailable ? [{ label: 'Nova aba de anotações', icon: 'notes', hint: `${k.mod}+O`, run: () => this.createNotes() }] : []),
+            { label: 'Nova sessão', icon: 'plus', hint: hint(k.newTab), run: () => this.create() },
+            { label: 'Nova aba de navegador', icon: 'globe', hint: hint(`${k.mod}+B`), run: () => this.createBrowser() },
+            { label: 'Novo gerenciador de arquivos', icon: 'folder', hint: hint(`${k.mod}+E`), run: () => this.createFiles() },
+            ...(window.appConfig?.notesAvailable ? [{ label: 'Nova aba de anotações', icon: 'notes', hint: hint(`${k.mod}+O`), run: () => this.createNotes() }] : []),
             ...(s.kind === 'terminal' ? [{ label: 'Abrir pasta atual nos Arquivos', icon: 'folderOpen',
                 run: () => this.createFiles(s.cwd || s.startCwd || undefined) }] : []),
             ...(this.split && (this.split.a === id || this.split.b === id)
                 ? [{ label: 'Desfazer divisão', icon: 'panelLeft', run: () => this.clearSplit({ keep: id }) }]
                 : [{ label: 'Dividir tela com…', icon: 'panelLeft', run: () => this.openSplitMenu(id, { x, y, anchor }) }]),
             { label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) },
-            { label: 'Renomear', icon: 'edit', hint: k.rename, run: () => this.startRename(id) },
+            { label: 'Renomear', icon: 'edit', hint: hint(k.rename), run: () => this.startRename(id) },
             { label: s.pinned ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(id) },
             'separator',
             { label: 'Mover para a esquerda', icon: 'chevronLeft', disabled: i === 0, run: () => this.move(id, -1) },
             { label: 'Mover para a direita', icon: 'chevronRight', disabled: i === ids.length - 1,
                 run: () => this.move(id, 1) },
             'separator',
-            { label: 'Fechar (encerra o processo)', icon: 'x', hint: k.close, run: () => this.close(id) },
+            { label: 'Fechar (encerra o processo)', icon: 'x', hint: hint(k.close), run: () => this.close(id) },
             { label: 'Fechar outras', icon: 'closeOthers', disabled: !hasOthers, run: () => this.closeOthers(id) },
             { label: 'Fechar à direita', icon: 'arrowRightBar', disabled: !hasRight,
                 run: () => this.closeToTheRight(id) },

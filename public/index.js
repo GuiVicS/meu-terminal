@@ -22,6 +22,7 @@ import { bindEdgeSwipe } from './ui/edgeSwipe.js';
 import VibeForm from './ui/vibeForm.js';
 import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
+import { isHandset, isIphonePortrait } from './ui/device.js';
 import { toast } from './ui/toast.js';
 
 const STATE_LABELS = {
@@ -57,8 +58,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const config = window.appConfig || {};
     // iPhones say "like Mac OS X" too: they'd get ⌘ shortcut hints (a glyph their font lacks)
     const isMacOS = /Macintosh|Mac OS X/i.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.userAgent);
-    /** The iPhone layout (styles.css [data-iphone], portrait only). */
-    const iphonePortrait = () => root.hasAttribute('data-iphone') && window.matchMedia('(orientation: portrait)').matches;
     const root = document.documentElement;
     const uiStorage = new StorageManager('meuterminal-');
 
@@ -370,11 +369,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     ];
 
     menuBtn.addEventListener('click', () => {
-        // iPhone: the ⋮ is about the tab on screen (docs/ANALISE-UX.md, section 5) - its actions
+        // Phones: the ⋮ is about the tab on screen (docs/ANALISE-UX.md, section 5) - its actions
         // first, then the app's. Nothing is lost: creating tabs is on the apps page, reopening in
         // the session sheet's history, quick commands and copied text on the shortcut bar, theme
-        // in Configurações, and the iPhone app is always fullscreen (no focus mode).
-        if (iphonePortrait()) {
+        // in Configurações, and a phone is already fullscreen (no focus mode). This is the same
+        // menu on every phone, not just the iPhone; the glass look stays iPhone-only.
+        if (isHandset()) {
             const own = workspace.tabActions(workspace.activeId, menuBtn);
             showMenu([...own, ...(own.length ? ['separator'] : []), ...appItems()],
                 { anchor: menuBtn, label: workspace.active ? `Ações de ${workspace.active.name}` : 'Mais ações' });

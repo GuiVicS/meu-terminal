@@ -8,13 +8,11 @@
  * not as a blocking modal.
  */
 import { icon } from './icons.js';
+import { isHandset } from './device.js';
 
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
-/** iPhone layout (portrait only: turned sideways it's the regular phone layout). */
-const iphonePortrait = () => document.documentElement.hasAttribute('data-iphone')
-    && window.matchMedia('(orientation: portrait)').matches;
-// iPhone: the form says what it creates (the type was picked on the icon, so no type selector)
-const IPHONE_TITLES = { terminal: 'Novo terminal', browser: 'Novo navegador', files: 'Nova aba de arquivos', notes: 'Novas anotações' };
+// Phone form: the type was picked on the icon, so no type selector - the title says what it creates
+const PHONE_TITLES = { terminal: 'Novo terminal', browser: 'Novo navegador', files: 'Nova aba de arquivos', notes: 'Novas anotações' };
 const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
 
 export function relativeTime(timestamp) {
@@ -195,20 +193,22 @@ export default class NewSessionPage {
 
     /**
      * @param {string} kind
-     * @param {{fixed?: boolean}} [opts] - fixed: the type was already picked on an app icon, so the
-     *   iPhone layout hides the type selector (styles.css) and titles the form with the type
+     * @param {{fixed?: boolean}} [opts] - fixed: the type was already picked on an app icon, so on
+     *   phones the type selector is hidden (styles.css) and the title says what is being created
      */
     showForm(kind, { fixed = false } = {}) {
         this.view = 'form';
-        this.fixedKind = fixed;
-        this.form.toggleAttribute('data-fixed-kind', fixed);
+        // The redundant selector is a phone problem: on desktop changing the type is one click,
+        // and the wide form has room for it, so nothing changes there.
+        this.fixedKind = fixed && isHandset();
+        this.form.toggleAttribute('data-fixed-kind', this.fixedKind);
         this.el.setAttribute('aria-labelledby', 'new-session-title');
         this.el.querySelector('.ns-home').hidden = true;
         this.form.hidden = false;
         this.setKind(kind);
-        // On touch devices don't pop the keyboard - the primary action is one tap away. On the
-        // iPhone nothing is focused at all: the button is already the obvious action (no focus ring).
-        if (iphonePortrait()) return;
+        // On touch devices don't pop the keyboard - the primary action is one tap away. On a
+        // phone nothing is focused at all: the button is already the obvious action (no focus ring).
+        if (isHandset()) return;
         const target = window.matchMedia('(pointer: coarse)').matches
             ? this.form.querySelector('[type="submit"]')
             : this.nameInput;
@@ -227,7 +227,7 @@ export default class NewSessionPage {
             files: ['Novo gerenciador de arquivos', 'Abrir arquivos', 'Vazio = pasta inicial do servidor. O Google Drive (rclone) aparece no painel lateral.'],
             notes: ['Nova aba de anotações', 'Abrir anotações', ''],
         }[kind];
-        this.el.querySelector('.new-session-title').textContent = this.fixedKind && iphonePortrait() ? IPHONE_TITLES[kind] : texts[0];
+        this.el.querySelector('.new-session-title').textContent = this.fixedKind ? PHONE_TITLES[kind] : texts[0];
         this.form.querySelector('[type="submit"]').textContent = texts[1];
         const help = this.el.querySelector('[data-for~="terminal"] .field-help');
         if (help && texts[2]) help.textContent = texts[2];
