@@ -132,10 +132,10 @@ export default class NewSessionPage {
             const tile = e.target.closest('.app-tile');
             if (!tile || tile.hidden) return;
             if (tile.dataset.special === 'agent') this.handlers.onAgent(tile);
-            else if (tile.dataset.special === 'vibecode') this.handlers.onVibecode();
+            else if (tileDatasetSpecial === 'vibecode') this.handlers.onVibecode();
             // Anotações is one shared notebook, not something to name/point at a folder - no form needed.
-            else if (tile.dataset.kind === 'notes') this.handlers.onCreate({ kind: 'notes' });
-            else this.showForm(tile.dataset.kind, { fixed: true });
+            else if (tileDatasetKind === 'notes') this.handlers.onCreate({ kind: 'notes' });
+            else this.showForm(tileDatasetKind, { fixed: true });
         });
         this.el.querySelectorAll('[data-action="back"]').forEach(btn => btn.addEventListener('click', () => this.showGrid()));
         this.el.querySelector('.ns-close').addEventListener('click', () => this.handlers.onCancel());
@@ -153,7 +153,7 @@ export default class NewSessionPage {
     }
 
     /**
-     * @param {{ defaultName: string, defaultCwd: string, recents: Array, closable?: boolean, advanced?: boolean }} opts
+     * @param {{{ defaultName: string, defaultCwd: string, recents: Array, closable?: boolean, advanced?: boolean }}} opts
      */
     open({ defaultName, defaultCwd, recents, closable = true, advanced = false }) {
         this.nameInput.value = '';
