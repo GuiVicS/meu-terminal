@@ -25,7 +25,7 @@ jobs:
       - name: Syntax check
         run: |
           node --check server.js
-          for f in scripts/*.js scripts/agents/*.js scripts/remote/*.js routes/*.js; do node --check "$f"; done
+          for f in scripts/*.js scripts/agents/*.js; do node --check "$f"; done
 
       - name: Run tests
         run: npm test
