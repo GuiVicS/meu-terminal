@@ -18,6 +18,7 @@ import { createSettingsDialog, createShortcutsDialog } from './ui/dialogs.js';
 import { showMenu } from './ui/contextMenu.js';
 import { icon } from './ui/icons.js';
 import { sessionIcon } from './ui/sessionSheet.js';
+import { bindEdgeSwipe } from './ui/edgeSwipe.js';
 import VibeForm from './ui/vibeForm.js';
 import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
@@ -334,6 +335,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('newTabBtn').innerHTML = icon('plus', 18);
     document.getElementById('newTabBtn').addEventListener('click', () => workspace.openNewSessionPage());
+    // iPhone: drag from the left edge to open the apps page, drag left to close it (ui/edgeSwipe.js)
+    bindEdgeSwipe({
+        isOpen: () => workspace.newSessionPage.isOpen,
+        canClose: () => workspace.sessions.size > 0,
+        onOpen: () => workspace.openNewSessionPage(),
+        onClose: () => workspace.closeNewSessionPage(),
+    });
 
     // ---------- overflow menu ----------
     const logout = () => {

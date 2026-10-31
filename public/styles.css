@@ -3262,3 +3262,17 @@ audio.fm-media { width: min(520px, 90%); }
         .new-session-actions .btn-ghost { border: none; background: var(--glass-fill); }
     }
 }
+
+/* Edge swipe hint (ui/edgeSwipe.js): a round glass button with the apps icon that follows the
+   finger while dragging from the left edge; turns accent when letting go will open the page. */
+.edge-swipe-hint {
+    position: fixed; top: 50%; left: 0; z-index: 950; width: 52px; height: 52px; margin-top: -26px;
+    display: grid; place-items: center; border-radius: 50%; pointer-events: none; color: var(--text);
+    background-color: var(--glass-bg-dense);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border: 0.5px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+    transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.edge-swipe-hint.from-right { left: auto; right: 0; }
+.edge-swipe-hint.ready { background-color: var(--accent); color: var(--accent-fg); }

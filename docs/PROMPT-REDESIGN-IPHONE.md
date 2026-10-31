@@ -32,6 +32,7 @@ Commits (do mais antigo ao mais novo):
 4. `feat: abas do iPhone como pílula da sessão atual + folha de sessões`.
 5. `feat: histórico de abas na folha de sessões do iPhone`.
 6. `feat: página inicial de apps no estilo da tela de início do iOS 26 (iPhone)`.
+7. `feat: arrastar da borda esquerda abre a página de apps (iPhone)`.
 
 ### 2.1 Como o "modo iPhone" liga
 
@@ -61,6 +62,7 @@ Há variantes claro/escuro, um `@supports` para `backdrop-filter` e um fallback 
 | Chat do agente | Caixa de mensagem **flutuante** (cartão de vidro, raio 32), conversa passa por baixo com fade. Texto em cima; embaixo ＋ (anexar), pílula de resumo "Modelo · Modo" e enviar. Os seletores do agente foram para uma **folha deslizante** ("Modelo e configurações") aberta pela pílula. | `composer.js` (`setupIphone`, `settingsSummary`, `openSheet`, `dispose`), CSS |
 | Navegador | Estilo **Safari compacto do iOS 26**: barra flutuante embaixo com voltar, pílula do endereço (mostra só o domínio; editar mostra o endereço completo e ocupa a barra) com recarregar dentro, e "•••" com Avançar, Teclado, Portas abertas e Tamanho e qualidade. Página ocupa a aba inteira. | `browserSession.js` (`.browser-pill`, `.browser-host`, `openMoreMenu`), CSS |
 | Menus (`.menu`) | Popovers de vidro com cantos 22 px e itens de 44 px. | CSS |
+| Gesto de borda | Arrastar da borda esquerda (24 px) para a direita abre a página de apps; com ela aberta, arrastar para a esquerda fecha. Um círculo de vidro com o ícone de grade acompanha o dedo e fica roxo quando soltar vai agir (70 px). Arrasto vertical, toque fora da borda e folhas/menus abertos não disparam. | `public/ui/edgeSwipe.js`, `index.js` (`bindEdgeSwipe`), CSS `.edge-swipe-hint` |
 | Página inicial de apps ("Nova sessão") | Título grande à esquerda; ícones de app como na tela de início (68 px, gradiente da cor do app, glifo branco, sem cartão em volta, rótulo embaixo); "Sessões recentes" como lista agrupada com ícone do tipo; formulário com controle segmentado, campos de 50 px e botões em cápsula; configurações e fechar como círculos de vidro; fundo com leve gradiente. | `ui/newSession.js` (`RECENT_ICONS`, `.recent-icon`), CSS |
 
 No desktop o navegador mantém a ordem antiga graças a `.browser-pill { display: contents }` e
@@ -116,6 +118,8 @@ abra o PWA instalado e confira:
       escondidos atrás da caixa.
 - [ ] Navegador: tocar na página manda o toque para o Chromium certo mesmo com a barra flutuando por
       cima; o "•••" e o menu de portas abrem ancorados no lugar certo.
+- [ ] Gesto da borda esquerda: abre a página de apps sem conflitar com o gesto do sistema (num PWA
+      instalado não há "voltar" do Safari; confira mesmo assim) nem com a rolagem do terminal.
 - [ ] Girar para paisagem volta ao layout antigo sem quebrar nada.
 - [ ] Tema claro e escuro.
 
