@@ -25,8 +25,10 @@ services:
       # Optional two-factor login (authenticator app code). Generate with:
       #   docker compose exec meuterminal node scripts/totp-setup.js
       AUTH_TOTP_SECRET: ${AUTH_TOTP_SECRET:-}
-      # PIN login, only used when AUTH_EMAIL/AUTH_PASSWORD are empty
-      MEUTERMINAL_PIN: ${MEUTERMINAL_PIN:-1234}
+      # PIN login, only used when AUTH_EMAIL/AUTH_PASSWORD are empty. No default: without
+      # email+password or a PIN the app refuses to start (ALLOW_NO_LOGIN=true to run open on purpose)
+      MEUTERMINAL_PIN: ${MEUTERMINAL_PIN:-}
+      ALLOW_NO_LOGIN: ${ALLOW_NO_LOGIN:-}
       # The address you open the app at (used for CORS / cookies)
       BASE_URL: ${BASE_URL:-http://localhost:3000}
       ENABLE_STARSHIP: ${ENABLE_STARSHIP:-true} # Starship prompt in the terminals

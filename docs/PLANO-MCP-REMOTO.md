@@ -1,6 +1,6 @@
 # Plano de ação: ponte MCP entre o Claude (claude.ai) e o MeuTerminal
 
-Status: proposta revisada após leitura do código (v2.7.0), nada implementado.
+Status: **fase 0 implementada** (branch `feat/ponte-mcp-fase0`); fases 1 a 3 pendentes.
 
 Objetivo: o Claude do claude.ai (chat, app do celular) usar o servidor do MeuTerminal como uma
 **extensão do próprio ambiente**. O ambiente do Claude tem a rede bloqueada (sem npm, pip, apt,
@@ -250,6 +250,22 @@ dica de como ler o resto (`job_output` com offset, `read_file` com linhas).
 **Fase 3:** `share_link`, `upload_base64`, DCR, página completa no `/admin`.
 
 Em paralelo, quando convier: quebrar o resto do `server.js` em `routes/` (2.4).
+
+### Fase 0: o que foi feito
+
+- `scripts/child-env.js`: terminais e agentes recebem o ambiente sem `AUTH_*`, `MEUTERMINAL_PIN`,
+  `WEBHOOK_SECRET_KEY` e `VERCEL_TOKEN` (conferido num terminal aberto de verdade).
+- `scripts/auth.js`: token de login, comparações, limitador de tentativas (login e webhooks),
+  checagem de origem e `isPublicPath` (exato, ou prefixo só para itens terminados em `/`).
+  Cookies de login existentes continuam válidos (mesma chave e formato; há teste disso).
+- `/login/pair` passou a constar explicitamente da lista pública; `/login.html`, `/mcp/remote`,
+  `/mcpqualquer` agora pedem login.
+- `requirePin` removido.
+- Compose sem PIN padrão. Como PIN vazio + sem email deixaria o app aberto, o servidor agora
+  **se recusa a subir sem login**, a não ser com `ALLOW_NO_LOGIN=true` (o modo demo não é afetado).
+- `scripts/process-runner.js` (usado pelo `WebhookRunner`) e `scripts/mcp-protocol.js` (usado pelo
+  `/mcp`), prontos para a ponte reaproveitar.
+- Testes novos: `auth`, `child-env`, `process-runner`, `mcp-protocol`.
 
 Estimativa de tamanho: fase 0 ~300 linhas (boa parte é mover código), fase 1 ~800 linhas com
 testes, fase 2 ~600 linhas.

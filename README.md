@@ -51,6 +51,7 @@ npm start
 | `FILES_HOME` | Pasta onde o gerenciador de arquivos abre |
 | `NOTES_ENABLED` | `false` desliga a aba de Anotações (padrão: ligada) |
 | `MEUTERMINAL_PIN` | PIN, só quando não há email e senha |
+| `ALLOW_NO_LOGIN` | `true` permite subir sem login nenhum (sem ele, o app se recusa a subir desprotegido) |
 | `WEBHOOKS_ENABLED` | `true` liga a aba Webhooks em Configurações (padrão: desligada) |
 | `VERCEL_TOKEN` | Publicar projetos de vibecoding na Vercel com um clique |
 

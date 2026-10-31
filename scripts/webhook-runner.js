@@ -5,25 +5,15 @@
  * environment. Inputs arrive only as env vars (scripts/webhook-inputs.js already validated and
  * typed them) - nothing from a request is ever interpolated into the command or the script text.
  * One queue per webhook (per `concurrency`), a timeout that kills the whole process group, and
- * masked output capped in size before it's handed to the store.
+ * masked output capped in size before it's handed to the store (scripts/process-runner.js).
  */
-const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { runProcess, killGroup } = require('./process-runner');
 
-const MAX_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_TIMEOUT_SEC = 300;
-
-function mask(text, secrets) {
-    let out = text;
-    for (const s of secrets) {
-        if (!s) continue;
-        out = out.split(s).join('••••');
-    }
-    return out;
-}
 
 class WebhookRunner {
     /** @param {object} opts
@@ -84,20 +74,8 @@ class WebhookRunner {
     cancelActive(webhookId) {
         const entry = this.active.get(webhookId);
         if (!entry) return false;
-        this.killGroup(entry.child);
+        killGroup(entry.child);
         return true;
-    }
-
-    killGroup(child) {
-        // A plain child.kill() only signals the immediate bash process - any command it forked (sleep,
-        // npm, docker...) would keep running and keep stdio open. Kill the whole tree instead.
-        if (process.platform === 'win32') {
-            try { require('child_process').execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F']); } catch { /* already gone */ }
-            return;
-        }
-        try {
-            process.kill(-child.pid, 'SIGKILL'); // negative pid: the whole detached process group
-        } catch { /* already gone */ }
     }
 
     async execute(webhook, ctx, runId = crypto.randomUUID()) {
@@ -125,37 +103,17 @@ class WebhookRunner {
             };
             if (ctx.payloadFile) env.MT_PAYLOAD_FILE = ctx.payloadFile;
 
-            const child = spawn('bash', ['--noprofile', '--norc', '-euo', 'pipefail', scriptFile], {
+            const { exitCode, output: masked, timedOut } = await runProcess({
+                command: 'bash',
+                args: ['--noprofile', '--norc', '-euo', 'pipefail', scriptFile],
                 cwd: webhook.cwd && fs.existsSync(webhook.cwd) ? webhook.cwd : os.homedir(),
                 env,
-                stdio: ['ignore', 'pipe', 'pipe'],
-                detached: process.platform !== 'win32',
+                timeoutMs: (webhook.timeoutSec || DEFAULT_TIMEOUT_SEC) * 1000,
+                secrets: ctx.secretValues || [],
+                onSpawn: child => this.active.set(webhook.id, { runId, child }),
             });
-            this.active.set(webhook.id, { runId, child });
-
-            let output = '';
-            let truncated = false;
-            const onData = d => {
-                if (output.length >= MAX_OUTPUT_BYTES) { truncated = true; return; }
-                output += d.toString('utf8');
-            };
-            child.stdout.on('data', onData);
-            child.stderr.on('data', onData);
-
-            const timeoutMs = (webhook.timeoutSec || DEFAULT_TIMEOUT_SEC) * 1000;
-            let timedOut = false;
-            const timer = setTimeout(() => { timedOut = true; this.killGroup(child); }, timeoutMs);
-            timer.unref?.();
-
-            const exitCode = await new Promise((resolve, reject) => {
-                child.on('error', reject);
-                child.on('close', code => resolve(code));
-            }).catch(e => { output += `\n[erro ao iniciar: ${e.message}]`; return null; });
-            clearTimeout(timer);
             this.active.delete(webhook.id);
 
-            if (truncated) output += '\n[saída truncada]';
-            const masked = mask(output, ctx.secretValues || []);
             const status = timedOut ? 'timeout' : exitCode === 0 ? 'ok' : 'failed';
             const finishedAt = Date.now();
             this.store.finishRun(runId, { status, exitCode: exitCode ?? null, output: masked, finishedAt });
