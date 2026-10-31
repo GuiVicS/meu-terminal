@@ -4,6 +4,7 @@
  * (focus trapping, Esc to close and the backdrop come from the browser).
  */
 import { icon } from './icons.js';
+import { isHandset } from './device.js';
 import { pushStatus, enablePush, disablePush, testPush } from '../managers/push.js';
 import { toast } from './toast.js';
 
@@ -218,6 +219,16 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
         </section>
         <section class="settings-section" data-page="interface">
             <h3 class="section-label">Interface</h3>
+            <label class="setting" data-iphone-visual>
+                <span class="setting-text">Visual do celular
+                    <span class="setting-help">Vidro flutuante, como no iPhone. “Em qualquer celular” leva o
+                    mesmo visual para outros celulares; “Clássico” mantém a interface normal.</span></span>
+                <select data-setting="iphoneVisual">
+                    <option value="glass">Vidro (iPhone)</option>
+                    <option value="glass-any">Vidro em qualquer celular</option>
+                    <option value="classic">Clássico</option>
+                </select>
+            </label>
             <label class="setting">
                 <span class="setting-text">Tema</span>
                 <select data-setting="theme">
@@ -301,6 +312,8 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
                 com o cabeçalho <code class="mono">Authorization: Bearer $MEUTERMINAL_MCP_TOKEN</code>
                 (variável já definida em todo terminal). Só funciona de dentro do servidor.</p>
         </section>`;
+    // The phone visual preference means nothing on a desktop/iPad: keep the section short there.
+    body.querySelector('[data-iphone-visual]').hidden = !isHandset();
     const mcpCommand = body.querySelector('[data-mcp-command]');
     body.querySelector('[data-copy-mcp]').addEventListener('click', async e => {
         const button = e.currentTarget;

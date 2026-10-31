@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <!-- viewport-fit=cover: draw under notches/home indicator; safe areas are padded in CSS -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <script>
+        // iPhone: Safari zooms into any focused field under 16px. styles.css keeps fields at 16px+ on touch;
+        // this is the safety net. On iOS maximum-scale only stops that automatic zoom (pinch zoom keeps
+        // working), so it's set on iPhones only - on Android it would block pinch zoom.
+        if (/iPhone|iPod/.test(navigator.userAgent)) document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+    </script>
     <meta name="theme-color" content="#0B0D10">
     <meta name="color-scheme" content="dark light">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -26,6 +32,17 @@
                 }
             } catch (e) { /* storage unavailable: keep dark */ }
             document.documentElement.setAttribute('data-theme', theme);
+            // iPhone-only layout (Liquid Glass look, floating agent message box): styles.css,
+            // agent/composer.js. Set before first paint so nothing jumps. Settings → Interface can
+            // switch it back to the classic layout or put the same visual on any phone.
+            var visual = 'glass';
+            try {
+                visual = JSON.parse(localStorage.getItem('meuterminal-settings') || '{}').iphoneVisual || 'glass';
+            } catch (e) { /* storage unavailable: keep the iPhone default */ }
+            var isPhone = /iPhone|iPod/.test(navigator.userAgent)
+                || (visual === 'glass-any' && window.matchMedia('(pointer: coarse)').matches
+                    && Math.min(window.screen.width || 0, window.screen.height || 0) < 720);
+            if (visual !== 'classic' && isPhone) document.documentElement.setAttribute('data-iphone', '');
         })();
     </script>
     <link rel="stylesheet" href="styles.css">
@@ -58,6 +75,13 @@
                 <span class="brand-title" id="siteTitle">MeuTerminal</span>
                 <span class="brand-conn" id="brandConn" data-state="connecting" role="img" aria-label="Conectando"></span>
             </div>
+
+            <!-- iPhone: the current session as one pill; tap for the session sheet (ui/sessionSheet.js) -->
+            <button type="button" class="session-pill" id="sessionPill" aria-haspopup="dialog" aria-label="Sessões abertas">
+                <span class="session-pill-icon" aria-hidden="true"></span>
+                <span class="session-pill-name"></span>
+                <span class="session-pill-chevron" aria-hidden="true"></span>
+            </button>
 
             <div class="tabstrip">
                 <button type="button" class="icon-btn new-tab" id="newTabBtn" aria-label="Nova sessão"></button>

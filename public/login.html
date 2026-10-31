@@ -3,6 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <script>
+        // iPhone: Safari zooms into any focused field under 16px. styles.css keeps fields at 16px+ on touch;
+        // this is the safety net. On iOS maximum-scale only stops that automatic zoom (pinch zoom keeps
+        // working), so it's set on iPhones only - on Android it would block pinch zoom.
+        if (/iPhone|iPod/.test(navigator.userAgent)) document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+        // Same switch as index.html: iPhone-only visual, or "any phone" when chosen in Settings.
+        (function () {
+            var visual = 'glass';
+            try {
+                visual = JSON.parse(localStorage.getItem('meuterminal-settings') || '{}').iphoneVisual || 'glass';
+            } catch (e) { /* storage unavailable: keep the iPhone default */ }
+            var isPhone = /iPhone|iPod/.test(navigator.userAgent)
+                || (visual === 'glass-any' && window.matchMedia('(pointer: coarse)').matches
+                    && Math.min(window.screen.width || 0, window.screen.height || 0) < 720);
+            if (visual !== 'classic' && isPhone) document.documentElement.setAttribute('data-iphone', '');
+        })();
+    </script>
     <meta name="theme-color" content="#121212">
     <meta name="color-scheme" content="dark light">
     <title id="pageTitle">MeuTerminal</title>

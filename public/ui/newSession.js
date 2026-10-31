@@ -8,8 +8,11 @@
  * not as a blocking modal.
  */
 import { icon } from './icons.js';
+import { isHandset } from './device.js';
 
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
+// Phone form: the type was picked on the icon, so no type selector - the title says what it creates
+const PHONE_TITLES = { terminal: 'Novo terminal', browser: 'Novo navegador', files: 'Nova aba de arquivos', notes: 'Novas anotações' };
 const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
 
 export function relativeTime(timestamp) {
@@ -20,6 +23,9 @@ export function relativeTime(timestamp) {
     }
     return 'agora';
 }
+
+// Kind of a closed tab -> its icon (shown in the iPhone layout of the recent list)
+const RECENT_ICONS = { terminal: 'terminal', browser: 'globe', files: 'folder', notes: 'notes', agent: 'bot' };
 
 // data-kind -> handlers.onCreate({ kind }); data-special -> its own handler. data-flag gates on appConfig.
 const APPS = [
@@ -65,7 +71,7 @@ export default class NewSessionPage {
                 </div>
 
                 <form class="new-session-form" autocomplete="off" hidden>
-                    <button type="button" class="ns-back">${icon('arrowLeft', 16)} Início</button>
+                    <button type="button" class="ns-back" data-action="back">${icon('arrowLeft', 16)} Início</button>
                     <h2 id="new-session-title" class="new-session-title"></h2>
                     <div class="kind-toggle" role="radiogroup" aria-label="Tipo de aba">
                         <button type="button" role="radio" data-kind="terminal" aria-checked="true">${icon('terminal', 16)} Terminal</button>
@@ -126,10 +132,10 @@ export default class NewSessionPage {
             const tile = e.target.closest('.app-tile');
             if (!tile || tile.hidden) return;
             if (tile.dataset.special === 'agent') this.handlers.onAgent(tile);
-            else if (tile.dataset.special === 'vibecode') this.handlers.onVibecode();
+            else if (tileDatasetSpecial === 'vibecode') this.handlers.onVibecode();
             // Anotações is one shared notebook, not something to name/point at a folder - no form needed.
-            else if (tile.dataset.kind === 'notes') this.handlers.onCreate({ kind: 'notes' });
-            else this.showForm(tile.dataset.kind);
+            else if (tileDatasetKind === 'notes') this.handlers.onCreate({ kind: 'notes' });
+            else this.showForm(tileDatasetKind, { fixed: true });
         });
         this.el.querySelectorAll('[data-action="back"]').forEach(btn => btn.addEventListener('click', () => this.showGrid()));
         this.el.querySelector('.ns-close').addEventListener('click', () => this.handlers.onCancel());
@@ -147,7 +153,7 @@ export default class NewSessionPage {
     }
 
     /**
-     * @param {{ defaultName: string, defaultCwd: string, recents: Array, closable?: boolean, advanced?: boolean }} opts
+     * @param {{{ defaultName: string, defaultCwd: string, recents: Array, closable?: boolean, advanced?: boolean }}} opts
      */
     open({ defaultName, defaultCwd, recents, closable = true, advanced = false }) {
         this.nameInput.value = '';
@@ -185,13 +191,24 @@ export default class NewSessionPage {
         }
     }
 
-    showForm(kind) {
+    /**
+     * @param {string} kind
+     * @param {{fixed?: boolean}} [opts] - fixed: the type was already picked on an app icon, so on
+     *   phones the type selector is hidden (styles.css) and the title says what is being created
+     */
+    showForm(kind, { fixed = false } = {}) {
         this.view = 'form';
+        // The redundant selector is a phone problem: on desktop changing the type is one click,
+        // and the wide form has room for it, so nothing changes there.
+        this.fixedKind = fixed && isHandset();
+        this.form.toggleAttribute('data-fixed-kind', this.fixedKind);
         this.el.setAttribute('aria-labelledby', 'new-session-title');
         this.el.querySelector('.ns-home').hidden = true;
         this.form.hidden = false;
         this.setKind(kind);
-        // On touch devices don't pop the keyboard - the primary action is one tap away
+        // On touch devices don't pop the keyboard - the primary action is one tap away. On a
+        // phone nothing is focused at all: the button is already the obvious action (no focus ring).
+        if (isHandset()) return;
         const target = window.matchMedia('(pointer: coarse)').matches
             ? this.form.querySelector('[type="submit"]')
             : this.nameInput;
@@ -210,7 +227,7 @@ export default class NewSessionPage {
             files: ['Novo gerenciador de arquivos', 'Abrir arquivos', 'Vazio = pasta inicial do servidor. O Google Drive (rclone) aparece no painel lateral.'],
             notes: ['Nova aba de anotações', 'Abrir anotações', ''],
         }[kind];
-        this.el.querySelector('.new-session-title').textContent = texts[0];
+        this.el.querySelector('.new-session-title').textContent = this.fixedKind ? PHONE_TITLES[kind] : texts[0];
         this.form.querySelector('[type="submit"]').textContent = texts[1];
         const help = this.el.querySelector('[data-for~="terminal"] .field-help');
         if (help && texts[2]) help.textContent = texts[2];
@@ -250,12 +267,14 @@ export default class NewSessionPage {
             li.innerHTML = `
                 <button type="button" class="recent-open">
                     <span class="recent-dot" aria-hidden="true"></span>
+                    <span class="recent-icon" aria-hidden="true">${icon(RECENT_ICONS[r.kind] || 'terminal', 18)}</span>
                     <span class="recent-text">
                         <span class="recent-name"></span>
                         <span class="recent-meta"><span class="recent-cwd mono"></span><span class="recent-time"></span></span>
                     </span>
                 </button>
                 <button type="button" class="icon-btn recent-forget">${icon('x', 14)}</button>`;
+            if (r.color) li.style.setProperty('--c', `var(--c-${r.color})`);
             li.querySelector('.recent-name').textContent = r.name;
             li.querySelector('.recent-cwd').textContent = r.cwd || '~';
             li.querySelector('.recent-time').textContent = relativeTime(r.closedAt);

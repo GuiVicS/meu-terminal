@@ -705,7 +705,12 @@ self.addEventListener('notificationclick', event => {
     event.waitUntil((async () => {
         const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
         const open = windows.find(w => w.url.startsWith(self.registration.scope));
-        if (open) return open.focus();
+        if (open) {
+            // App already running: tell it where the push leads (e.g. ?tab=<agent tab>) instead of
+            // reloading it - index.js switches to that tab
+            open.postMessage({ type: 'notification-click', url: target });
+            return open.focus();
+        }
         return self.clients.openWindow(target);
     })());
 });

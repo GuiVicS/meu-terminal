@@ -513,6 +513,8 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 }
 .new-session-title { text-align: center; font-size: 22px; font-weight: 600; margin-bottom: 24px; letter-spacing: -0.02em; }
 .new-session-form { display: flex; flex-direction: column; gap: 16px; }
+/* Phones: the type was already picked on the app icon, so the segmented control is redundant */
+.new-session-form[data-fixed-kind] .kind-toggle { display: none; }
 .new-session-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 
 /* App grid: the home screen shown while no tab is open, like a phone's springboard */
@@ -593,6 +595,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 .recent-cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-time { white-space: nowrap; }
 .recent-forget { width: 32px; height: 32px; border-radius: 50%; }
+.recent-icon { display: none; }
 
 /* ---------- buttons ---------- */
 .btn {
@@ -1010,6 +1013,8 @@ kbd {
    ========================================================= */
 @keyframes pulse { 50% { opacity: 0.35; } }
 @keyframes fade-in { from { opacity: 0; } }
+@keyframes session-pill-next { from { opacity: 0; transform: translateX(16px); } }
+@keyframes session-pill-prev { from { opacity: 0; transform: translateX(-16px); } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.97); } }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
@@ -1244,6 +1249,18 @@ body.page-login { overflow: auto; }
 }
 .browser-address input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .browser-kbd-btn { display: none; }
+/* Address pill wrapper and "•••" only matter in the iPhone (Safari-style) layout; elsewhere the
+   wrapper disappears from layout and `order` keeps the toolbar in its usual sequence. */
+.browser-pill { display: contents; }
+.browser-host, .browser-more { display: none; }
+.browser-toolbar [data-act="back"] { order: 1; }
+.browser-toolbar [data-act="forward"] { order: 2; }
+.browser-toolbar [data-act="reload"] { order: 3; }
+.browser-toolbar [data-act="live"] { order: 4; }
+.browser-toolbar .browser-address { order: 5; }
+.browser-toolbar [data-act="ports"] { order: 6; }
+.browser-toolbar [data-act="view"] { order: 7; }
+.browser-toolbar [data-act="keyboard"] { order: 8; }
 .browser-progress {
     flex-shrink: 0;
     height: 2px;
@@ -2792,6 +2809,688 @@ audio.fm-media { width: min(520px, 90%); }
     font: 12.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow-y: auto;
 }
 
+   Liquid glass (iPhone)
+   Follows Apple's Liquid Glass guidance (developer.apple.com, "Adopting Liquid Glass" and the
+   HIG "Materials" page), approximated with CSS since a web page can't use the system material:
+   - glass only on the control/navigation layer floating above the content, used sparingly;
+   - related controls share ONE glass capsule (toolbar grouping) instead of one each, and
+     text and icons are not mixed inside a shared capsule;
+   - no glass on glass: controls inside a glass container use plain fills;
+   - concentric corners: inner radius = outer radius - inset;
+   - content scrolling under floating controls fades out (scroll edge effect);
+   - sheets are inset from the screen edges, with large radii and taller list rows;
+   - "reduce transparency" and "increase contrast" switch to solid, higher-contrast surfaces.
+   Only on iPhones (data-iphone is set before first paint in index.html), only in portrait.
+   ========================================================= */
+:root,
+[data-theme="dark"] {
+    --glass-bg: var(--surface);
+    --glass-bg-dense: var(--surface);              /* containers holding text input */
+    --glass-fill: rgba(255, 255, 255, 0.10);       /* plain fill for controls inside glass */
+    --glass-fill-pressed: rgba(255, 255, 255, 0.20);
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-rim: rgba(255, 255, 255, 0.28);        /* specular highlight on the top edge */
+    --glass-rim-low: rgba(255, 255, 255, 0.06);    /* light caught on the bottom edge */
+    --glass-sheen: rgba(255, 255, 255, 0.08);
+    --glass-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
+    --glass-blur: blur(20px) saturate(180%);
+}
+[data-theme="light"] {
+    --glass-bg: var(--surface);
+    --glass-bg-dense: #FFFFFF;
+    --glass-fill: rgba(0, 0, 0, 0.06);
+    --glass-fill-pressed: rgba(0, 0, 0, 0.12);
+    --glass-border: rgba(0, 0, 0, 0.08);
+    --glass-rim: rgba(255, 255, 255, 0.95);
+    --glass-rim-low: rgba(255, 255, 255, 0.45);
+    --glass-sheen: rgba(255, 255, 255, 0.50);
+    --glass-shadow: 0 8px 22px rgba(40, 32, 10, 0.14), 0 1px 3px rgba(40, 32, 10, 0.10);
+    --glass-blur: blur(20px) saturate(160%);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root,
+    [data-theme="dark"] { --glass-bg: rgba(40, 40, 40, 0.55); --glass-bg-dense: rgba(30, 30, 30, 0.78); }
+    [data-theme="light"] { --glass-bg: rgba(255, 255, 255, 0.55); --glass-bg-dense: rgba(255, 255, 255, 0.80); }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    :root,
+    [data-theme="dark"] { --glass-bg: var(--surface); --glass-bg-dense: var(--surface); --glass-border: var(--border-strong); }
+    [data-theme="light"] { --glass-bg: #FFFFFF; --glass-bg-dense: #FFFFFF; --glass-border: var(--border-strong); }
+}
+
+/* Pieces that only exist in the iPhone layout (created by agent/composer.js) */
+.ag-settings-btn[hidden],
+.ag-sheet-backdrop[hidden] { display: none !important; }
+.session-pill { display: none; }
+.ag-select-name { display: none; }
+
+@media (orientation: portrait) {
+    [data-iphone] {
+        /* The glass material, on the few elements that carry it */
+        .topbar-actions .icon-btn,
+        .session-pill,
+        .tabstrip,
+        .shortcut-scroll,
+        .shortcut-pinned,
+        .ag-composer,
+        .ag-jump {
+            background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur);
+            backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border);
+            box-shadow:
+                inset 0 1px 0 var(--glass-rim),
+                inset 0 -1px 1px var(--glass-rim-low),
+                var(--glass-shadow);
+        }
+
+        /* ---------- terminal page ---------- */
+        .app { background: var(--term-bg); }
+
+        /* Top: always the compact "fullscreen" layout - no brand row, no tab strip, no fullscreen
+           button (an installed PWA on iPhone is already fullscreen). The current session is one
+           glass pill that opens the session sheet (ui/sessionSheet.js); ⋮ keeps the app menu. */
+        .topbar,
+        &[data-expanded] .topbar,
+        &[data-keyboard] .topbar {
+            background: transparent;
+            border-bottom: none;
+            padding: 4px 12px 6px;
+            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-rows: 48px;
+            grid-template-areas: "pill actions";
+            column-gap: 8px;
+        }
+        .brand,
+        .tabstrip,
+        #fullscreenBtn,
+        .topbar-divider { display: none !important; }
+        /* 48px capsule, 4px inset: the icon is a 40px circle (24 - 4 = 20) */
+        .session-pill {
+            grid-area: pill; justify-self: start; align-self: center; min-width: 0; max-width: 100%;
+            display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px 0 4px;
+            border-radius: 24px; color: var(--text);
+            touch-action: pan-y; /* horizontal swipes change session instead of scrolling (4.6) */
+            transition: transform var(--dur) var(--ease);
+        }
+        .session-pill:active { transform: scale(0.97); }
+        .session-pill-icon {
+            width: 40px; height: 40px; flex-shrink: 0; display: grid; place-items: center; border-radius: 20px;
+            background: var(--accent); color: var(--accent-fg);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+        .session-pill-name { min-width: 0; font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .session-pill-name.swipe-next { animation: session-pill-next 200ms var(--ease); }
+        .session-pill-name.swipe-prev { animation: session-pill-prev 200ms var(--ease); }
+        .session-pill-chevron { display: inline-grid; flex-shrink: 0; color: var(--text-2); }
+        .session-pill[data-state="connecting"] .session-pill-icon,
+        .session-pill[data-state="reconnecting"] .session-pill-icon { animation: pulse 1.2s ease-in-out infinite; }
+        .session-pill[data-state="error"] .session-pill-icon { background: var(--danger); }
+        .topbar-actions { grid-area: actions; }
+        .brand { padding: 0 2px; }
+        .brand-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+        .brand-icon { border-radius: 50%; border: none; box-shadow: none; }
+        .topbar-actions { gap: 8px; padding: 0; }
+        .topbar-actions .icon-btn { width: 44px; height: 44px; border-radius: 50%; color: var(--text); }
+        .topbar-actions .icon-btn:active { transform: scale(0.92); }
+
+        /* Capsule 48px tall, 4px inset: inner pieces are 40px capsules (24 - 4 = 20px radius) */
+        .tabstrip { border-top: 0.5px solid var(--glass-border); border-radius: 24px; padding: 4px; align-items: center; overflow: hidden; }
+        .new-tab {
+            width: 40px; height: 40px; margin: 0 4px 0 0; flex-shrink: 0;
+            border: none; border-radius: 20px; background: var(--glass-fill); color: var(--text);
+        }
+        .tab-list { padding-top: 0; gap: 4px; align-items: center; }
+        .tab { height: 40px; min-width: 140px; border: none; border-radius: 20px; padding: 0 4px 0 14px; }
+        .tab:hover { background: transparent; }
+        .tab.active { background: var(--glass-fill-pressed); }
+        .tab.active::before,
+        .tab.active::after { display: none; }
+        .tab-close { border-radius: 50%; }
+
+        /* Bottom: the status line is information, not a control - plain text, no glass */
+        .statusbar { background: transparent; border-top: none; padding: 0 6px 0 18px; }
+
+        /* Shortcut keys in two capsules: text keys, then tool icons (never mixed) */
+        .shortcut-bar { background: transparent; border-top: none; padding: 2px 0 8px; }
+        .shortcut-row { gap: 8px; padding: 0 10px; }
+        .shortcut-scroll { border-radius: 24px; padding: 4px; gap: 2px; }
+        .shortcut-pinned { border-left: 0.5px solid var(--glass-border); border-radius: 24px; padding: 4px; gap: 2px; }
+        .shortcut-key {
+            height: 40px; min-width: 42px; border: none; border-radius: 20px;
+            background: transparent; color: var(--text); box-shadow: none;
+        }
+        .shortcut-key.icon-key { color: var(--text); min-width: 40px; }
+        .shortcut-key.pressed { background: var(--glass-fill-pressed); transform: scale(0.94); }
+        .shortcut-key.active { background: var(--accent); color: var(--accent-fg); border: none; box-shadow: none; }
+        .shortcut-key.icon-key.recording { border: none; }
+        .shortcut-key[data-key="more"][aria-expanded="true"] { background: var(--glass-fill-pressed); }
+
+        &[data-keyboard] .topbar-actions .icon-btn { width: 38px; height: 38px; }
+        &[data-keyboard] .tabstrip { border-radius: 22px; }
+        &[data-keyboard] .tab,
+        &[data-keyboard] .new-tab { height: 36px; border-radius: 18px; }
+        &[data-keyboard] .new-tab { width: 36px; }
+
+        /* ---------- agent chat: the message box floats over the conversation ---------- */
+        .ag-head { border-bottom: 0.5px solid var(--glass-border); }
+        /* Header: just title and status - its actions are in the ⋮ (TerminalManager.tabActions) */
+        .ag-head > [data-act] { display: none; }
+        .ag-main { --ag-composer-h: 120px; }
+        .ag-log { padding-bottom: calc(var(--ag-composer-h) + 32px); }
+        .ag-pending { margin-bottom: calc(var(--ag-composer-h) + 16px); }
+        .ag-jump { bottom: calc(var(--ag-composer-h) + 22px); color: var(--text); }
+
+        /* Scroll edge effect: messages fade out as they reach the floating box */
+        .ag-main::after {
+            content: ''; position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; pointer-events: none;
+            height: calc(var(--ag-composer-h) + 36px);
+            background: linear-gradient(to bottom, transparent, var(--bg) 70%);
+        }
+
+        /* Card radius 32px, 10px inset: the inner capsules (44px tall) get 22px = 32 - 10 */
+        .ag-composer {
+            position: absolute; left: 10px; right: 10px; bottom: 8px; z-index: 4;
+            background-color: var(--glass-bg-dense);
+            border-radius: 32px; padding: 10px;
+        }
+        .ag-selectors { margin: 0; }
+        .ag-input-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+            grid-template-areas: "text text text text text" "attach settings mic stop send";
+            align-items: center;
+            gap: 8px;
+        }
+        .ag-input-row textarea {
+            grid-area: text; min-height: 40px; padding: 6px 8px 2px;
+            border: none; background: transparent; box-shadow: none; font-size: 17px;
+        }
+        .ag-input-row textarea:focus { box-shadow: none; }
+        .ag-input-row .icon-btn { width: 44px; height: 44px; border-radius: 22px; }
+        .ag-attach-btn { grid-area: attach; background: var(--glass-fill); color: var(--text); }
+        .ag-stop { grid-area: stop; background: var(--glass-fill); }
+        .ag-mic { grid-area: mic; background: var(--glass-fill); color: var(--text); }
+        /* Recording: red and pulsing, the same signal as the terminal's dictation key */
+        .ag-mic.recording { background: var(--danger); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+        .ag-send { grid-area: send; }
+        .ag-settings-btn {
+            grid-area: settings; justify-self: start; min-width: 0; max-width: 100%;
+            display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 14px 0 18px;
+            border-radius: 22px; background: var(--glass-fill); color: var(--text); font-size: 16px;
+            transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
+        }
+        .ag-settings-btn:active { transform: scale(0.96); background: var(--glass-fill-pressed); }
+        .ag-settings-btn .icon { color: var(--text-3); flex-shrink: 0; }
+        .ag-settings-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ag-settings-label strong { font-weight: 500; }
+        .ag-settings-label span { color: var(--text-3); margin-left: 5px; }
+        .ag-suggest { left: 0; right: 0; border-radius: 22px; }
+    }
+}
+
+/* ---------- the agent settings sheet (created only on iPhones) ---------- */
+.ag-sheet-backdrop {
+    position: fixed; inset: 0; z-index: 900; display: flex; align-items: flex-end;
+    background: rgba(0, 0, 0, 0); transition: background-color 220ms var(--ease);
+}
+.ag-sheet-backdrop.open { background: rgba(0, 0, 0, 0.35); }
+/* Inset from the screen edges so the content peeks through, large radius */
+.ag-sheet {
+    width: calc(100% - 16px); margin: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
+    max-height: 78dvh; overflow-y: auto; overscroll-behavior: contain;
+    padding: 6px 16px 18px; border-radius: 34px;
+    background-color: var(--glass-bg-dense);
+    background-image: linear-gradient(180deg, var(--glass-sheen), transparent 40%);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border: 0.5px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+    transform: translateY(110%); transition: transform 280ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.ag-sheet-backdrop.open .ag-sheet { transform: none; }
+.ag-sheet-grabber { width: 36px; height: 5px; border-radius: 3px; background: var(--border-strong); margin: 4px auto 6px; }
+.ag-sheet-head { display: flex; align-items: center; justify-content: space-between; min-height: 44px; margin-bottom: 10px; }
+.ag-sheet-head h3 { font-size: 17px; font-weight: 600; padding-left: 4px; }
+.ag-sheet-close { border-radius: 50%; background: var(--glass-fill); color: var(--text); }
+/* The selectors as a grouped settings list: tall rows, rounded section, title-case names */
+.ag-sheet .ag-selectors {
+    display: flex; flex-direction: column; flex-wrap: nowrap; gap: 0; margin: 0;
+    border-radius: 22px; background: var(--glass-fill); overflow: hidden;
+}
+.ag-sheet .ag-select,
+.ag-sheet .ag-toggle {
+    display: flex; width: 100%; max-width: none; height: 56px; gap: 12px; padding: 0 10px 0 16px;
+    border: none; border-radius: 0; background: transparent; color: var(--text); font-size: 16px;
+}
+.ag-sheet .ag-selectors > * + * { border-top: 0.5px solid var(--glass-border); }
+.ag-sheet .ag-select > span { color: var(--text-2); }
+.ag-sheet .ag-select-name { display: block; flex: 1; min-width: 0; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag-sheet .ag-select .ui-select { max-width: 62%; height: 40px; font-size: 16px; color: var(--text-2); }
+.ag-sheet .ag-select:hover:has(.ui-select:not(:disabled)),
+.ag-sheet .ag-select:has(.ui-select.open) { color: var(--text); box-shadow: none; }
+.ag-sheet .ag-select select { max-width: 62%; font-size: 16px; }
+.ag-sheet .ag-toggle input { order: 2; margin-left: auto; width: 22px; height: 22px; accent-color: var(--accent); }
+/* Session sheet (ui/sessionSheet.js): sheet radius 34px, 16px inset -> 18px rows */
+.sessions-sheet .ss-add { border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.ss-list { display: flex; flex-direction: column; gap: 8px; }
+.ss-row {
+    --c: var(--c-green);
+    display: flex; align-items: center; gap: 12px; min-height: 66px; padding: 0 6px 0 16px;
+    border-radius: 18px; background: var(--glass-fill); cursor: pointer;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.ss-row:active { transform: scale(0.98); }
+.ss-row.active { background: var(--accent-soft); box-shadow: inset 0 1px 0 var(--glass-rim); }
+.ss-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex-shrink: 0; }
+.ss-row[data-state="disconnected"] .ss-dot,
+.ss-row[data-state="exited"] .ss-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.ss-row[data-state="error"] .ss-dot { background: var(--danger); }
+.ss-icon {
+    width: 42px; height: 42px; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%;
+    background: var(--glass-fill); color: var(--text);
+}
+.ss-row.active .ss-icon { background: var(--glass-bg-dense); color: var(--accent); }
+.ss-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ss-text b { font-size: 16.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-text small { font-size: 13.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-check { display: inline-grid; color: var(--accent); flex-shrink: 0; }
+.ss-close { width: 44px; height: 44px; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; color: var(--text-2); }
+.ss-close:active { background: var(--glass-fill-pressed); }
+.ss-new {
+    width: 100%; height: 54px; margin-top: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;
+    border-radius: 18px; background: var(--accent-soft); color: var(--accent); font-size: 16px; font-weight: 600;
+}
+.ss-new:active { transform: scale(0.98); }
+/* Tab history: section title in title case (Apple's lists no longer use all caps) */
+.ss-section { margin: 22px 4px 10px; font-size: 15px; font-weight: 600; color: var(--text-2); }
+.ss-history[hidden] { display: none; }
+.ss-recent { min-height: 58px; background: transparent; box-shadow: inset 0 0 0 0.5px var(--glass-border); }
+.ss-recent .ss-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.ss-recent .ss-icon { width: 38px; height: 38px; color: var(--text-2); }
+.ss-recent .ss-text b { font-weight: 500; }
+.ss-recent + .ss-recent { margin-top: 8px; }
+.ss-reopen { display: inline-grid; color: var(--text-3); flex-shrink: 0; }
+@media (prefers-reduced-motion: reduce) {
+    .ag-sheet, .ag-sheet-backdrop { transition: none; }
+}
+
+/* ---------- iPhone: the browser tab as Safari's compact layout (iOS 26) ----------
+   One floating bar at the bottom, detached from the edges: back (glass circle), the address
+   pill showing just the domain with reload inside it, and "•••" with the rest (forward,
+   keyboard, ports, size/quality). The page fills the whole tab and runs under the bar. */
+@media (orientation: portrait) {
+    [data-iphone] {
+        .browser-toolbar {
+            position: absolute; left: 10px; right: 10px; bottom: 8px; z-index: 5;
+            gap: 8px; padding: 0; background: transparent; border: none;
+        }
+        .browser-toolbar [data-act="forward"],
+        .browser-toolbar [data-act="ports"],
+        .browser-toolbar [data-act="view"],
+        .browser-toolbar [data-act="keyboard"] { display: none; }
+
+        .browser-toolbar [data-act="back"],
+        .browser-more,
+        .browser-pill {
+            background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur);
+            backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border);
+            box-shadow: inset 0 1px 0 var(--glass-rim), inset 0 -1px 1px var(--glass-rim-low), var(--glass-shadow);
+        }
+        .browser-toolbar [data-act="back"],
+        .browser-more { display: inline-grid; width: 48px; height: 48px; border-radius: 50%; color: var(--text); }
+        .browser-toolbar [data-act="back"]:disabled { opacity: 1; color: var(--text-3); }
+        .browser-more { order: 9; }
+        .browser-more .icon { transform: rotate(90deg); } /* Safari's "•••" is horizontal */
+
+        /* 48px capsule, 4px inset: reload is a 40px circle inside it (24 - 4 = 20) */
+        .browser-pill {
+            order: 5; flex: 1; min-width: 0; height: 48px; display: flex; align-items: center;
+            padding: 4px; border-radius: 24px;
+        }
+        .browser-pill [data-act="reload"] { order: 3; width: 40px; height: 40px; border-radius: 20px; color: var(--text-2); }
+        .browser-pill .browser-live { order: 1; margin-left: 6px; }
+        .browser-address { order: 2; position: relative; flex: 1; min-width: 0; margin: 0; }
+        .browser-address input {
+            height: 40px; padding: 0 8px 0 12px; border: none; border-radius: 20px;
+            background: transparent; box-shadow: none; font-size: 16px; text-align: center;
+        }
+        .browser-address input:focus { text-align: left; background: var(--glass-fill); box-shadow: none; }
+        /* Not editing: the domain, centered, over the (transparent) full address */
+        .browser-host {
+            display: block; position: absolute; inset: 0; padding: 0 8px; pointer-events: none;
+            font-size: 16px; font-weight: 500; line-height: 40px; text-align: center; color: var(--text);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .browser-address:not(:focus-within):has(.browser-host:not(:empty)) input { color: transparent; }
+        .browser-address:focus-within .browser-host { display: none; }
+        /* Editing the address: the field takes the whole bar, like Safari */
+        .browser-toolbar:has(.browser-address:focus-within) [data-act="back"],
+        .browser-toolbar:has(.browser-address:focus-within) .browser-more { display: none; }
+
+        /* Scrolled down (4.5): the bar tucks into a small centered capsule with only the domain.
+           Tapping it expands again (browserSession.js) - the same as Safari. */
+        .browser-toolbar.minimized { justify-content: center; }
+        .browser-toolbar.minimized [data-act="back"],
+        .browser-toolbar.minimized .browser-more,
+        .browser-toolbar.minimized .browser-pill [data-act="reload"],
+        .browser-toolbar.minimized .browser-pill .browser-live { display: none; }
+        .browser-toolbar.minimized .browser-pill {
+            flex: 0 1 auto; height: 32px; min-width: 88px; max-width: 62vw;
+            padding: 0 10px; border-radius: 16px;
+        }
+        .browser-toolbar.minimized .browser-address { flex: 0 1 auto; width: min(52vw, 210px); }
+        .browser-toolbar.minimized .browser-address input,
+        .browser-toolbar.minimized .browser-host {
+            height: 32px; padding: 0 2px; font-size: 13px; line-height: 32px;
+        }
+        .browser-toolbar { transition: gap 180ms var(--ease); }
+        .browser-toolbar .browser-pill { transition: height 180ms var(--ease), border-radius 180ms var(--ease); }
+        .browser-toolbar .browser-address input,
+        .browser-toolbar .browser-host { transition: height 180ms var(--ease), font-size 180ms var(--ease); }
+
+        /* Loading: a thin line along the top edge of the page */
+        .browser-progress { position: absolute; top: 0; left: 0; right: 0; z-index: 5; }
+
+        /* Menus (••• and the rest of the app) as glass popovers */
+        .menu {
+            border: 0.5px solid var(--glass-border); border-radius: 22px; padding: 6px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .menu-item { height: 44px; border-radius: 16px; font-size: 15px; }
+    }
+}
+
+/* No sliding bar for people who asked for less motion */
+@media (prefers-reduced-motion: reduce) {
+    [data-iphone] .browser-toolbar,
+    [data-iphone] .browser-toolbar .browser-pill,
+    [data-iphone] .browser-toolbar .browser-address input,
+    [data-iphone] .browser-toolbar .browser-host { transition: none; }
+}
+
+/* ---------- iPhone: the apps home page ("Nova sessão") as an iOS 26 home screen ----------
+   Large left-aligned title, app icons as rounded squares with a colored gradient and a white
+   glyph (no tile card around them, labels underneath), the recent tabs as an inset grouped list,
+   and the form as a grouped form with a segmented control and capsule buttons. The round
+   settings/close buttons are glass (controls); the icons are content, so they are not. */
+@media (orientation: portrait) {
+    [data-iphone] {
+        .new-session {
+            padding: calc(64px + var(--safe-top)) calc(20px + var(--safe-right)) calc(32px + var(--safe-bottom)) calc(20px + var(--safe-left));
+            background:
+                radial-gradient(120% 60% at 0% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
+                radial-gradient(90% 50% at 100% 30%, color-mix(in srgb, var(--c-blue) 14%, transparent), transparent 70%),
+                var(--bg);
+        }
+        .ns-close,
+        .ns-settings {
+            top: calc(10px + var(--safe-top)); width: 44px; height: 44px; border-radius: 50%; color: var(--text);
+            background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .ns-close { right: calc(14px + var(--safe-right)); }
+        .ns-settings { right: calc(14px + 52px + var(--safe-right)); }
+
+        .new-session-mark { display: none; }
+        .app-grid-title {
+            text-align: left; font-size: 34px; font-weight: 700; letter-spacing: -0.025em;
+            color: var(--text); margin: 0 4px 28px;
+        }
+
+        /* Home screen icons: 68px, radius ~23% of the size, gradient + top highlight */
+        .app-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 26px 10px; max-width: none; }
+        .app-tile { padding: 0; gap: 8px; border: none; background: transparent; border-radius: 0; }
+        .app-tile:hover { transform: none; }
+        .app-tile:active .app-tile-icon { transform: scale(0.92); filter: brightness(0.9); }
+        .app-tile-icon {
+            width: 68px; height: 68px; border-radius: 16px; border: none; color: #FFFFFF;
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 55%),
+                linear-gradient(160deg, color-mix(in srgb, var(--tc) 85%, #FFFFFF), color-mix(in srgb, var(--tc) 70%, #000000));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 -1px 1px rgba(0, 0, 0, 0.12), 0 6px 16px color-mix(in srgb, var(--tc) 30%, transparent);
+            transition: transform var(--dur) var(--ease), filter var(--dur) var(--ease);
+        }
+        .app-tile-icon .icon { width: 30px; height: 30px; stroke-width: 2.1; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2)); }
+        .app-tile-label { font-size: 13px; font-weight: 500; color: var(--text); }
+
+        /* Recent tabs: inset grouped list (title-case header, 22px corners, 60px rows) */
+        .recent { margin-top: 40px; }
+        .section-label { text-transform: none; letter-spacing: -0.01em; font-size: 20px; font-weight: 700; color: var(--text); margin: 0 4px 10px; }
+        .recent-list { gap: 0; border-radius: 22px; overflow: hidden; background: var(--glass-fill); }
+        .recent-item { --c: var(--accent); gap: 0; padding-right: 6px; }
+        .recent-item + .recent-item { border-top: 0.5px solid var(--glass-border); }
+        .recent-open { min-height: 60px; padding: 8px 8px 8px 16px; border-radius: 0; gap: 12px; }
+        .recent-open:hover { background: transparent; }
+        .recent-open:active { background: var(--glass-fill-pressed); }
+        .recent-dot { background: var(--c); }
+        .recent-icon {
+            display: grid; place-items: center; width: 38px; height: 38px; flex-shrink: 0;
+            border-radius: 50%; background: var(--glass-fill); color: var(--text-2);
+        }
+        .recent-name { font-size: 16px; }
+        .recent-meta { font-size: 13px; }
+        .recent-forget { width: 44px; height: 44px; color: var(--text-3); }
+
+        /* The form ("Terminal", "Navegador"...): grouped fields, segmented control, capsule buttons */
+        .ns-back { color: var(--accent); font-size: 16px; font-weight: 500; margin-bottom: 12px; }
+        .new-session-title { text-align: left; font-size: 28px; font-weight: 700; margin: 0 4px 18px; }
+        .kind-toggle { padding: 4px; border: none; border-radius: 24px; background: var(--glass-fill); }
+        .kind-toggle button { min-width: 0; height: 40px; border-radius: 20px; font-size: 12.5px; gap: 5px; padding: 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .kind-toggle button .icon { display: none; }
+        .kind-toggle button[aria-checked="true"] {
+            background: var(--glass-bg-dense); color: var(--text); border: none;
+            box-shadow: inset 0 1px 0 var(--glass-rim), 0 2px 8px rgba(0, 0, 0, 0.18);
+        }
+        .field-label { font-size: 13px; margin-left: 4px; }
+        .field-help { margin-left: 4px; }
+        .field input { height: 50px; border-radius: 16px; border: none; background: var(--glass-fill); font-size: 16px; padding: 0 16px; }
+        .field input:focus { box-shadow: 0 0 0 2px var(--accent); }
+        .new-session-actions { flex-direction: column-reverse; gap: 10px; margin-top: 8px; }
+        .new-session-actions .btn { flex: none; width: 100%; height: 52px; border-radius: 26px; font-size: 16px; }
+        /* The color already makes it the main action: no glow ring around it */
+        .new-session-actions .btn-primary,
+        .new-session-actions .btn-primary:focus-visible { box-shadow: none; outline: none; border: none; }
+        .new-session-actions .btn-primary:active { transform: scale(0.98); box-shadow: none; }
+        .new-session-actions .btn-ghost { border: none; background: var(--glass-fill); }
+    }
+}
+
+/* Edge swipe hint (ui/edgeSwipe.js): a round glass button with the apps icon that follows the
+   finger while dragging from the left edge; turns accent when letting go will open the page. */
+.edge-swipe-hint {
+    position: fixed; top: 50%; left: 0; z-index: 950; width: 52px; height: 52px; margin-top: -26px;
+    display: grid; place-items: center; border-radius: 50%; pointer-events: none; color: var(--text);
+    background-color: var(--glass-bg-dense);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border: 0.5px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+    transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.edge-swipe-hint.from-right { left: auto; right: 0; }
+.edge-swipe-hint.ready { background-color: var(--accent); color: var(--accent-fg); }
+
+/* ---------- No zoom on focus (touch screens, any orientation) ----------
+   iOS Safari zooms into any focused field whose text is under 16px, and the user has to pinch back
+   out every time. Every place you type keeps 16px+ on touch screens (xterm's hidden textarea too:
+   it takes the focus when the terminal is tapped). Checkboxes, switches and sliders don't zoom, so
+   they're left alone. index.html also sets maximum-scale=1 on iPhones as a safety net. */
+@media (pointer: coarse) {
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="color"], [type="file"]),
+    textarea, select, [contenteditable="true"], .ProseMirror, .xterm-helper-textarea {
+        font-size: max(16px, 1em) !important;
+    }
+}
+
+/* ---------- iPhone: the screens that were still desktop (files, notes, sheets, search) ----------
+   Same rules as the rest of the iPhone layout: glass only on controls, 44px+ targets, 34px sheets
+   away from the edges, content scrolling under floating bars. Desktop and other phones untouched. */
+@keyframes iphone-sheet-up { from { opacity: 0; transform: translateY(24px); } }
+@keyframes iphone-sheet-down { from { opacity: 0; transform: translateY(100%); } }
+
+@media (orientation: portrait) {
+    [data-iphone] {
+        /* ---- Arquivos ---- */
+        .fm-toolbar {
+            flex-shrink: 0; margin: 8px 10px 0; padding: 2px 4px; min-height: 48px;
+            background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border); border-radius: 24px;
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .fm-toolbar .icon-btn { width: 44px; height: 44px; border-radius: 50%; color: var(--text); }
+        .fm-crumbs { padding-left: 4px; margin: 0 2px; }
+        .fm-crumb { height: 40px; border-radius: 20px; font-size: 14px; }
+        .fm-crumb:hover { background: var(--glass-fill); }
+        .fm-list {
+            margin: 8px 10px 0; padding: 4px 4px calc(92px + var(--safe-bottom));
+            background: var(--surface); border: 0.5px solid var(--border); border-radius: 20px;
+        }
+        .fm-row { min-height: 56px; border-radius: 14px; }
+        .fm-row:hover { background: transparent; }
+        .fm-more { width: 44px; height: 44px; border-radius: 50%; }
+        .fm-bars { bottom: calc(12px + var(--safe-bottom)); }
+        .fm-selbar, .fm-pastebar {
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border); border-radius: 22px;
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .fm-selbar .icon-btn { width: 44px; height: 44px; }
+        .fm-fab { bottom: calc(18px + var(--safe-bottom)); right: 18px; border: none; box-shadow: var(--glass-shadow); }
+        .fm.has-bars .fm-fab { bottom: calc(84px + var(--safe-bottom)); }
+        /* the places drawer becomes a sheet, like every other secondary surface */
+        .fm-side {
+            position: fixed; inset: auto 8px calc(8px + var(--safe-bottom)) 8px; width: auto;
+            max-height: 72dvh; z-index: 40; padding: 14px 12px 22px; border: 0.5px solid var(--glass-border);
+            border-radius: 34px; background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow); transform: translateY(calc(100% + 16px));
+        }
+        .fm.side-open .fm-side { transform: none; animation: iphone-sheet-down 220ms var(--ease); }
+        .fm-side-close { width: 44px; height: 44px; border-radius: 50%; }
+        .fm-side-item { min-height: 52px; border-radius: 14px; }
+        .fm-scrim:not([hidden]) { position: fixed; inset: 0; z-index: 35; background: var(--backdrop); }
+        .fm-viewer-bar { min-height: 56px; padding: 6px 8px; background: var(--glass-bg-dense); border-bottom: 0.5px solid var(--border); }
+        .fm-viewer { padding-top: var(--safe-top); }
+        .fm-viewer-bar .icon-btn { width: 44px; height: 44px; border-radius: 50%; }
+        .fm-editor { font-size: 16px; }
+
+        /* ---- Anotações ---- */
+        .nt-toolbar {
+            flex-shrink: 0; margin: 8px 10px 0; padding: 2px 4px; min-height: 48px; border: 0.5px solid var(--glass-border);
+            border-radius: 24px; background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .nt-toolbar .icon-btn { width: 44px; height: 44px; border-radius: 50%; color: var(--text); }
+        .nt-search { padding-left: 4px; }
+        .nt-search input {
+            height: 40px; border: 0; border-radius: 20px; background: var(--glass-fill);
+            padding: 0 14px; box-shadow: none;
+        }
+        .nt-search input:focus { background: var(--glass-fill-pressed); box-shadow: none; }
+        .nt-tags { padding: 8px 12px; border-bottom: none; }
+        .nt-chip { min-height: 34px; border-radius: 17px; }
+        .nt-list { padding: 4px 10px calc(100px + var(--safe-bottom)); }
+        .nt-row-fg { border-radius: 16px; }
+        .nt-item { min-height: 60px; padding: 10px 4px 10px 14px; }
+        .nt-more { width: 44px; height: 44px; border-radius: 50%; }
+        .nt-fab { right: 18px; bottom: calc(18px + var(--safe-bottom)); border: none; box-shadow: var(--glass-shadow); }
+        .nt-ehead {
+            min-height: 56px; padding: 4px 8px; border-bottom: 0.5px solid var(--divider);
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+        }
+        .nt-ehead .icon-btn { width: 44px; height: 44px; border-radius: 50%; }
+        .nt-title { padding: 14px 18px 6px; }
+        .nt-tagsline { padding: 0 18px 10px; }
+        .nt-doc-wrap { padding: 12px 18px 24px; }
+        .nt-fbar {
+            left: 8px; right: 8px; bottom: calc(8px + var(--safe-bottom)); margin: 0;
+            border: 0.5px solid var(--glass-border); border-radius: 22px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .nt-fbtn { width: 44px; height: 44px; border-radius: 12px; }
+        /* standalone /notas has no app topbar: the toolbar takes the safe area itself */
+        .page-terminal:not(:has(.topbar)) .nt-toolbar { margin-top: calc(8px + var(--safe-top)); }
+
+        /* ---- Diálogos e folhas (Configurações, comandos, prompts) ---- */
+        .dialog {
+            width: calc(100vw - 16px); max-height: 88dvh; margin: auto auto calc(8px + var(--safe-bottom));
+            border: 0.5px solid var(--glass-border); border-radius: 34px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow); padding-bottom: 0;
+        }
+        .dialog[open] { animation: iphone-sheet-up 220ms var(--ease); }
+        .dialog-header { min-height: 60px; padding: 8px 10px 8px 22px; border-bottom: 0.5px solid var(--divider); }
+        .dialog-title { font-size: 17px; }
+        .dialog-header .icon-btn { width: 44px; height: 44px; border-radius: 50%; }
+        .dialog-body { padding: 8px 22px calc(24px + var(--safe-bottom)); }
+        .prompt-actions { padding: 0 22px calc(18px + var(--safe-bottom)); }
+        .prompt-actions .btn { min-height: 48px; border-radius: 24px; }
+        .prompt-dialog .field input { height: 48px; border-radius: 24px; }
+        .setting { min-height: 56px; }
+        .settings-section { margin-top: 22px; }
+
+        /* ---- Avisos ---- */
+        .toast-region { bottom: calc(var(--safe-bottom) + 104px); max-width: calc(100vw - 32px); }
+        .toast {
+            padding: 12px 12px 12px 18px; border: 0.5px solid var(--glass-border); border-radius: 22px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow); font-size: 14.5px;
+        }
+        .toast-action { height: 36px; border-radius: 18px; font-size: 14px; }
+
+        /* ---- Busca no terminal: a floating glass capsule ---- */
+        .search-bar {
+            top: 10px; left: 12px; right: 12px; width: auto; height: 48px; padding: 0 4px 0 16px;
+            border: 0.5px solid var(--glass-border); border-radius: 24px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+        }
+        .search-bar .icon-btn { width: 40px; height: 40px; }
+        .search-bar input { font-size: 16px; }
+
+        /* ---- Painel do agente: sheet at the bottom instead of a side column ---- */
+        .ag-side {
+            position: absolute; left: 8px; right: 8px; bottom: calc(8px + var(--safe-bottom)); top: auto;
+            width: auto; max-height: 72%; z-index: 8; padding: 18px 18px 22px;
+            border: 0.5px solid var(--glass-border); border-left: 0.5px solid var(--glass-border); border-radius: 34px;
+            background-color: var(--glass-bg-dense);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-shadow);
+        }
+        .ag-body.side-open .ag-side { animation: iphone-sheet-down 220ms var(--ease); }
+        .ag-side h3 { text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 600; color: var(--text-2); }
+        .sp-list button { min-height: 48px; border-radius: 14px; }
+        .ag-side-scrim:not([hidden]) { position: absolute; inset: 0; z-index: 7; background: var(--backdrop); }
+
+        /* ---- Login e /admin: only corners and breathing room (they are content, not glass) ---- */
+        .page-login .login { padding: calc(20px + var(--safe-top)) 14px calc(20px + var(--safe-bottom)); }
+        .page-login .login-card { width: 100%; max-width: 440px; padding: 30px 22px 26px; border-radius: 30px; border-width: 0.5px; }
+        .page-login .login-form .btn { height: 50px; border-radius: 25px; }
+        .page-admin .admin-topbar { height: calc(56px + var(--safe-top)); padding-top: var(--safe-top); }
+        .page-admin .admin-page { padding: 20px 16px calc(80px + var(--safe-bottom)); }
+    }
+}
+=======
 /* ---------- Claude bridge consent page (oauth-authorize.html) ---------- */
 .oauth-card .login-subtitle strong { color: var(--text); }
 .oauth-scope { margin: 18px 0 10px; padding-left: 18px; text-align: left; font-size: 13.5px; color: var(--text-2); display: grid; gap: 6px; }
@@ -2819,3 +3518,5 @@ audio.fm-media { width: min(520px, 90%); }
 .rm-output { flex: 1 1 100%; max-height: 320px; overflow: auto; margin: 4px 0 0; padding: 10px; border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 .rm-empty { font-size: 13px; color: var(--text-3); }
 .agent-ui-section.is-off { display: none; }
+
+/* ==================================================

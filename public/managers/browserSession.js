@@ -9,6 +9,7 @@ import { icon } from '../ui/icons.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { askText } from '../ui/prompt.js';
 import StorageManager from './storage.js';
+import { isIphonePortrait } from '../ui/device.js';
 
 const MAX_RECONNECT_ATTEMPTS = 6;
 const CLOSE_SESSION_GONE = 4404;
@@ -79,6 +80,7 @@ export default class BrowserSession {
         this.frameSeq = 0;
         this.drawnSeq = 0;
         this.nav = { canGoBack: false, canGoForward: false, loading: false };
+        this.toolbarMinimized = false;
 
         this.panel = document.createElement('div');
         this.panel.className = 'terminal-panel browser-panel';
@@ -99,15 +101,19 @@ export default class BrowserSession {
             <div class="browser-toolbar">
                 <button type="button" class="icon-btn" data-act="back" aria-label="Voltar" disabled>${icon('chevronLeft', 18)}</button>
                 <button type="button" class="icon-btn" data-act="forward" aria-label="Avançar" disabled>${icon('chevronRight', 18)}</button>
-                <button type="button" class="icon-btn" data-act="reload" aria-label="Recarregar">${icon('refresh', 17)}</button>
-                <button type="button" class="browser-live" data-act="live" hidden><span>ao vivo</span></button>
-                <form class="browser-address" autocomplete="off">
-                    <input type="text" inputmode="url" enterkeyhint="go" spellcheck="false" autocapitalize="off"
-                        autocorrect="off" placeholder="localhost:5173 ou endereço" aria-label="Endereço">
-                </form>
+                <div class="browser-pill">
+                    <button type="button" class="browser-live" data-act="live" hidden><span>ao vivo</span></button>
+                    <form class="browser-address" autocomplete="off">
+                        <input type="text" inputmode="url" enterkeyhint="go" spellcheck="false" autocapitalize="off"
+                            autocorrect="off" placeholder="localhost:5173 ou endereço" aria-label="Endereço">
+                        <span class="browser-host" aria-hidden="true"></span>
+                    </form>
+                    <button type="button" class="icon-btn" data-act="reload" aria-label="Recarregar">${icon('refresh', 17)}</button>
+                </div>
                 <button type="button" class="icon-btn" data-act="ports" aria-label="Portas abertas no servidor">${icon('activity', 17)}</button>
                 <button type="button" class="icon-btn" data-act="view" aria-label="Tamanho e qualidade">${icon('settings', 17)}</button>
                 <button type="button" class="icon-btn browser-kbd-btn" data-act="keyboard" aria-label="Abrir teclado">${icon('keyboard', 18)}</button>
+                <button type="button" class="icon-btn browser-more" data-act="more" aria-label="Mais ações" aria-haspopup="menu">${icon('more', 20)}</button>
             </div>
             <div class="browser-progress" hidden></div>
             <div class="browser-viewer">
@@ -126,12 +132,14 @@ export default class BrowserSession {
             forward: q('[data-act="forward"]'),
             reload: q('[data-act="reload"]'),
             live: q('[data-act="live"]'),
+            host: q('.browser-host'),
             progress: q('.browser-progress'),
             viewer: q('.browser-viewer'),
             surface: q('.browser-surface'),
             canvas: q('canvas'),
             status: q('.browser-status'),
             kbd: q('.browser-kbd'),
+            pill: q('.browser-pill'),
         };
         this.ctx = this.el.canvas.getContext('2d');
         this.el.address.value = this.url;
@@ -305,6 +313,12 @@ export default class BrowserSession {
         if (document.activeElement !== this.el.address) {
             this.el.address.value = s.url && s.url !== 'about:blank' ? s.url : '';
         }
+        // Domain only, like Safari (shown instead of the full address on iPhones, see styles.css)
+        let host = '';
+        try {
+            host = s.url && s.url !== 'about:blank' ? new URL(s.url).host : '';
+        } catch { /* not a URL: leave it empty */ }
+        this.el.host.textContent = host;
         this.el.back.disabled = !s.canGoBack;
         this.el.forward.disabled = !s.canGoForward;
         this.el.reload.innerHTML = s.loading ? icon('x', 17) : icon('refresh', 17);
@@ -389,6 +403,13 @@ export default class BrowserSession {
             this.focus();
         });
         address.addEventListener('focus', () => address.select());
+        // Tap on the shrunken bar (4.5) expands it instead of focusing the address
+        this.el.pill.addEventListener('pointerdown', e => {
+            if (!this.toolbarMinimized) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.setToolbarMinimized(false);
+        }, true);
         this.panel.querySelector('.browser-toolbar').addEventListener('click', e => {
             const btn = e.target.closest('[data-act]');
             if (!btn) return;
@@ -400,11 +421,23 @@ export default class BrowserSession {
             } else if (act === 'ports') this.send({ type: 'ports' }) || this.showStatus('Sem conexão');
             else if (act === 'view') this.openViewMenu(btn);
             else if (act === 'live') this.openLiveMenu(btn);
+            else if (act === 'more') this.openMoreMenu(btn);
             else if (act === 'keyboard') {
                 if (document.activeElement === this.el.kbd) this.el.kbd.blur();
                 else this.openKeyboard();
             }
         });
+    }
+
+    /**
+     * Safari's scroll-away bar: while the page scrolls down the bar tucks into a small capsule
+     * with only the domain; scrolling up (or tapping it) brings the controls back. The class is
+     * toggled everywhere, but only the iPhone CSS makes it visible - other layouts ignore it.
+     */
+    setToolbarMinimized(min) {
+        if (this.toolbarMinimized === min) return;
+        this.toolbarMinimized = min;
+        this.panel.querySelector('.browser-toolbar')?.classList.toggle('minimized', min);
     }
 
     navigate(url) {
@@ -423,6 +456,20 @@ export default class BrowserSession {
                 ? { label: 'Parar de recarregar ao salvar', icon: 'eyeOff', run: () => this.send({ type: 'live', path: null }) }
                 : { label: 'Recarregar ao salvar arquivos…', icon: 'refresh', run: () => this.askLiveFolder() },
         ], { anchor, label: 'Tamanho e qualidade' });
+    }
+
+    /**
+     * "•••" (iPhone, Safari-style bottom bar): the toolbar buttons that don't fit next to the
+     * address pill. Hidden elsewhere, where those buttons are on the toolbar itself.
+     */
+    openMoreMenu(anchor) {
+        showMenu([
+            { label: 'Avançar', icon: 'chevronRight', disabled: !this.nav.canGoForward, run: () => this.send({ type: 'forward' }) },
+            { label: 'Teclado', icon: 'keyboard', run: () => this.openKeyboard() },
+            { label: 'Portas abertas no servidor', icon: 'activity', run: () => this.send({ type: 'ports' }) || this.showStatus('Sem conexão') },
+            'separator',
+            { label: 'Tamanho e qualidade…', icon: 'settings', run: () => this.openViewMenu(anchor) },
+        ], { anchor, label: 'Mais ações' });
     }
 
     /** Live reload: the page reloads when a file of a folder is saved (like VS Code's Live Server). */
@@ -452,7 +499,9 @@ export default class BrowserSession {
     }
 
     showPorts(ports) {
-        const anchor = this.panel.querySelector('[data-act="ports"]');
+        // The ports button, or "•••" where the ports button is folded into it (iPhone)
+        const anchor = ['ports', 'more'].map(act => this.panel.querySelector(`[data-act="${act}"]`))
+            .find(btn => btn && btn.offsetParent) || null;
         const items = ports.map(({ port, name }) => ({
             label: `localhost:${port}`,
             hint: name,
@@ -530,7 +579,7 @@ export default class BrowserSession {
             }
             if (e.touches.length !== 1) return;
             const t = e.touches[0];
-            touch = { two: false, x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY, time: performance.now(), vx: 0, vy: 0, dragging: false };
+            touch = { two: false, x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY, time: performance.now(), vx: 0, vy: 0, vAccum: 0, hAccum: 0, dragging: false };
         }, { passive: false });
         s.addEventListener('touchmove', e => {
             e.preventDefault();
@@ -552,6 +601,16 @@ export default class BrowserSession {
             touch.y = t.clientY;
             touch.time = now;
             scrollBy(dx, dy, t.clientX, t.clientY);
+            // Scroll down = bar shrinks, scroll up = bar returns (Safari, iOS 26)
+            if (isIphonePortrait()) {
+                touch.vAccum += dy;
+                touch.hAccum += dx;
+                if (Math.abs(touch.vAccum) > Math.abs(touch.hAccum) && Math.abs(touch.vAccum) > 24) {
+                    this.setToolbarMinimized(touch.vAccum > 0);
+                    touch.vAccum = 0;
+                    touch.hAccum = 0;
+                }
+            }
         }, { passive: false });
         s.addEventListener('touchend', e => {
             e.preventDefault();

@@ -17,9 +17,12 @@ import ShortcutBar from './ui/shortcutBar.js';
 import { createSettingsDialog, createShortcutsDialog } from './ui/dialogs.js';
 import { showMenu } from './ui/contextMenu.js';
 import { icon } from './ui/icons.js';
+import { sessionIcon } from './ui/sessionSheet.js';
+import { bindEdgeSwipe } from './ui/edgeSwipe.js';
 import VibeForm from './ui/vibeForm.js';
 import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
+import { isHandset, isIphonePortrait } from './ui/device.js';
 import { toast } from './ui/toast.js';
 
 const STATE_LABELS = {
@@ -53,7 +56,8 @@ async function waitForFonts() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     const config = window.appConfig || {};
-    const isMacOS = /Macintosh|Mac OS X/i.test(navigator.userAgent);
+    // iPhones say "like Mac OS X" too: they'd get ⌘ shortcut hints (a glyph their font lacks)
+    const isMacOS = /Macintosh|Mac OS X/i.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.userAgent);
     const root = document.documentElement;
     const uiStorage = new StorageManager('meuterminal-');
 
@@ -185,7 +189,54 @@ document.addEventListener('DOMContentLoaded', async () => {
     const statusBar = new StatusBar(document.getElementById('statusBar'), {
         onSessions: anchor => workspace.openSessionList(anchor),
     });
+    // iPhone session pill (top of the screen): icon, name and color of the current session
+    const sessionPill = document.getElementById('sessionPill');
+    sessionPill.querySelector('.session-pill-chevron').innerHTML = icon('chevronDown', 18);
+    // Swiping the pill left/right goes to the next/previous open session (iPhone, 4.6).
+    // The click that the browser fires after the drag must not open the session sheet.
+    let pillGesture = null;
+    let pillSwipedAt = 0;
+    sessionPill.addEventListener('pointerdown', e => {
+        if (e.pointerType === 'mouse' || !root.hasAttribute('data-iphone')) return;
+        pillGesture = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        try { sessionPill.setPointerCapture(e.pointerId); } catch { /* pointerup still bubbles */ }
+    });
+    const endPillGesture = e => {
+        const start = pillGesture;
+        pillGesture = null;
+        if (!start || start.id !== e.pointerId) return;
+        const dx = e.clientX - start.x;
+        const dy = e.clientY - start.y;
+        // Mostly horizontal and long enough, like a page swipe
+        if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        pillSwipedAt = performance.now();
+        workspace.cycle(dx < 0 ? 1 : -1);
+        const name = sessionPill.querySelector('.session-pill-name');
+        name.classList.remove('swipe-next', 'swipe-prev');
+        void name.offsetWidth; // restart the short entrance animation
+        name.classList.add(dx < 0 ? 'swipe-next' : 'swipe-prev');
+    };
+    sessionPill.addEventListener('pointerup', endPillGesture);
+    sessionPill.addEventListener('pointercancel', () => { pillGesture = null; });
+    sessionPill.addEventListener('click', e => {
+        if (performance.now() - pillSwipedAt < 600) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+        workspace?.openSessionList(sessionPill);
+    });
+    const renderPill = session => {
+        if (!session) return;
+        sessionPill.querySelector('.session-pill-icon').innerHTML = icon(sessionIcon(session), 20);
+        sessionPill.querySelector('.session-pill-name').textContent = session.name;
+        sessionPill.style.setProperty('--c', `var(--c-${session.color || 'green'})`);
+        sessionPill.dataset.state = session.state;
+        sessionPill.setAttribute('aria-label', `Sessão atual: ${session.name}. Toque para ver as sessões abertas`);
+    };
+
     const renderActive = session => {
+        renderPill(session);
         statusBar.render(session);
         if (typeof updateShortcutBar === 'function') updateShortcutBar();
         brandConn.dataset.state = session.state;
@@ -244,6 +295,42 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ---------- dialogs ----------
     settingsDialog = createSettingsDialog(settings, () => workspace?.active, commands);
+    /** Configurações: on iPhone, opens a sheet inside the app; on desktop, goes to /admin. */
+    function openSettings() {
+        if (isIphonePortrait()) {
+            // Open settings sheet inside the app, focusing the Interface section
+            const sheet = document.createElement('div');
+            sheet.className = 'ag-settings-sheet';
+            sheet.innerHTML = `
+                <div class="ag-sheet-header">
+                    <h3>Configurações</h3>
+                    <button type="button" class="ag-sheet-close" aria-label="Fechar">${icon('x')}</button>
+                </div>
+                <div class="ag-sheet-content">
+                    <!-- mountSettingsSections will fill this -->
+                </div>
+            `;
+            document.body.appendChild(sheet);
+            // Re-mount the settings sections into the sheet
+            const sections = mountSettingsSections(sheet.querySelector('.ag-sheet-content'), {
+                settings,
+                getSession: () => workspace?.active,
+                commands,
+            });
+            // Close sheet on backdrop click or close button
+            sheet.querySelector('.ag-sheet-close').addEventListener('click', () => sheet.remove());
+            sheet.addEventListener('click', e => {
+                if (e.target === sheet) sheet.remove();
+            });
+            // Focus the interface section initially
+            setTimeout(() => {
+                const interfaceSection = sheet.querySelector('[data-page="interface"]');
+                if (interfaceSection) interfaceSection.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+        } else {
+            window.location.href = joinPath('admin');
+        }
+    }
     const vibeForm = new VibeForm();
     const agentLaunch = new AgentLaunch();
 
@@ -304,7 +391,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             },
             onAction: action => {
                 if (action === 'fullscreen') toggleFullscreen();
-                else if (action === 'settings') window.location.href = joinPath('admin');
+                else if (action === 'settings') openSettings();
                 else if (action === 'vibecode') vibeForm.open();
             },
         },
@@ -319,6 +406,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('newTabBtn').innerHTML = icon('plus', 18);
     document.getElementById('newTabBtn').addEventListener('click', () => workspace.openNewSessionPage());
+    // iPhone: drag from the left edge to open the apps page, drag left to close it (ui/edgeSwipe.js)
+    bindEdgeSwipe({
+        isOpen: () => workspace.newSessionPage.isOpen,
+        canClose: () => workspace.sessions.size > 0,
+        onOpen: () => workspace.openNewSessionPage(),
+        onClose: () => workspace.closeNewSessionPage(),
+    });
 
     // ---------- overflow menu ----------
     const logout = () => {
@@ -333,7 +427,24 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
     };
 
+    const appItems = () => [
+        { label: 'Configurações', icon: 'settings', run: () => openSettings() },
+        { label: 'Guia do app', icon: 'info', run: () => window.open(joinPath('guia'), '_blank', 'noopener') },
+        ...(config.isPinRequired ? [{ label: 'Sair', icon: 'logout', danger: true, run: logout }] : []),
+    ];
+
     menuBtn.addEventListener('click', () => {
+        // Phones: the ⋮ is about the tab on screen (docs/ANALISE-UX.md, section 5) - its actions
+        // first, then the app's. Nothing is lost: creating tabs is on the apps page, reopening in
+        // the session sheet's history, quick commands and copied text on the shortcut bar, theme
+        // in Configurações, and a phone is already fullscreen (no focus mode). This is the same
+        // menu on every phone, not just the iPhone; the glass look stays iPhone-only.
+        if (isHandset()) {
+            const own = workspace.tabActions(workspace.activeId, menuBtn);
+            showMenu([...own, ...(own.length ? ['separator'] : []), ...appItems()],
+                { anchor: menuBtn, label: workspace.active ? `Ações de ${workspace.active.name}` : 'Mais ações' });
+            return;
+        }
         const k = workspace.shortcutLabels();
         const c = isMacOS ? '⌘' : 'Ctrl';
         const dark = settings.resolvedTheme() === 'dark';
@@ -360,7 +471,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             { label: dark ? 'Tema claro' : 'Tema escuro', icon: dark ? 'sun' : 'moon',
                 run: () => settings.set('theme', dark ? 'light' : 'dark') },
             'separator',
-            { label: 'Configurações', icon: 'settings', hint: `${c}+,`, run: () => { window.location.href = joinPath('admin'); } },
+            { label: 'Configurações', icon: 'settings', hint: `${c}+,`, run: () => openSettings() },
             { label: 'Guia do app', icon: 'info', run: () => window.open(joinPath('guia'), '_blank', 'noopener') },
         ];
         if (!window.matchMedia('(pointer: coarse)').matches) {
@@ -370,6 +481,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             items.push('separator', { label: 'Sair', icon: 'logout', danger: true, run: logout });
         }
         showMenu(items, { anchor: menuBtn, label: 'Mais ações' });
+    });
+
+    // A push tapped while the app was already open (service-worker.js): go to the tab it points at
+    navigator.serviceWorker?.addEventListener('message', e => {
+        if (e.data?.type !== 'notification-click') return;
+        const id = new URL(e.data.url, window.location.href).searchParams.get('tab');
+        if (id) workspace.showTab(id);
     });
 
     // ---------- service worker (silent updates) ----------

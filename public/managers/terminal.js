@@ -14,8 +14,11 @@ import TabBar from '../ui/tabbar.js';
 import SearchBar from '../ui/search.js';
 import NewSessionPage from '../ui/newSession.js';
 import { showMenu } from '../ui/contextMenu.js';
+import { askText } from '../ui/prompt.js';
+import { openSessionSheet, sessionIcon } from '../ui/sessionSheet.js';
 import { toast } from '../ui/toast.js';
 import { playChime } from '../ui/sound.js';
+import { isHandset } from '../ui/device.js';
 
 const RECONCILE_DELAY = 250;
 
@@ -44,6 +47,16 @@ async function api(method, path, body) {
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
+}
+
+/** Reads and removes "?tab=<id>" from the address (so a reload doesn't jump there again). */
+function takeTabParam() {
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get('tab');
+    if (!id) return null;
+    url.searchParams.delete('tab');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    return id;
 }
 
 export default class TerminalManager {
@@ -578,11 +591,11 @@ export default class TerminalManager {
         this.tabBar.reorder(sorted);
     }
 
-    cycle(delta) {
+    cycle(delta, { focus = false } = {}) {
         const ids = this.order;
         if (ids.length < 2) return;
         const i = ids.indexOf(this.activeId);
-        this.activate(ids[(i + delta + ids.length) % ids.length], { focus: true });
+        this.activate(ids[(i + delta + ids.length) % ids.length], { focus });
     }
 
     selectIndex(n) {
@@ -693,38 +706,113 @@ export default class TerminalManager {
         const hasRight = ids.slice(i + 1).some(o => !this.sessions.get(o).pinned);
         const hasOthers = ids.some(o => o !== id && !this.sessions.get(o).pinned);
         const k = this.shortcutLabels();
+        // A phone has no physical keyboard: the Ctrl+key hints would only take space
+        const hint = text => (isHandset() ? undefined : text);
         showMenu([
-            { label: 'Nova sessão', icon: 'plus', hint: k.newTab, run: () => this.create() },
-            { label: 'Nova aba de navegador', icon: 'globe', hint: `${k.mod}+B`, run: () => this.createBrowser() },
-            { label: 'Novo gerenciador de arquivos', icon: 'folder', hint: `${k.mod}+E`, run: () => this.createFiles() },
-            ...(window.appConfig?.notesAvailable ? [{ label: 'Nova aba de anotações', icon: 'notes', hint: `${k.mod}+O`, run: () => this.createNotes() }] : []),
+            { label: 'Nova sessão', icon: 'plus', hint: hint(k.newTab), run: () => this.create() },
+            { label: 'Nova aba de navegador', icon: 'globe', hint: hint(`${k.mod}+B`), run: () => this.createBrowser() },
+            { label: 'Novo gerenciador de arquivos', icon: 'folder', hint: hint(`${k.mod}+E`), run: () => this.createFiles() },
+            ...(window.appConfig?.notesAvailable ? [{ label: 'Nova aba de anotações', icon: 'notes', hint: hint(`${k.mod}+O`), run: () => this.createNotes() }] : []),
             ...(s.kind === 'terminal' ? [{ label: 'Abrir pasta atual nos Arquivos', icon: 'folderOpen',
                 run: () => this.createFiles(s.cwd || s.startCwd || undefined) }] : []),
             ...(this.split && (this.split.a === id || this.split.b === id)
                 ? [{ label: 'Desfazer divisão', icon: 'panelLeft', run: () => this.clearSplit({ keep: id }) }]
                 : [{ label: 'Dividir tela com…', icon: 'panelLeft', run: () => this.openSplitMenu(id, { x, y, anchor }) }]),
             { label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) },
-            { label: 'Renomear', icon: 'edit', hint: k.rename, run: () => this.tabBar.startRename(id) },
+            { label: 'Renomear', icon: 'edit', hint: hint(k.rename), run: () => this.startRename(id) },
             { label: s.pinned ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(id) },
             'separator',
             { label: 'Mover para a esquerda', icon: 'chevronLeft', disabled: i === 0, run: () => this.move(id, -1) },
             { label: 'Mover para a direita', icon: 'chevronRight', disabled: i === ids.length - 1,
                 run: () => this.move(id, 1) },
             'separator',
-            { label: 'Fechar (encerra o processo)', icon: 'x', hint: k.close, run: () => this.close(id) },
+            { label: 'Fechar (encerra o processo)', icon: 'x', hint: hint(k.close), run: () => this.close(id) },
             { label: 'Fechar outras', icon: 'closeOthers', disabled: !hasOthers, run: () => this.closeOthers(id) },
             { label: 'Fechar à direita', icon: 'arrowRightBar', disabled: !hasRight,
                 run: () => this.closeToTheRight(id) },
         ], { x, y, label: `Ações de ${s.name}`, restoreFocus: anchor });
     }
 
-    /** Session switcher (mobile status bar button). */
+    /**
+     * Renames a tab in place on its tab; when the tab strip isn't on screen (iPhone: the session
+     * pill replaces it) asks for the name in a dialog instead of editing an invisible tab.
+     */
+    async startRename(id) {
+        const tab = this.tabBar.tabs.get(id);
+        if (tab && tab.offsetParent !== null) {
+            this.tabBar.startRename(id);
+            return;
+        }
+        const s = this.sessions.get(id);
+        if (!s) return;
+        const name = await askText({ title: 'Renomear sessão', label: 'Nome', value: s.name, confirm: 'Salvar' });
+        if (name && name.trim() && name.trim() !== s.name) this.rename(id, name.trim().slice(0, 60));
+        this.focusActive();
+    }
+
+    /**
+     * What the iPhone's ⋮ shows first: the actions of the current tab (its own and the tab menu's),
+     * so the menu is about what's on screen. Creating tabs lives on the apps page, reopening in the
+     * session sheet's history, quick commands/copied on the shortcut bar.
+     */
+    tabActions(id, anchor) {
+        const s = this.sessions.get(id);
+        if (!s) return [];
+        const folder = s.kind === 'terminal' ? (s.cwd || s.startCwd || undefined) : undefined;
+        const own = {
+            terminal: [
+                { label: 'Buscar no terminal', icon: 'search', run: () => this.run('search') },
+                { label: 'Nova conversa com agente aqui', icon: 'bot', run: () => this.openAgentMenu(anchor) },
+                ...(window.appConfig?.filesAvailable ? [{ label: 'Abrir pasta nos Arquivos', icon: 'folderOpen', run: () => this.createFiles(folder) }] : []),
+            ],
+            agent: s.kind === 'agent' && s.menuActions ? s.menuActions(anchor) : [],
+            browser: window.appConfig?.filesAvailable
+                ? [{ label: 'Abrir pasta nos Arquivos', icon: 'folderOpen', run: () => this.createFiles(this.hooks.suggestFolder(s)) }] : [],
+            files: [{ label: 'Buscar', icon: 'search', run: () => s.openFind() }],
+            notes: [{ label: 'Buscar nas anotações', icon: 'search', run: () => s.openFind() }],
+        }[s.kind] || [];
+        return [
+            ...own,
+            ...(own.length ? ['separator'] : []),
+            { label: 'Renomear', icon: 'edit', run: () => this.startRename(id) },
+            { label: s.pinned ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(id) },
+            ...(s.kind !== 'agent' ? [{ label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) }] : []),
+            { label: s.kind === 'terminal' ? 'Fechar (encerra o processo)' : 'Fechar', icon: 'x', run: () => this.close(id) },
+        ];
+    }
+
+    /** Session switcher (mobile status bar button; on iPhones also the session pill, as a sheet). */
     openSessionList(anchor) {
+        if (document.documentElement.hasAttribute('data-iphone')) {
+            const sheet = openSessionSheet({
+                getItems: () => this.order.map(id => {
+                    const s = this.sessions.get(id);
+                    return { id, name: s.name, sub: s.displayCwd(), icon: sessionIcon(s), color: s.color, state: s.state, active: id === this.activeId };
+                }),
+                onPick: id => this.activate(id),
+                onClose: id => this.close(id),
+                onNew: () => this.openNewSessionPage(),
+                onMenu: (id, pos) => this.openTabMenu(id, pos),
+                // Tab history: the same "recent" list as the new session page
+                getRecents: () => this.recents.map(r => ({
+                    id: r.id, name: r.name, color: r.color, closedAt: r.closedAt,
+                    sub: r.cwd || '', icon: sessionIcon({ kind: r.kind }),
+                })),
+                onReopen: id => this.create({ reopenId: id }),
+                onForget: id => this.forgetRecent(this.recents.findIndex(r => r.id === id)),
+            });
+            // Refresh the history from the server (it may include tabs closed on other devices)
+            api('GET', 'sessions').then(data => {
+                this.recents = data.recent || [];
+                sheet.refresh();
+            }).catch(() => { /* keep what we have */ });
+            return;
+        }
         showMenu(this.order.map(id => {
             const s = this.sessions.get(id);
             return {
                 label: s.name,
-                icon: s.pinned ? 'pin' : s.kind === 'browser' ? 'globe' : s.kind === 'files' ? 'folder' : s.kind === 'notes' ? 'notes' : s.kind === 'agent' ? 'bot' : 'terminal',
+                icon: sessionIcon(s),
                 hint: s.displayCwd(),
                 checked: id === this.activeId,
                 run: () => this.activate(id),
@@ -809,9 +897,9 @@ export default class TerminalManager {
             case 'newPage': return this.openNewSessionPage();
             case 'reopen': return this.restoreLastClosed();
             case 'close': return this.activeId !== null && this.close(this.activeId);
-            case 'rename': return this.activeId !== null && this.tabBar.startRename(this.activeId);
-            case 'next': return this.cycle(1);
-            case 'prev': return this.cycle(-1);
+            case 'rename': return this.activeId !== null && this.startRename(this.activeId);
+            case 'next': return this.cycle(1, { focus: true });
+            case 'prev': return this.cycle(-1, { focus: true });
             case 'search':
                 // Browser tabs are images of a page: there's no text here to search
                 if (this.active?.kind === 'browser') return this.active.focus();
@@ -850,6 +938,12 @@ export default class TerminalManager {
             { keys: `${m}+F`, label: 'Tela cheia' },
             { keys: `${c}+,`, label: 'Configurações' },
         ];
+    }
+
+    /** Switches to a tab that may have just been created elsewhere (push notification links). */
+    async showTab(id) {
+        if (!this.sessions.has(id)) await this.reconcile();
+        if (this.sessions.has(id)) this.activate(id, { focus: !isCoarse() });
     }
 
     // ---------- messages from agents (MCP) ----------
@@ -957,7 +1051,9 @@ export default class TerminalManager {
         }
         rows.forEach(row => this.addSession(row));
         this.normalizeOrder();
-        const saved = this.storage.get('activeSession');
+        // Opened from a push (?tab=<id>, e.g. an agent asking for permission): that tab first
+        const wanted = takeTabParam();
+        const saved = this.sessions.has(wanted) ? wanted : this.storage.get('activeSession');
         this.activate(this.sessions.has(saved) ? saved : this.order[0], { focus: !isCoarse() });
     }
 }
