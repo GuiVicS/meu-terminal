@@ -9,6 +9,7 @@ import { icon } from '../ui/icons.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { askText } from '../ui/prompt.js';
 import StorageManager from './storage.js';
+import { isIphonePortrait } from '../ui/device.js';
 
 const MAX_RECONNECT_ATTEMPTS = 6;
 const CLOSE_SESSION_GONE = 4404;
@@ -79,6 +80,7 @@ export default class BrowserSession {
         this.frameSeq = 0;
         this.drawnSeq = 0;
         this.nav = { canGoBack: false, canGoForward: false, loading: false };
+        this.toolbarMinimized = false;
 
         this.panel = document.createElement('div');
         this.panel.className = 'terminal-panel browser-panel';
@@ -137,6 +139,7 @@ export default class BrowserSession {
             canvas: q('canvas'),
             status: q('.browser-status'),
             kbd: q('.browser-kbd'),
+            pill: q('.browser-pill'),
         };
         this.ctx = this.el.canvas.getContext('2d');
         this.el.address.value = this.url;
@@ -400,6 +403,13 @@ export default class BrowserSession {
             this.focus();
         });
         address.addEventListener('focus', () => address.select());
+        // Tap on the shrunken bar (4.5) expands it instead of focusing the address
+        this.el.pill.addEventListener('pointerdown', e => {
+            if (!this.toolbarMinimized) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.setToolbarMinimized(false);
+        }, true);
         this.panel.querySelector('.browser-toolbar').addEventListener('click', e => {
             const btn = e.target.closest('[data-act]');
             if (!btn) return;
@@ -417,6 +427,17 @@ export default class BrowserSession {
                 else this.openKeyboard();
             }
         });
+    }
+
+    /**
+     * Safari's scroll-away bar: while the page scrolls down the bar tucks into a small capsule
+     * with only the domain; scrolling up (or tapping it) brings the controls back. The class is
+     * toggled everywhere, but only the iPhone CSS makes it visible - other layouts ignore it.
+     */
+    setToolbarMinimized(min) {
+        if (this.toolbarMinimized === min) return;
+        this.toolbarMinimized = min;
+        this.panel.querySelector('.browser-toolbar')?.classList.toggle('minimized', min);
     }
 
     navigate(url) {
@@ -558,7 +579,7 @@ export default class BrowserSession {
             }
             if (e.touches.length !== 1) return;
             const t = e.touches[0];
-            touch = { two: false, x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY, time: performance.now(), vx: 0, vy: 0, dragging: false };
+            touch = { two: false, x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY, time: performance.now(), vx: 0, vy: 0, vAccum: 0, hAccum: 0, dragging: false };
         }, { passive: false });
         s.addEventListener('touchmove', e => {
             e.preventDefault();
@@ -580,6 +601,16 @@ export default class BrowserSession {
             touch.y = t.clientY;
             touch.time = now;
             scrollBy(dx, dy, t.clientX, t.clientY);
+            // Scroll down = bar shrinks, scroll up = bar returns (Safari, iOS 26)
+            if (isIphonePortrait()) {
+                touch.vAccum += dy;
+                touch.hAccum += dx;
+                if (Math.abs(touch.vAccum) > Math.abs(touch.hAccum) && Math.abs(touch.vAccum) > 24) {
+                    this.setToolbarMinimized(touch.vAccum > 0);
+                    touch.vAccum = 0;
+                    touch.hAccum = 0;
+                }
+            }
         }, { passive: false });
         s.addEventListener('touchend', e => {
             e.preventDefault();

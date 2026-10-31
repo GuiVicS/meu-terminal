@@ -3168,6 +3168,27 @@ audio.fm-media { width: min(520px, 90%); }
         .browser-toolbar:has(.browser-address:focus-within) [data-act="back"],
         .browser-toolbar:has(.browser-address:focus-within) .browser-more { display: none; }
 
+        /* Scrolled down (4.5): the bar tucks into a small centered capsule with only the domain.
+           Tapping it expands again (browserSession.js) - the same as Safari. */
+        .browser-toolbar.minimized { justify-content: center; }
+        .browser-toolbar.minimized [data-act="back"],
+        .browser-toolbar.minimized .browser-more,
+        .browser-toolbar.minimized .browser-pill [data-act="reload"],
+        .browser-toolbar.minimized .browser-pill .browser-live { display: none; }
+        .browser-toolbar.minimized .browser-pill {
+            flex: 0 1 auto; height: 32px; min-width: 88px; max-width: 62vw;
+            padding: 0 10px; border-radius: 16px;
+        }
+        .browser-toolbar.minimized .browser-address { flex: 0 1 auto; width: min(52vw, 210px); }
+        .browser-toolbar.minimized .browser-address input,
+        .browser-toolbar.minimized .browser-host {
+            height: 32px; padding: 0 2px; font-size: 13px; line-height: 32px;
+        }
+        .browser-toolbar { transition: gap 180ms var(--ease); }
+        .browser-toolbar .browser-pill { transition: height 180ms var(--ease), border-radius 180ms var(--ease); }
+        .browser-toolbar .browser-address input,
+        .browser-toolbar .browser-host { transition: height 180ms var(--ease), font-size 180ms var(--ease); }
+
         /* Loading: a thin line along the top edge of the page */
         .browser-progress { position: absolute; top: 0; left: 0; right: 0; z-index: 5; }
 
@@ -3180,6 +3201,14 @@ audio.fm-media { width: min(520px, 90%); }
         }
         .menu-item { height: 44px; border-radius: 16px; font-size: 15px; }
     }
+}
+
+/* No sliding bar for people who asked for less motion */
+@media (prefers-reduced-motion: reduce) {
+    [data-iphone] .browser-toolbar,
+    [data-iphone] .browser-toolbar .browser-pill,
+    [data-iphone] .browser-toolbar .browser-address input,
+    [data-iphone] .browser-toolbar .browser-host { transition: none; }
 }
 
 /* ---------- iPhone: the apps home page ("Nova sessão") as an iOS 26 home screen ----------
