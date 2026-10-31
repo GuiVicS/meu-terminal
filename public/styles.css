@@ -3257,7 +3257,11 @@ audio.fm-media { width: min(520px, 90%); }
         .field input:focus { box-shadow: 0 0 0 2px var(--accent); }
         .new-session-actions { flex-direction: column-reverse; gap: 10px; margin-top: 8px; }
         .new-session-actions .btn { flex: none; width: 100%; height: 52px; border-radius: 26px; font-size: 16px; }
-        .new-session-actions .btn-primary { box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent); border: none; }
+        /* The type was picked on the icon: no selector, the title says what is being created */
+        .new-session-form[data-fixed-kind] .kind-toggle { display: none; }
+        /* The color already makes it the main action: no glow ring around it */
+        .new-session-actions .btn-primary,
+        .new-session-actions .btn-primary:focus-visible { box-shadow: none; outline: none; border: none; }
         .new-session-actions .btn-primary:active { transform: scale(0.98); box-shadow: none; }
         .new-session-actions .btn-ghost { border: none; background: var(--glass-fill); }
     }

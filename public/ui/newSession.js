@@ -10,6 +10,11 @@
 import { icon } from './icons.js';
 
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
+/** iPhone layout (portrait only: turned sideways it's the regular phone layout). */
+const iphonePortrait = () => document.documentElement.hasAttribute('data-iphone')
+    && window.matchMedia('(orientation: portrait)').matches;
+// iPhone: the form says what it creates (the type was picked on the icon, so no type selector)
+const IPHONE_TITLES = { terminal: 'Novo terminal', browser: 'Novo navegador', files: 'Nova aba de arquivos', notes: 'Novas anotações' };
 const rtf = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
 
 export function relativeTime(timestamp) {
@@ -68,7 +73,7 @@ export default class NewSessionPage {
                 </div>
 
                 <form class="new-session-form" autocomplete="off" hidden>
-                    <button type="button" class="ns-back">${icon('arrowLeft', 16)} Início</button>
+                    <button type="button" class="ns-back" data-action="back">${icon('arrowLeft', 16)} Início</button>
                     <h2 id="new-session-title" class="new-session-title"></h2>
                     <div class="kind-toggle" role="radiogroup" aria-label="Tipo de aba">
                         <button type="button" role="radio" data-kind="terminal" aria-checked="true">${icon('terminal', 16)} Terminal</button>
@@ -132,7 +137,7 @@ export default class NewSessionPage {
             else if (tile.dataset.special === 'vibecode') this.handlers.onVibecode();
             // Anotações is one shared notebook, not something to name/point at a folder - no form needed.
             else if (tile.dataset.kind === 'notes') this.handlers.onCreate({ kind: 'notes' });
-            else this.showForm(tile.dataset.kind);
+            else this.showForm(tile.dataset.kind, { fixed: true });
         });
         this.el.querySelectorAll('[data-action="back"]').forEach(btn => btn.addEventListener('click', () => this.showGrid()));
         this.el.querySelector('.ns-close').addEventListener('click', () => this.handlers.onCancel());
@@ -188,13 +193,22 @@ export default class NewSessionPage {
         }
     }
 
-    showForm(kind) {
+    /**
+     * @param {string} kind
+     * @param {{fixed?: boolean}} [opts] - fixed: the type was already picked on an app icon, so the
+     *   iPhone layout hides the type selector (styles.css) and titles the form with the type
+     */
+    showForm(kind, { fixed = false } = {}) {
         this.view = 'form';
+        this.fixedKind = fixed;
+        this.form.toggleAttribute('data-fixed-kind', fixed);
         this.el.setAttribute('aria-labelledby', 'new-session-title');
         this.el.querySelector('.ns-home').hidden = true;
         this.form.hidden = false;
         this.setKind(kind);
-        // On touch devices don't pop the keyboard - the primary action is one tap away
+        // On touch devices don't pop the keyboard - the primary action is one tap away. On the
+        // iPhone nothing is focused at all: the button is already the obvious action (no focus ring).
+        if (iphonePortrait()) return;
         const target = window.matchMedia('(pointer: coarse)').matches
             ? this.form.querySelector('[type="submit"]')
             : this.nameInput;
@@ -213,7 +227,7 @@ export default class NewSessionPage {
             files: ['Novo gerenciador de arquivos', 'Abrir arquivos', 'Vazio = pasta inicial do servidor. O Google Drive (rclone) aparece no painel lateral.'],
             notes: ['Nova aba de anotações', 'Abrir anotações', ''],
         }[kind];
-        this.el.querySelector('.new-session-title').textContent = texts[0];
+        this.el.querySelector('.new-session-title').textContent = this.fixedKind && iphonePortrait() ? IPHONE_TITLES[kind] : texts[0];
         this.form.querySelector('[type="submit"]').textContent = texts[1];
         const help = this.el.querySelector('[data-for~="terminal"] .field-help');
         if (help && texts[2]) help.textContent = texts[2];
