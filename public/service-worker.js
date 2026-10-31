@@ -662,9 +662,10 @@ self.addEventListener('push', event => {
     const title = data.title || 'MeuTerminal';
     const scope = self.registration.scope;
     event.waitUntil((async () => {
-        // App open and visible: it already shows the notice with its own chime
+        // App open and visible: it already shows the notice with its own chime (unless the push
+        // asks to always be shown, e.g. a Claude bridge approval with its Aprovar/Recusar buttons)
         const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-        if (windows.some(w => w.visibilityState === 'visible')) return;
+        if (!data.always && windows.some(w => w.visibilityState === 'visible')) return;
         await self.registration.showNotification(title, {
             body: data.body || '',
             icon: new URL('assets/icon-192.png', scope).href,
@@ -673,7 +674,8 @@ self.addEventListener('push', event => {
             renotify: true,
             silent: data.sound === false,
             vibrate: data.sound === false ? undefined : [200, 100, 200],
-            data: { url: data.url || scope },
+            data: { url: data.url || scope, approvalId: data.approvalId || null },
+            ...(Array.isArray(data.actions) ? { actions: data.actions, requireInteraction: true } : {}),
         });
     })());
 });
@@ -681,6 +683,25 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
     event.notification.close();
     const target = (event.notification.data && event.notification.data.url) || self.registration.scope;
+    const approvalId = event.notification.data && event.notification.data.approvalId;
+    // Claude bridge: "Aprovar"/"Recusar" answer right from the notification (logged-in device).
+    // If that fails (session expired...), fall through to opening the page with the pending list.
+    if (approvalId && (event.action === 'approve' || event.action === 'reject')) {
+        event.waitUntil((async () => {
+            try {
+                const res = await fetch(new URL(`api/remote/approvals/${encodeURIComponent(approvalId)}`, self.registration.scope), {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    redirect: 'manual',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ approve: event.action === 'approve' }),
+                });
+                if (res.ok) return;
+            } catch { /* open the page below */ }
+            await self.clients.openWindow(target);
+        })());
+        return;
+    }
     event.waitUntil((async () => {
         const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
         const open = windows.find(w => w.url.startsWith(self.registration.scope));

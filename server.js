@@ -12,6 +12,8 @@ const fs = require('fs');
 const { generatePWAManifest, generateNotesManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
 const { TotpVerifier } = require('./scripts/totp');
+const { safeEqual, verifyPin, createTokenSigner, AttemptLimiter, isSameOrigin: isSameOriginWith, isPublicPath } = require('./scripts/auth');
+const { childEnv } = require('./scripts/child-env');
 const SessionStore = require('./scripts/session-store');
 const SessionManager = require('./scripts/session-manager');
 const CommandStore = require('./scripts/command-store');
@@ -25,7 +27,8 @@ const webhookPresets = require('./scripts/webhook-presets');
 const { resolveInputs } = require('./scripts/webhook-inputs');
 const { verifyHmacSignature } = require('./scripts/webhook-crypto');
 const { BrowserManager, listPorts, normalizeUrl } = require('./scripts/browser-manager');
-const { createMcpHandler, mcpToken } = require('./scripts/mcp-server');
+const { createMcpHandler, createMcpTools, mcpToken } = require('./scripts/mcp-server');
+const { registerRemote, REMOTE_PUBLIC_PATHS, REMOTE_CROSS_ORIGIN_PATHS } = require('./routes/remote');
 const { FileManager, FileError } = require('./scripts/file-manager');
 const { LiveServers } = require('./scripts/live-server');
 const { Vibe } = require('./scripts/vibe');
@@ -118,6 +121,23 @@ const isPinRequired = !!(PIN && PIN.trim() !== '');
 const AUTH_MODE = isEmailAuth ? 'email' : (isPinRequired ? 'pin' : 'none');
 const isAuthRequired = AUTH_MODE !== 'none';
 
+// No login at all is only allowed on purpose: a terminal open to anyone who finds the address
+// is root on the machine. Demo mode has nothing to protect.
+if (!isAuthRequired && !DEMO_MODE && process.env.ALLOW_NO_LOGIN !== 'true') {
+    console.error('Nenhum login configurado. Defina AUTH_EMAIL e AUTH_PASSWORD (recomendado) ou '
+        + `${projectName}_PIN. Para rodar sem login de propósito (ex.: só na sua máquina), use ALLOW_NO_LOGIN=true.`);
+    process.exit(1);
+}
+
+// Claude bridge (routes/remote.js, docs/PLANO-MCP-REMOTO.md): claude.ai drives this server through
+// /mcp/remote. Off by default, and only with email + password (its consent page asks for them).
+const REMOTE_MCP_REQUESTED = process.env.REMOTE_MCP_ENABLED === 'true';
+const REMOTE_MCP_ENABLED = REMOTE_MCP_REQUESTED && AUTH_MODE === 'email' && !DEMO_MODE;
+const REMOTE_MCP_DISABLED_REASON = !REMOTE_MCP_REQUESTED ? 'REMOTE_MCP_ENABLED não está como true.'
+    : DEMO_MODE ? 'Indisponível no modo demonstração.'
+    : 'A ponte exige login com email e senha (AUTH_EMAIL e AUTH_PASSWORD); com PIN ou sem login ela não liga.';
+if (REMOTE_MCP_REQUESTED && !REMOTE_MCP_ENABLED) console.warn(`Ponte com o Claude não ligada: ${REMOTE_MCP_DISABLED_REASON}`);
+
 // Log which protection is enabled
 if (isEmailAuth) {
     debugLog('Email/password login is enabled for:', AUTH_EMAIL, totp ? '(with 2FA)' : '');
@@ -127,36 +147,17 @@ if (isEmailAuth) {
     debugLog('Authentication is disabled');
 }
 
-// ---- Email login tokens ----
-// The cookie never contains the password: it holds an expiry and an HMAC signature.
-// The key is derived from the credentials (and the 2FA secret), so changing the
-// password or turning 2FA on/off in .env logs everyone out; a restart does not.
-const TOKEN_KEY = crypto.createHash('sha256')
-    .update(`meu-terminal-auth\0${AUTH_EMAIL}\0${AUTH_PASSWORD}\0${totp ? TOTP_SECRET : ''}`)
-    .digest();
-
-function signToken(expiresAt) {
-    return crypto.createHmac('sha256', TOKEN_KEY).update(`${AUTH_EMAIL}|${expiresAt}`).digest('base64url');
-}
+// ---- Email login tokens (scripts/auth.js) ----
+// Signed expiry, never the password; changing the password or 2FA in .env logs everyone out.
+const tokens = createTokenSigner({ email: AUTH_EMAIL, password: AUTH_PASSWORD, totpSecret: totp ? TOTP_SECRET : '' });
+const MAX_SESSION_AGE = (process.env.MAX_SESSION_AGE || 24) * 60 * 60 * 1000; // default 24 hours
 
 function createAuthToken() {
-    const expiresAt = Date.now() + MAX_SESSION_AGE;
-    return `${expiresAt}.${signToken(expiresAt)}`;
+    return tokens.create(MAX_SESSION_AGE);
 }
 
 function verifyAuthToken(token) {
-    if (!isEmailAuth || !token || typeof token !== 'string') return false;
-    const [expiresAt, signature] = token.split('.');
-    if (!expiresAt || !signature || !/^\d+$/.test(expiresAt)) return false;
-    if (Number(expiresAt) < Date.now()) return false;
-    return safeEqual(signature, signToken(expiresAt));
-}
-
-// Constant-time comparison for strings of any length (hashes first)
-function safeEqual(a, b) {
-    const ha = crypto.createHash('sha256').update(String(a)).digest();
-    const hb = crypto.createHash('sha256').update(String(b)).digest();
-    return crypto.timingSafeEqual(ha, hb);
+    return isEmailAuth && tokens.verify(token);
 }
 
 /** True if the request/handshake carries valid credentials for the active auth mode. */
@@ -167,38 +168,9 @@ function hasValidAuthCookie(cookies) {
 }
 
 // Brute force protection
-const loginAttempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_TIME = (process.env.LOCKOUT_TIME || 15) * 60 * 1000; // default 15 minutes in milliseconds
-const MAX_SESSION_AGE = (process.env.MAX_SESSION_AGE || 24) * 60 * 60 * 1000; // default 24 hours
-
-function resetAttempts(ip) {
-    debugLog('Resetting login attempts for IP:', ip);
-    loginAttempts.delete(ip);
-}
-
-function isLockedOut(ip) {
-    const attempts = loginAttempts.get(ip);
-    if (!attempts) return false;
-    
-    if (attempts.count >= MAX_ATTEMPTS) {
-        const timeElapsed = Date.now() - attempts.lastAttempt;
-        if (timeElapsed < LOCKOUT_TIME) {
-            debugLog('IP is locked out:', ip, 'Time remaining:', Math.ceil((LOCKOUT_TIME - timeElapsed) / 1000 / 60), 'minutes');
-            return true;
-        }
-        resetAttempts(ip);
-    }
-    return false;
-}
-
-function recordAttempt(ip) {
-    const attempts = loginAttempts.get(ip) || { count: 0, lastAttempt: 0 };
-    attempts.count += 1;
-    attempts.lastAttempt = Date.now();
-    loginAttempts.set(ip, attempts);
-    debugLog('Login attempt recorded for IP:', ip, 'Count:', attempts.count);
-}
+const loginLimiter = new AttemptLimiter({ max: MAX_ATTEMPTS, lockoutMs: LOCKOUT_TIME });
 
 // ---- Step-up re-authentication ----
 // A handful of actions (creating a webhook, editing its script, issuing a token - see
@@ -229,7 +201,13 @@ const captureRawBody = (req, res, buf) => { req.rawBody = buf; };
 const jsonWebhook = express.json({ limit: '64kb', verify: captureRawBody });
 const urlencodedWebhook = express.urlencoded({ extended: false, limit: '64kb', verify: captureRawBody });
 const HOOK_PATH_RE = /\/hooks\/[^/]+$/;
+// OAuth endpoints of the Claude bridge: clients send application/x-www-form-urlencoded (RFC 6749)
+const OAUTH_FORM_RE = /\/oauth\/(token|revoke|register)$/;
+const urlencodedOAuth = express.urlencoded({ extended: false, limit: '16kb' });
 app.use((req, res, next) => {
+    if (req.method === 'POST' && OAUTH_FORM_RE.test(req.path) && String(req.headers['content-type'] || '').includes('urlencoded')) {
+        return urlencodedOAuth(req, res, next);
+    }
     if (/\/api\/agent-sessions\/[^/]+\/prompt$/.test(req.path)) return jsonAgentPrompt(req, res, next);
     if (req.method === 'POST' && HOOK_PATH_RE.test(req.path)) {
         const parser = String(req.headers['content-type'] || '').includes('urlencoded') ? urlencodedWebhook : jsonWebhook;
@@ -254,33 +232,6 @@ app.use(session({
         maxAge: MAX_SESSION_AGE
     }
 }));
-
-const requirePin = (req, res, next) => {
-    if (!PIN || !isValidPin(PIN)) {
-        return next();
-    }
-
-    const authCookie = req.cookies[COOKIE_NAME];
-    if (!authCookie || !secureCompare(authCookie, PIN)) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-    next();
-};
-
-// Constant-time PIN comparison to prevent timing attacks
-const verifyPin = (storedPin, providedPin) => {
-    if (!storedPin || !providedPin) return false;
-    if (storedPin.length !== providedPin.length) return false;
-    
-    try {
-        return crypto.timingSafeEqual(
-            Buffer.from(storedPin),
-            Buffer.from(providedPin)
-        );
-    } catch {
-        return false;
-    }
-}
 
 // Authentication middleware
 const authMiddleware = (req, res, next) => {
@@ -319,32 +270,23 @@ const authMiddleware = (req, res, next) => {
 // domain (e.g. *.easypanel.host, other subdomains) would otherwise get the login cookie.
 const EXTRA_ORIGINS = new Set((process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim())
     .filter(o => o && o !== '*').map(o => { try { return new URL(o).origin; } catch { return null; } }).filter(Boolean));
-function isSameOrigin(req) {
-    const origin = req.headers.origin;
-    if (origin === undefined) return true;
-    let parsed;
-    try {
-        parsed = new URL(origin); // "null" (sandboxed pages, file://) fails here
-    } catch {
-        return false;
-    }
-    const hosts = [req.headers.host, ...String(req.headers['x-forwarded-host'] || '').split(',')]
-        .map(h => String(h || '').trim().toLowerCase()).filter(Boolean);
-    return hosts.includes(parsed.host.toLowerCase()) || EXTRA_ORIGINS.has(parsed.origin);
-}
+const isSameOrigin = req => isSameOriginWith(req, EXTRA_ORIGINS);
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 // Global middleware for origin validation and authentication
 app.use(BASE_PATH, (req, res, next) => {
     // /mcp and /api/agent-launch: server-local + token (and /mcp refuses any Origin)
-    if (!SAFE_METHODS.has(req.method) && req.path !== '/mcp' && req.path !== '/api/agent-launch' && !req.path.startsWith('/hooks/') && !isSameOrigin(req)) {
+    const remoteCrossOrigin = REMOTE_MCP_ENABLED && REMOTE_CROSS_ORIGIN_PATHS.includes(req.path); // own credentials, no cookies
+    if (!SAFE_METHODS.has(req.method) && req.path !== '/mcp' && req.path !== '/api/agent-launch' && !req.path.startsWith('/hooks/')
+        && !remoteCrossOrigin && !isSameOrigin(req)) {
         console.warn('Blocked cross-site request:', req.method, req.path, 'from', req.headers.origin);
         return res.status(403).json({ error: 'Origem não permitida.' });
     }
 
-    // List of paths that should be publicly accessible
+    // Paths that skip the login: exact match, or prefix only for entries ending in "/"
     const publicPaths = [
         '/login',
+        '/login/pair', // the phone redeeming a QR code (rate-limited like the login)
         '/auth-mode',
         '/login.js',
         '/pin-length',
@@ -363,10 +305,12 @@ app.use(BASE_PATH, (req, res, next) => {
         '/mcp',
         // Public webhook triggers: own check (bearer token or HMAC signature), not the app login
         '/hooks/',
+        // Claude bridge (only while on): OAuth endpoints, /mcp/remote (OAuth token), /dl/ links
+        ...(REMOTE_MCP_ENABLED ? REMOTE_PUBLIC_PATHS : []),
     ];
 
     // Check if the current path matches any of the public paths
-    if (publicPaths.some(path => req.path.startsWith(path))) {
+    if (isPublicPath(req.path, publicPaths)) {
         return next();
     }
     // Agent shims (terminal "usar o modo UI?"): own check like /mcp (local + bearer token).
@@ -490,11 +434,9 @@ app.post(BASE_PATH + '/login', (req, res) => {
     }
 
     const ip = req.ip;
-    if (isLockedOut(ip)) {
-        const attempts = loginAttempts.get(ip);
-        const timeLeft = Math.ceil((LOCKOUT_TIME - (Date.now() - attempts.lastAttempt)) / 1000 / 60);
+    if (loginLimiter.isLockedOut(ip)) {
         return res.status(429).json({
-            error: `Muitas tentativas. Tente novamente em ${timeLeft} minuto(s).`
+            error: `Muitas tentativas. Tente novamente em ${loginLimiter.minutesLeft(ip)} minuto(s).`
         });
     }
 
@@ -516,14 +458,14 @@ app.post(BASE_PATH + '/login', (req, res) => {
             }
             if (!totp.verify(code)) {
                 debugLog('2FA code rejected');
-                recordAttempt(ip);
-                const left = Math.max(0, MAX_ATTEMPTS - loginAttempts.get(ip).count);
+                loginLimiter.record(ip);
+                const left = loginLimiter.attemptsLeft(ip);
                 return res.status(401).json({ needCode: true, error: 'Código inválido ou já usado.', attemptsLeft: left });
             }
         }
         if (emailOk && passwordOk) {
             debugLog('Email login successful');
-            resetAttempts(ip);
+            loginLimiter.reset(ip);
             req.session.authenticated = true;
             res.cookie(AUTH_COOKIE, createAuthToken(), {
                 httpOnly: true,
@@ -535,8 +477,8 @@ app.post(BASE_PATH + '/login', (req, res) => {
         }
 
         debugLog('Email login failed');
-        recordAttempt(ip);
-        const attemptsLeft = Math.max(0, MAX_ATTEMPTS - loginAttempts.get(ip).count);
+        loginLimiter.record(ip);
+        const attemptsLeft = loginLimiter.attemptsLeft(ip);
         res.status(401).json({ error: 'Email ou senha incorretos.', attemptsLeft });
     }, crypto.randomInt(50, 150));
 });
@@ -581,15 +523,15 @@ app.post(BASE_PATH + '/api/pair', async (req, res) => {
 // The phone that scanned the QR code redeems it (public route, rate-limited like the login)
 app.post(BASE_PATH + '/login/pair', (req, res) => {
     const ip = req.ip;
-    if (isLockedOut(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente mais tarde.' });
+    if (loginLimiter.isLockedOut(ip)) return res.status(429).json({ error: 'Muitas tentativas. Tente mais tarde.' });
     const code = String((req.body || {}).code || '');
     const expiresAt = pairCodes.get(code);
     if (!expiresAt || expiresAt < Date.now()) {
-        recordAttempt(ip);
+        loginLimiter.record(ip);
         return res.status(401).json({ error: 'Código inválido ou expirado. Gere um novo QR code.' });
     }
     pairCodes.delete(code); // single use
-    resetAttempts(ip);
+    loginLimiter.reset(ip);
     grantLogin(req, res);
     debugLog('Device paired by QR code');
     res.json({ success: true, redirect: BASE_PATH + '/' });
@@ -621,12 +563,10 @@ app.post(BASE_PATH + '/verify-pin', (req, res) => {
     const ip = req.ip;
     
     // Check if IP is locked out
-    if (isLockedOut(ip)) {
-        const attempts = loginAttempts.get(ip);
-        const timeLeft = Math.ceil((LOCKOUT_TIME - (Date.now() - attempts.lastAttempt)) / 1000 / 60);
+    if (loginLimiter.isLockedOut(ip)) {
         debugLog('PIN verification blocked - IP is locked out:', ip);
         return res.status(429).json({ 
-            error: `Too many attempts. Please try again in ${timeLeft} minutes.`
+            error: `Too many attempts. Please try again in ${loginLimiter.minutesLeft(ip)} minutes.`
         });
     }
 
@@ -643,7 +583,7 @@ app.post(BASE_PATH + '/verify-pin', (req, res) => {
     if (isPinValid) {
         debugLog('PIN verification successful');
         // Reset attempts on successful login
-        resetAttempts(ip);
+        loginLimiter.reset(ip);
         
         // Set authentication in session immediately
         req.session.authenticated = true;
@@ -664,10 +604,9 @@ app.post(BASE_PATH + '/verify-pin', (req, res) => {
     } else {
         debugLog('PIN verification failed - Invalid PIN');
         // Record failed attempt
-        recordAttempt(ip);
+        loginLimiter.record(ip);
         
-        const attempts = loginAttempts.get(ip);
-        const attemptsLeft = MAX_ATTEMPTS - attempts.count;
+        const attemptsLeft = loginLimiter.attemptsLeft(ip);
         
         // Add artificial delay before sending error response
         setTimeout(() => {
@@ -685,10 +624,8 @@ app.post(BASE_PATH + '/verify-pin', (req, res) => {
 app.post(BASE_PATH + '/api/reauth', (req, res) => {
     if (!isAuthRequired) return res.json({ success: true });
     const ip = req.ip;
-    if (isLockedOut(ip)) {
-        const attempts = loginAttempts.get(ip);
-        const timeLeft = Math.ceil((LOCKOUT_TIME - (Date.now() - attempts.lastAttempt)) / 1000 / 60);
-        return res.status(429).json({ error: `Muitas tentativas. Tente de novo em ${timeLeft} minuto(s).` });
+    if (loginLimiter.isLockedOut(ip)) {
+        return res.status(429).json({ error: `Muitas tentativas. Tente de novo em ${loginLimiter.minutesLeft(ip)} minuto(s).` });
     }
 
     if (AUTH_MODE === 'email') {
@@ -698,23 +635,23 @@ app.post(BASE_PATH + '/api/reauth', (req, res) => {
         if (passwordOk && totp) {
             if (typeof code !== 'string' || !code.trim()) return res.status(401).json({ needCode: true });
             if (!totp.verify(code)) {
-                recordAttempt(ip);
+                loginLimiter.record(ip);
                 return res.status(401).json({ needCode: true, error: 'Código inválido ou já usado.' });
             }
         }
         if (!passwordOk) {
-            recordAttempt(ip);
+            loginLimiter.record(ip);
             return res.status(401).json({ error: 'Senha incorreta.' });
         }
     } else if (AUTH_MODE === 'pin') {
         const { pin } = req.body || {};
         if (typeof pin !== 'string' || !verifyPin(PIN, pin)) {
-            recordAttempt(ip);
+            loginLimiter.record(ip);
             return res.status(401).json({ error: 'PIN incorreto.' });
         }
     }
 
-    resetAttempts(ip);
+    loginLimiter.reset(ip);
     req.session.reauthAt = Date.now();
     res.json({ success: true });
 });
@@ -848,7 +785,8 @@ const agentGateway = new AgentGateway({
     // Images/files produced by agents (or attached to prompts), next to the database (same volume)
     mediaDir: AGENT_MEDIA_DIR,
     // Agents never get the popup themselves (their shells are not TTYs anyway)
-    env: { ...process.env, MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN },
+    // (without the app's own secrets - scripts/child-env.js)
+    env: childEnv({ MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN }),
     // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
     mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
     log: debugLog,
@@ -868,11 +806,12 @@ const vibe = new Vibe({
     deployer: new VercelDeploy({ token: process.env.VERCEL_TOKEN }), log: debugLog,
 });
 
-const mcpHandler = createMcpHandler({
+const mcpDeps = {
     sessions, store: sessionStore, browsers, files: FILES_ENABLED ? files : null,
     listPorts: exclude => listPorts([...exclude, ...live.ports]), normalizeUrl, port: Number(PORT),
     live, vibe, setLiveReload, agentTerminal, notifier: () => notifier,
-});
+};
+const mcpHandler = createMcpHandler(mcpDeps);
 
 /**
  * Agents run on this machine: only loopback connections with the token are accepted.
@@ -1644,21 +1583,8 @@ app.get(BASE_PATH + '/api/webhooks/:id/versions', webhooksRoute((req, res) => {
 // Bearer token (default) or HMAC signature (opt-in per webhook, section 3.5). Everything here
 // answers the same generic 404 for "wrong token" and "webhook doesn't exist" (section 3.7), so a
 // failed call can't be used to discover which slugs are registered.
-const webhookAuthAttempts = new Map(); // ip -> { count, lastAttempt } - separate from loginAttempts, same shape
-const WEBHOOK_MAX_ATTEMPTS = 5;
-function isWebhookLockedOut(ip) {
-    const a = webhookAuthAttempts.get(ip);
-    if (!a) return false;
-    if (a.count >= WEBHOOK_MAX_ATTEMPTS && Date.now() - a.lastAttempt < LOCKOUT_TIME) return true;
-    if (a.count >= WEBHOOK_MAX_ATTEMPTS) webhookAuthAttempts.delete(ip);
-    return false;
-}
-function recordWebhookAttempt(ip) {
-    const a = webhookAuthAttempts.get(ip) || { count: 0, lastAttempt: 0 };
-    a.count += 1;
-    a.lastAttempt = Date.now();
-    webhookAuthAttempts.set(ip, a);
-}
+// Separate counters from the login (same shape: 5 failures -> locked for LOCKOUT_TIME)
+const webhookLimiter = new AttemptLimiter({ max: 5, lockoutMs: LOCKOUT_TIME });
 
 // HMAC mode replay protection (section 3.5): an X-Request-Id/Idempotency-Key seen in the last
 // 24h is treated as a repeat and ignored (still answered 202, so retries by the sender are safe).
@@ -1690,9 +1616,9 @@ function tailLines(text, n = 20) {
 app.post(BASE_PATH + '/hooks/:slug', async (req, res) => {
     if (!WEBHOOKS_ENABLED) return res.status(404).json({ error: 'nao_encontrado' });
     const ip = req.ip;
-    if (isWebhookLockedOut(ip)) return res.status(429).json({ error: 'limite' });
+    if (webhookLimiter.isLockedOut(ip)) return res.status(429).json({ error: 'limite' });
 
-    const fail = () => { recordWebhookAttempt(ip); return res.status(404).json({ error: 'nao_encontrado' }); };
+    const fail = () => { webhookLimiter.record(ip); return res.status(404).json({ error: 'nao_encontrado' }); };
 
     const wh = webhooks.getBySlug(String(req.params.slug || '').toLowerCase());
     if (!wh || !wh.enabled) return fail();
@@ -1718,7 +1644,7 @@ app.post(BASE_PATH + '/hooks/:slug', async (req, res) => {
         if (!found) return fail();
         tokenId = found.tokenId;
     }
-    webhookAuthAttempts.delete(ip);
+    webhookLimiter.reset(ip);
 
     if (!checkAndRecordRate(wh.id, wh.ratePerMin || 6)) return res.status(429).json({ error: 'limite' });
 
@@ -1776,6 +1702,49 @@ app.post(BASE_PATH + '/logout', (req, res) => {
 });
 
 // WebSocket server configuration
+// ---------- Claude bridge (routes/remote.js) ----------
+
+/** Email + password (+ 2FA) check for the bridge's consent page: same rules as POST /login. */
+function verifyLoginCredentials({ email, password, code }) {
+    if (AUTH_MODE !== 'email') return { error: 'Login por email desligado.' };
+    const emailOk = typeof email === 'string' && safeEqual(email.trim().toLowerCase(), AUTH_EMAIL);
+    const passwordOk = typeof password === 'string' && safeEqual(password, AUTH_PASSWORD);
+    if (!emailOk || !passwordOk) return { error: 'Email ou senha incorretos.' };
+    if (totp) {
+        if (typeof code !== 'string' || !code.trim()) return { needCode: true };
+        if (!totp.verify(code)) return { needCode: true, error: 'Código inválido ou já usado.' };
+    }
+    return { ok: true };
+}
+
+registerRemote(app, {
+    enabled: REMOTE_MCP_ENABLED,
+    disabledReason: REMOTE_MCP_DISABLED_REASON,
+    basePath: BASE_PATH,
+    baseUrl: BASE_URL,
+    db: sessionStore.db,
+    fingerprint: tokens.fingerprint,
+    verifyCredentials: verifyLoginCredentials,
+    twoFactor: !!totp,
+    requireReauth,
+    lockoutMs: LOCKOUT_TIME,
+    sessions,
+    notes: NOTES_ENABLED ? notes : null,
+    notesChanged,
+    notifier: () => notifier,
+    localTools: REMOTE_MCP_ENABLED ? createMcpTools(mcpDeps) : null,
+    browserAvailable: browsers.available,
+    prefs: {
+        get: key => { const v = sessionStore.getMeta(key); try { return JSON.parse(v); } catch { return v; } },
+        set: (key, value) => sessionStore.setMeta(key, JSON.stringify(value)),
+    },
+    dataDir: path.dirname(DB_PATH),
+    publicDir: PUBLIC_DIR,
+    version: APP_VERSION,
+    env: process.env,
+    log: debugLog,
+});
+
 const wss = new WebSocketServer({ 
     server,
     verifyClient: (info, callback) => {
@@ -1892,8 +1861,8 @@ function spawnShell({ id, cwd, cols = 80, rows = 24 }) {
         cols,
         rows,
         cwd: DEMO_MODE ? '/home/demo' : cwd,
-        env: {
-            ...process.env,
+        // The app's own secrets (login, webhook key...) never reach the shell: scripts/child-env.js
+        env: childEnv({
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
             LANG: 'en_US.UTF-8',
@@ -1911,7 +1880,7 @@ function spawnShell({ id, cwd, cols = 80, rows = 24 }) {
                 PATH: `${AGENT_SHIM_DIR}${path.delimiter}${process.env.PATH || ''}`,
                 MEUTERMINAL_API_URL: `http://127.0.0.1:${PORT}${BASE_PATH}/api`,
             } : {})
-        }
+        })
     });
 }
 
@@ -2094,16 +2063,8 @@ function createTerminal(ws, requestedCwd = null) {
 // Cleanup old lockouts periodically
 setInterval(() => {
     const now = Date.now();
-    for (const [ip, attempts] of loginAttempts.entries()) {
-        if (now - attempts.lastAttempt >= LOCKOUT_TIME) {
-            loginAttempts.delete(ip);
-        }
-    }
-    for (const [ip, attempts] of webhookAuthAttempts.entries()) {
-        if (now - attempts.lastAttempt >= LOCKOUT_TIME) {
-            webhookAuthAttempts.delete(ip);
-        }
-    }
+    loginLimiter.sweep();
+    webhookLimiter.sweep();
     for (const [id, seenAt] of webhookSeenRequestIds.entries()) {
         if (now - seenAt >= REPLAY_WINDOW_MS) {
             webhookSeenRequestIds.delete(id);

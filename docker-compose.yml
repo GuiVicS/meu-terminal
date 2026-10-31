@@ -25,8 +25,10 @@ services:
       # Optional two-factor login (authenticator app code). Generate with:
       #   docker compose exec meuterminal node scripts/totp-setup.js
       AUTH_TOTP_SECRET: ${AUTH_TOTP_SECRET:-}
-      # PIN login, only used when AUTH_EMAIL/AUTH_PASSWORD are empty
-      MEUTERMINAL_PIN: ${MEUTERMINAL_PIN:-1234}
+      # PIN login, only used when AUTH_EMAIL/AUTH_PASSWORD are empty. No default: without
+      # email+password or a PIN the app refuses to start (ALLOW_NO_LOGIN=true to run open on purpose)
+      MEUTERMINAL_PIN: ${MEUTERMINAL_PIN:-}
+      ALLOW_NO_LOGIN: ${ALLOW_NO_LOGIN:-}
       # The address you open the app at (used for CORS / cookies)
       BASE_URL: ${BASE_URL:-http://localhost:3000}
       ENABLE_STARSHIP: ${ENABLE_STARSHIP:-true} # Starship prompt in the terminals
@@ -39,6 +41,15 @@ services:
       # Webhooks that run a server-side script (off by default - see /admin → Webhooks)
       WEBHOOKS_ENABLED: ${WEBHOOKS_ENABLED:-}
       WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:-}
+      # Claude bridge: claude.ai uses this server through an MCP connector (off by default;
+      # needs AUTH_EMAIL/AUTH_PASSWORD - see /admin → Ponte com o Claude and .env.example)
+      REMOTE_MCP_ENABLED: ${REMOTE_MCP_ENABLED:-}
+      REMOTE_MCP_RUN_AS: ${REMOTE_MCP_RUN_AS:-}
+      REMOTE_MCP_WORKDIR: ${REMOTE_MCP_WORKDIR:-}
+      REMOTE_MCP_APPROVAL: ${REMOTE_MCP_APPROVAL:-}
+      REMOTE_MCP_CLIENT_ID: ${REMOTE_MCP_CLIENT_ID:-}
+      REMOTE_MCP_CLIENT_SECRET: ${REMOTE_MCP_CLIENT_SECRET:-}
+      REMOTE_MCP_DCR: ${REMOTE_MCP_DCR:-}
 
       # (OPTIONAL) Comma-separated list of allowed origins, e.g.
       # https://terminal.example.com,http://192.168.0.10:3000 (unset = allow all)

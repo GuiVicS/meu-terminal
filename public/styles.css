@@ -2809,7 +2809,6 @@ audio.fm-media { width: min(520px, 90%); }
     font: 12.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow-y: auto;
 }
 
-/* =========================================================
    Liquid glass (iPhone)
    Follows Apple's Liquid Glass guidance (developer.apple.com, "Adopting Liquid Glass" and the
    HIG "Materials" page), approximated with CSS since a web page can't use the system material:
@@ -3491,3 +3490,33 @@ audio.fm-media { width: min(520px, 90%); }
         .page-admin .admin-page { padding: 20px 16px calc(80px + var(--safe-bottom)); }
     }
 }
+=======
+/* ---------- Claude bridge consent page (oauth-authorize.html) ---------- */
+.oauth-card .login-subtitle strong { color: var(--text); }
+.oauth-scope { margin: 18px 0 10px; padding-left: 18px; text-align: left; font-size: 13.5px; color: var(--text-2); display: grid; gap: 6px; }
+.oauth-card .field-help { text-align: left; display: block; }
+.oauth-card .login-form .btn-ghost { margin-top: 0; }
+
+/* ---------- /admin → Ponte com o Claude (admin/remote.js) ---------- */
+.rm-section .rm-gap { margin-top: 28px; }
+.rm-warning { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; color: var(--text-2); background: var(--surface-2); }
+.rm-warning .icon { flex: none; margin-top: 2px; color: var(--warning, var(--accent)); }
+.rm-code { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono, monospace); font-size: 13px; }
+.rm-steps { margin: 8px 0 12px; padding-left: 20px; display: grid; gap: 8px; font-size: 13.5px; color: var(--text-2); }
+.rm-steps code, .rm-section .setting-help code { font-family: var(--font-mono, monospace); font-size: 12.5px; word-break: break-all; color: var(--text); }
+.rm-copy { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rm-list { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; gap: 8px; }
+.rm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.rm-row.rm-failed { border-left: 3px solid var(--danger); }
+.rm-approval { border-color: var(--accent); }
+.rm-name { flex: 1 1 220px; min-width: 0; font-size: 13.5px; }
+.rm-meta { display: block; font-size: 12px; color: var(--text-3); width: 100%; }
+.rm-name .rm-meta { width: auto; }
+.rm-cmd { flex: 1 1 100%; min-width: 0; font-family: var(--font-mono, monospace); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.rm-actions { display: flex; gap: 8px; margin-left: auto; }
+.rm-actions .btn, .rm-row > .btn { height: 34px; padding: 0 14px; }
+.rm-output { flex: 1 1 100%; max-height: 320px; overflow: auto; margin: 4px 0 0; padding: 10px; border-radius: var(--radius); background: var(--surface-2); font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.rm-empty { font-size: 13px; color: var(--text-3); }
+.agent-ui-section.is-off { display: none; }
+
+/* ==================================================
