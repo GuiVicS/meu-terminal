@@ -1,153 +1,277 @@
-# Plano de ação: MCP remoto (agentes de fora usando o servidor)
+# Plano de ação: ponte MCP entre o Claude (claude.ai) e o MeuTerminal
 
-Status: proposta, nada implementado.
-Escopo: permitir que um agente que **não** roda no servidor (ex.: o Claude em claude.ai, como
-conector personalizado) use o MeuTerminal como ambiente auxiliar: rodar comandos, ler e escrever
-arquivos, baixar coisas com a rede do servidor e acompanhar abas de terminal.
+Status: proposta revisada após leitura do código (v2.7.0), nada implementado.
+
+Objetivo: o Claude do claude.ai (chat, app do celular) usar o servidor do MeuTerminal como uma
+**extensão do próprio ambiente**. O ambiente do Claude tem a rede bloqueada (sem npm, pip, apt,
+Hugging Face) e não guarda nada entre conversas; o servidor tem rede livre, os programas
+instalados e disco persistente. Exemplos do que passa a ser possível numa conversa:
+
+- pesquisar na web e **salvar o resultado lá** (arquivo, Anotação, Google Drive via rclone);
+- **instalar e rodar** o que o ambiente do Claude não consegue (npm, pip, Docker, modelos);
+- subir um projeto, **abrir no Chromium do servidor e ver o screenshot**;
+- deixar um processo longo rodando e **receber push no celular** quando terminar.
 
 O MCP atual (`/mcp`) continua igual: só loopback + token, para os agentes que rodam dentro dos
-terminais. O remoto é um endpoint **novo e separado**, desligado por padrão.
+terminais. A ponte é um endpoint **novo e separado** (`/mcp/remote`), desligado por padrão.
 
 ---
 
-## 1. Ponto de partida (o que já existe)
+## 1. Viabilidade
 
-| Peça | Onde está | Aproveitamento |
+**Alta.** Quase tudo de que a ponte precisa já existe e está bem feito; o que falta é a porta de
+entrada (OAuth) e uma camada fina de ferramentas.
+
+| Precisa de | Já existe | Situação |
 |---|---|---|
-| Servidor MCP (JSON-RPC, Streamable HTTP, respostas JSON) | `scripts/mcp-server.js` (`createMcpHandler`) | Mesmo protocolo. Separar a lista de ferramentas para montar um segundo handler com outro conjunto. |
-| Autenticação do MCP local | `mcpAuth` em `server.js`: só loopback, sem `Origin`, Bearer estático | **Não serve** para o remoto: o Claude chama a partir dos servidores da Anthropic, pela internet. |
-| Login do app | email + senha, 2FA (`scripts/totp.js`), cookie de sessão | Vira a tela de login/consentimento do OAuth. |
-| Sessões de terminal | `scripts/session-manager.js`: `create`, `runCommand`, headless xterm com `SerializeAddon` | Ferramentas de "terminal visível": o agente digita numa aba e lê a tela. |
-| Arquivos | `scripts/file-manager.js` (local + rclone/Drive) | `list_dir`, `read_file`, `write_file` reaproveitam a classe, com os mesmos limites (`MAX_TEXT`). |
-| Avisos | ferramenta `notify` (tela + push) | Reaproveitar: avisar no celular quando um job longo termina ou quando precisa de aprovação. |
-| Banco SQLite | `data/meuterminal.db` | Tabelas novas: clientes OAuth, tokens, log de auditoria, jobs. |
-| Modelo de webhooks | `scripts/webhook-*.js`, `/admin` | Referência para token por cliente, CRUD e tela no `/admin`. |
+| Protocolo MCP (JSON-RPC, Streamable HTTP) | `scripts/mcp-server.js` → `createMcpHandler` | Pronto. Só falta separar "protocolo" de "lista de ferramentas". |
+| Rodar comando com timeout, saída limitada e segredos mascarados | `scripts/webhook-runner.js` → `WebhookRunner.execute` (env limpo, `detached` + kill do grupo, 64 KB, `mask()`) | Excelente base. Extrair um `ProcessRunner` genérico. |
+| Ler, escrever, buscar, enviar e baixar arquivos (local + Google Drive) | `scripts/file-manager.js` → `FileManager` (`readText`, `writeText`, `list`, `search`, `upload`, `send`, rclone) | Pronto. Falta um modo "raiz restrita" opcional. |
+| Salvar pesquisas onde você lê no celular | `scripts/notes-store.js` (`.md` por nota) + `notesChanged()` (avisa os aparelhos) | Pronto: vira `save_note`. |
+| Ver páginas renderizadas | `BrowserManager.screenshot` / `readText` + ferramentas `open_url`, `screenshot`, `read_page` | Pronto: o screenshot já volta como imagem MCP. |
+| Avisar no celular | ferramenta `notify` + `PushNotifier` | Pronto. |
+| Terminal visível ao vivo | `SessionManager` (`create`, `runCommand`, headless xterm com `SerializeAddon`) | Pronto: falta só ler a tela pelo MCP. |
+| Login forte | email + senha + TOTP, lockout, `requireReauth` (step-up de 5 min) | Pronto: vira a tela de autorização do OAuth. |
+| Classificar comandos perigosos | `public/agent/risk.js` (`rm -rf`, `sudo`, `curl \| sh`, force push...) | Pronto (hoje no front). Mover/compartilhar com o servidor. |
+| Testes | `node --test`, CI em `.github/workflows/tests.yml` | Pronto: mesmo padrão para os novos módulos. |
+| **OAuth 2.1 (exigido pelo claude.ai)** | — | **Novo.** É a maior parte do trabalho. |
+| **Jobs em segundo plano** | parcial (fila do `WebhookRunner`, tabela de runs) | **Novo**, copiando o modelo dos webhooks. |
+| **Auditoria da ponte** | parcial (`webhook_runs`) | **Novo**, mesmo modelo. |
 
----
+### O que o claude.ai exige de um conector personalizado
 
-## 2. O que o Claude exige de um conector personalizado
-
-- Transporte **Streamable HTTP** (o handler atual já responde assim). SSE também existe, mas pode ser descontinuado.
-- Autenticação **OAuth** (com ou sem registro dinâmico de cliente, o DCR) ou **sem autenticação**.
-  Token Bearer estático não aparece como opção. Sem autenticação está fora de cogitação aqui.
-- Sem DCR, dá para cadastrar no Claude um **client ID + secret** fixos (mais simples de implementar).
-- Callback do OAuth: `https://claude.ai/api/mcp/auth_callback`. A Anthropic avisa que pode passar a ser
-  um domínio `claude.com`, então aceite os dois.
-- URL pública em HTTPS (o `BASE_URL` atual atrás do Coolify/proxy já resolve).
-- Disponível nos planos Pro, Max, Team e Enterprise. É adicionado em Configurações → Conectores, e
-  depois funciona também no celular.
+- Transporte **Streamable HTTP** (o handler atual já responde JSON puro, permitido pela especificação).
+- Autenticação **OAuth** (com ou sem registro dinâmico de cliente, o DCR) ou nenhuma. Token Bearer
+  estático, como o do `/mcp`, não está entre as opções. Sem DCR, dá para cadastrar no Claude um
+  **client ID + secret** fixos.
+- Callback: `https://claude.ai/api/mcp/auth_callback` (a Anthropic avisa que pode passar a ser um
+  domínio `claude.com`; aceitar os dois).
+- URL pública em HTTPS (o `BASE_URL` atrás do Coolify já resolve).
+- Planos Pro, Max, Team ou Enterprise; adicionado em Configurações → Conectores, e depois funciona
+  também no app do celular.
 
 Fonte: https://support.claude.com/en/articles/11503834
 
 ---
 
-## 3. Arquitetura proposta
+## 2. Problemas encontrados no código (corrigir antes ou junto)
+
+Em ordem de importância para a ponte.
+
+### 2.1 Segredos do app vazam para todo processo filho
+`spawnShell` (`server.js`, ~linha 1892) passa `...process.env` para cada terminal, e o
+`AgentGateway` recebe `env: { ...process.env, ... }` (~linha 851). Resultado: `AUTH_PASSWORD`,
+`AUTH_TOTP_SECRET`, `VERCEL_TOKEN` e `WEBHOOK_SECRET_KEY` aparecem num simples `env` em qualquer
+terminal e em qualquer agente. Hoje o risco é contido (quem tem terminal já é root), mas com a
+ponte **qualquer saída de comando vai para uma conversa fora do servidor**.
+**Correção:** uma função `childEnv()` com lista de variáveis do app que nunca descem
+(`AUTH_*`, `MEUTERMINAL_PIN`, `WEBHOOK_SECRET_KEY`, `VERCEL_TOKEN`...), usada em `spawnShell`, no
+gateway e no runner da ponte. Na ponte, além disso, mascarar esses valores na saída (`mask()`).
+
+### 2.2 Rotas públicas casadas por prefixo
+O middleware global libera qualquer caminho que **comece** com um item de `publicPaths`
+(`req.path.startsWith(path)`, ~linha 369). Com `'/mcp'` na lista, `/mcp/remote`, `/mcpqualquer`
+etc. também pulam o login. Hoje não há rota assim, mas a ponte criaria uma.
+**Correção:** comparar caminho exato (ou prefixo com `/` no fim, como já é `'/assets/'`) e listar
+`/mcp/remote`, `/oauth/*` e `/.well-known/*` explicitamente, cada uma com a sua própria checagem.
+O mesmo vale para a isenção da checagem de origem (~linha 340), que hoje só conhece `/mcp`.
+
+### 2.3 PIN padrão `1234` e PIN em texto no cookie
+`docker-compose.yml` (linha 29) usa `MEUTERMINAL_PIN: ${MEUTERMINAL_PIN:-1234}`: quem sobe sem
+configurar email e senha fica protegido por `1234`. E no modo PIN o cookie guarda o próprio PIN
+(`res.cookie(..._PIN, pin)`, ~linha 652).
+**Correção:** padrão vazio no compose (ou recusar subir sem login). Para a ponte: **só ligar com
+email + senha**, e de preferência com 2FA; com PIN ou sem login, `/mcp/remote` nem é montado.
+
+### 2.4 `server.js` com 2.128 linhas
+Ainda legível (bons comentários), mas a ponte acrescentaria umas 600 linhas. Hoje o arquivo mistura
+auth, sessões, arquivos, agentes, vibecoding, push, notas, backup, webhooks e WebSocket.
+**Correção (incremental, sem mudar comportamento):** mover cada bloco para `routes/<area>.js`
+exportando `register(app, ctx)`, onde `ctx` reúne `sessions`, `files`, `notes`, `notifier`,
+`requireReauth` etc. Começar pelos blocos que a ponte toca: auth e MCP.
+
+### 2.5 Código morto
+`requirePin` (~linha 258) usa `COOKIE_NAME`, `isValidPin` e `secureCompare`, que não existem, e
+não é usado em lugar nenhum. Remover.
+
+### 2.6 Sem testes de autenticação
+Há bons testes de notas, webhooks, backup e agentes, mas nenhum de login, cookie assinado, lockout
+ou da checagem de origem. O OAuth vai mexer exatamente aí.
+**Correção:** extrair as funções puras (`signToken`, `verifyAuthToken`, `isSameOrigin`, lockout)
+para `scripts/auth.js` e testar com `node --test`.
+
+---
+
+## 3. Decisão central: em que ambiente os comandos da ponte rodam
+
+O objetivo é usar **os programas que já estão no servidor**. Hoje tudo roda como `root` no
+contêiner, e as ferramentas instaladas pelo usuário ficam em `/root` (`NPM_CONFIG_PREFIX=/root/.npm-global`,
+`~/.local/bin`), que outro usuário não lê. Isso cria um conflito real entre utilidade e isolamento:
+
+| Modo | Como | Utilidade | Risco |
+|---|---|---|---|
+| **A. Mesmo ambiente do terminal** | Comandos como root, mesma home, mesmas ferramentas. | Total: é exatamente o que você tem no terminal. | Igual ao do seu login: quem tiver o token manda no contêiner. |
+| **B. Usuário dedicado** | Usuário `claude` com home própria; ferramentas globais em `/usr/local`. | Parcial: o que você instalou em `/root` não aparece. | Menor: não lê o banco, o `.env` nem a sua home. |
+| **C. Contêiner worker** | Outro contêiner no compose, com só `/work` montado; o app chama por socket interno. | Parcial, mas com controle fino (CPU, RAM, rede). | O menor. |
+
+**Recomendação para uso pessoal:** começar no **modo A**, porque é o único que cumpre o objetivo
+("ter os programas de lá"), com as proteções da seção 5 obrigatórias. Deixar o modo configurável
+(`REMOTE_MCP_RUN_AS=root|<usuário>`) para poder endurecer depois sem reescrever nada. O modo C fica
+para quando o MeuTerminal virar produto para outras pessoas.
+
+Pasta de trabalho padrão da ponte: `~/claude` (configurável, `REMOTE_MCP_WORKDIR`), para o que o
+Claude cria não se misturar com os seus projetos.
+
+---
+
+## 4. Arquitetura proposta
 
 ```
-claude.ai ──HTTPS──▶ /mcp/remote ──▶ authRemote (OAuth) ──▶ handler remoto ──▶ worker (usuário/contêiner isolado)
-                     /oauth/*       (login + 2FA + tela de consentimento)
+claude.ai ──HTTPS──▶ Caddy/Coolify ──▶ MeuTerminal
+                                         ├─ /.well-known/oauth-*      metadados (públicos)
+                                         ├─ /oauth/authorize          login + 2FA + "Permitir?"
+                                         ├─ /oauth/token              código → tokens (PKCE)
+                                         └─ /mcp/remote ─ remoteAuth ─ handler MCP (ferramentas remotas)
+                                                                         ├─ ProcessRunner (comandos e jobs)
+                                                                         ├─ FileManager (arquivos, Drive)
+                                                                         ├─ NotesStore (anotações)
+                                                                         ├─ BrowserManager (prévia, screenshot)
+                                                                         ├─ SessionManager (terminal visível)
+                                                                         └─ PushNotifier (avisos)
+                                                                       auditoria em SQLite
 ```
 
-- Variável `REMOTE_MCP_ENABLED=false` (padrão). Com `false`, as rotas nem são montadas.
-- `/mcp/remote` fica fora do login por cookie (como `/mcp` e `/hooks/`) e fora da checagem de
-  mesma origem, mas com a sua própria checagem OAuth.
-- Requisição sem token ou com token inválido → `401` com
-  `WWW-Authenticate: Bearer resource_metadata="<BASE_URL>/.well-known/oauth-protected-resource"`.
+### 4.1 Arquivos novos e alterados
 
-### 3.1 OAuth (o app como servidor de autorização)
+| Arquivo | O que é |
+|---|---|
+| `scripts/mcp-protocol.js` | O JSON-RPC que hoje está dentro de `createMcpHandler`, recebendo `{ tools, impl, instructions, serverInfo }`. Usado pelos dois endpoints. |
+| `scripts/mcp-server.js` | Fica só com as ferramentas locais (sem mudar comportamento). |
+| `scripts/process-runner.js` | Extraído do `WebhookRunner.execute`: spawn com env limpo, grupo de processos, timeout, saída limitada, `mask()`. O `WebhookRunner` passa a usá-lo. |
+| `scripts/remote/oauth.js` | Servidor OAuth: metadados, authorize, token, refresh, revogação. Tabelas no mesmo SQLite. |
+| `scripts/remote/tools.js` | Ferramentas da ponte (seção 6). |
+| `scripts/remote/jobs.js` | Jobs em segundo plano: saída em arquivo, status no SQLite. |
+| `scripts/remote/audit.js` | Registro de cada chamada. |
+| `scripts/auth.js` | Funções de login extraídas do `server.js` (testáveis). |
+| `routes/remote.js` | Monta tudo acima no Express, só se `REMOTE_MCP_ENABLED=true`. |
+| `public/admin/remote.js` | Página "Ponte com o Claude" no `/admin`. |
+| `tests/remote-*.test.js` | Testes do OAuth, das ferramentas e do runner. |
+
+Sem dependências novas: `node:crypto` cobre PKCE e tokens, e `node:sqlite` já é usado. (Alternativa:
+o SDK oficial de MCP em TypeScript tem peças de servidor OAuth; avaliar se compensa trazer a
+dependência só para isso. O projeto hoje evita dependências e o JSON-RPC já foi feito à mão.)
+
+### 4.2 OAuth em detalhe
 
 | Rota | Função |
 |---|---|
-| `GET /.well-known/oauth-protected-resource` | Diz qual é o servidor de autorização. |
-| `GET /.well-known/oauth-authorization-server` | Metadados: endpoints, `code_challenge_methods_supported: ["S256"]`. |
-| `POST /oauth/register` | DCR (opcional na 1ª versão: dá para usar client ID/secret do `.env`). |
-| `GET /oauth/authorize` | Pede login (email, senha, 2FA) e mostra a tela "Permitir que <cliente> rode comandos neste servidor?". |
-| `POST /oauth/token` | Troca o código (com PKCE S256) por access token curto (ex.: 1 h) + refresh token. |
+| `GET /.well-known/oauth-protected-resource` | Aponta o servidor de autorização (o próprio app). |
+| `GET /.well-known/oauth-authorization-server` | Endpoints, `response_types: ["code"]`, `code_challenge_methods_supported: ["S256"]`, `grant_types: ["authorization_code", "refresh_token"]`. |
+| `POST /oauth/register` | DCR. Fase 2; na fase 1, client ID/secret do `.env`. |
+| `GET /oauth/authorize` | Sem sessão → manda para `/login` e volta. Com sessão → exige step-up (`requireReauth`: senha + 2FA, mesmo das ações sensíveis dos webhooks) e mostra "Permitir que o Claude rode comandos neste servidor?". |
+| `POST /oauth/token` | Código (uso único, 60 s, PKCE S256) → access token (1 h) + refresh token (30 dias, rotativo). |
 
-- Guardar só o **hash** dos tokens no SQLite.
-- Aceitar somente os `redirect_uri` da lista (claude.ai e claude.com).
-- No `/admin`: lista de clientes conectados, último uso e botão **Revogar**.
-- Trocar a senha do app revoga todos os tokens (mesmo comportamento do login hoje).
+- `redirect_uri` só da lista permitida (claude.ai e claude.com).
+- No banco, só o **hash** dos tokens, mais a "impressão" do `TOKEN_KEY` atual: trocar a senha ou o
+  2FA invalida todos os tokens da ponte, igual ao login de hoje.
+- Sem token ou token inválido em `/mcp/remote` → `401` com
+  `WWW-Authenticate: Bearer resource_metadata="<BASE_URL>/.well-known/oauth-protected-resource"`.
+- Lockout próprio para `/oauth/*` (mesmo formato de `webhookAuthAttempts`).
 
 ---
 
-## 4. Ferramentas do MCP remoto
+## 5. Segurança da ponte (obrigatório no modo A)
 
-### Fase 1: o essencial
+1. **Liga só com email + senha** (seção 2.3), de preferência com 2FA; consentimento com step-up.
+2. **Env limpo** nos comandos da ponte e **mascaramento** dos segredos do app na saída (2.1).
+3. **Auditoria**: tabela `remote_audit` (quando, cliente, ferramenta, argumentos, código de saída,
+   duração, bytes de saída), visível no `/admin`.
+4. **Interruptor** no `/admin` ("Ponte com o Claude: ligada/desligada") que corta na hora, sem
+   precisar de deploy, e **revogar** clientes.
+5. **Aprovação por push** para comandos que o `risk.js` marca como perigosos: a ferramenta responde
+   "aguardando aprovação", o celular recebe o push com Aprovar/Recusar e o Claude consulta de novo.
+   Configurável: `sempre`, `só perigosos` (padrão) ou `nunca`.
+6. **Limites**: timeout padrão 120 s (máx. 600 s) para `run_command`; jobs para o resto; saída
+   cortada mantendo começo e fim; máximo de jobs simultâneos; rate limit por cliente.
+7. **Pasta de trabalho padrão** `~/claude`; caminhos fora dela permitidos no modo A, mas registrados.
 
-| Ferramenta | O que faz | Limites |
+---
+
+## 6. Ferramentas da ponte
+
+### Fase 1: o essencial ("pesquisar aqui e salvar lá", "rodar o que eu não consigo")
+
+| Ferramenta | Reaproveita | O que faz |
 |---|---|---|
-| `run_command` | Roda `bash -lc "<comando>"` não interativo e devolve stdout, stderr, código de saída e duração. | Timeout padrão 120 s (máx. 600 s); saída cortada (ex.: 30 KB, mantendo começo e fim, com aviso). |
-| `list_dir` | Lista uma pasta do workspace. | `MAX_ENTRIES`. |
-| `read_file` | Lê texto, com `offset`/`limit` de linhas. | `MAX_TEXT`. |
-| `write_file` | Cria ou substitui um arquivo de texto. | Só dentro do workspace. |
-| `server_info` | SO, CPU, RAM, GPU (`nvidia-smi`), disco livre, ferramentas instaladas. | Para o agente saber onde está. |
+| `run_command` | `ProcessRunner` | `bash -lc` não interativo; devolve saída, código de saída e duração. |
+| `read_file` / `write_file` / `list_dir` / `search_files` | `FileManager` | Arquivos do servidor **e dos remotes do rclone** (Google Drive). |
+| `save_note` / `search_notes` / `read_note` | `NotesStore` + `notesChanged()` | O que o Claude pesquisa aparece na aba Anotações do celular. |
+| `server_info` | — | SO, CPU, RAM, GPU (`nvidia-smi`), disco, ferramentas instaladas, pasta de trabalho. |
+| `notify` | já existe | Push no celular. |
 
-### Fase 2: trabalhos longos e terminal visível
+### Fase 2: trabalho longo, prévia e terminal ao vivo
+
+| Ferramenta | Reaproveita | O que faz |
+|---|---|---|
+| `start_job` / `job_status` / `job_output` / `job_kill` | `ProcessRunner` + modelo de `webhook_runs` | Instalações, builds, downloads de modelos sem travar a conversa; push opcional ao terminar. |
+| `fetch_url` | `ProcessRunner` (curl) | O servidor baixa direto da internet para uma pasta. |
+| `open_url` / `screenshot` / `read_page` | já existem | O Claude abre o projeto no Chromium do servidor e **vê a imagem**. |
+| `terminal_open` / `terminal_send` / `terminal_read` | `SessionManager` + headless xterm | Uma aba "Claude" visível no app: você assiste ao vivo. |
+
+### Fase 3: transferência e conforto
 
 | Ferramenta | O que faz |
 |---|---|
-| `start_job` / `job_status` / `job_output` / `job_kill` | Comandos longos (build, download de modelo, render) em segundo plano, sem segurar a requisição HTTP. Saída gravada em arquivo. Ao terminar, `notify` opcional no celular. |
-| `terminal_open` | Cria uma aba de terminal com nome (ex.: "Claude · build"), visível no app. |
-| `terminal_send` | Digita numa aba (`sessions.runCommand`). |
-| `terminal_read` | Lê as últimas N linhas da tela (headless xterm). |
-| `notify` | A mesma do MCP local. |
+| `share_link` | Link temporário assinado (`/dl/<token>`, expira em minutos) para baixar um arquivo do servidor, usando `files.send`. |
+| `upload_base64` | Arquivos pequenos do ambiente do Claude para o servidor (limite baixo, ex.: 2 MB). |
+| DCR | Conectar sem mexer no `.env`. |
 
-A vantagem do terminal visível: você abre o app no celular e vê, ao vivo, o que o agente está fazendo.
-
-### Fase 3: transferência de arquivos
-
-- Arquivos pequenos: `read_file_base64` / `write_file_base64` (limite baixo, ex.: 2 MB).
-- Arquivos grandes: não passar pela conversa. Opções:
-  - o servidor faz `git push` para um repositório/branch, e o agente clona do outro lado;
-  - um link de download temporário assinado (`/dl/<token>`, expira em minutos).
+Regras gerais das respostas: texto curto e estruturado (JSON), saída longa cortada com aviso e
+dica de como ler o resto (`job_output` com offset, `read_file` com linhas).
 
 ---
 
-## 5. Segurança (o ponto mais importante)
+## 7. Ordem de entrega
 
-Um endpoint público que executa comandos dá acesso total ao servidor para quem tiver o token.
+**Fase 0: preparação (melhora o app mesmo sem a ponte)**
+1. `childEnv()` em `spawnShell` e no gateway (2.1).
+2. `publicPaths` com casamento exato (2.2); remover `requirePin` (2.5).
+3. Compose sem PIN padrão (2.3).
+4. `scripts/auth.js` + testes (2.6).
+5. Extrair `scripts/mcp-protocol.js` e `scripts/process-runner.js` (o `WebhookRunner` passa a usar; os testes atuais dele garantem que nada mudou).
 
-1. **Isolar a execução.** Não rodar como `root` no contêiner do app (que tem `/root`, o banco e o
-   `.env`). Opções, da mais simples à mais forte:
-   - usuário Linux dedicado (`runuser -u mt-agent`) com workspace próprio (ex.: `/work`), sem permissão
-     de leitura em `data/` e na home do root;
-   - **contêiner separado** (`meuterminal-worker` no `docker-compose.yml`) com só `/work` montado;
-     o app chama o worker por um socket interno. Recomendado.
-2. **Limpar o ambiente dos processos filhos.** Não repassar `AUTH_PASSWORD`, `AUTH_TOTP_SECRET`,
-   `VERCEL_TOKEN`, `WEBHOOK_SECRET_KEY`, `MEUTERMINAL_MCP_TOKEN` etc. Usar uma lista de variáveis
-   permitidas, não de proibidas.
-3. **Auditoria.** Tabela `mcp_audit` (data, cliente, ferramenta, argumentos, código de saída, duração),
-   visível no `/admin`.
-4. **Botão de emergência.** No `/admin`, um interruptor "MCP remoto: desligado" que corta na hora,
-   além de revogar clientes.
-5. **Limites.** Rate limit por cliente; número máximo de jobs simultâneos; timeout duro.
-6. **Aprovação opcional** para comandos perigosos (`rm -rf`, `sudo`, mexer em `.env`): push no celular
-   com Aprovar/Recusar antes de rodar. Avaliar se `public/agent/risk.js` já classifica isso e pode
-   ser reaproveitado.
-7. **Restringir quem chama (opcional).** Liberar só os IPs de saída da Anthropic (lista publicada
-   pela Anthropic) no proxy ou firewall.
+**Fase 1: ponte mínima**
+6. `scripts/remote/oauth.js` com client fixo + testes (PKCE, expiração, uso único, revogação).
+7. `routes/remote.js` + ferramentas da fase 1 + auditoria + interruptor.
+8. Testar com o MCP Inspector; depois adicionar no claude.ai em Configurações → Conectores.
 
----
+**Fase 2:** jobs, `fetch_url`, ferramentas de navegador e terminal visível; aprovação por push.
 
-## 6. Ordem de entrega
+**Fase 3:** `share_link`, `upload_base64`, DCR, página completa no `/admin`.
 
-1. Separar `TOOLS` e `createMcpTools` em conjuntos (local e remoto), sem mudar o comportamento do `/mcp`.
-2. OAuth mínimo: metadados, `authorize` com login + 2FA + consentimento, `token` com PKCE, client
-   ID/secret pelo `.env`. Testes em `tests/`.
-3. Worker isolado + `run_command`, `list_dir`, `read_file`, `write_file`, `server_info` + auditoria.
-4. Testar com o MCP Inspector e depois conectar no claude.ai (Configurações → Conectores).
-5. Fase 2 (jobs, terminal visível, notify).
-6. `/admin`: clientes, revogar, auditoria, interruptor.
-7. DCR, transferência de arquivos, aprovação por push.
+Em paralelo, quando convier: quebrar o resto do `server.js` em `routes/` (2.4).
+
+Estimativa de tamanho: fase 0 ~300 linhas (boa parte é mover código), fase 1 ~800 linhas com
+testes, fase 2 ~600 linhas.
 
 ---
 
-## 7. Decisões em aberto
+## 8. Limites que continuam existindo
 
-- **DCR ou client ID/secret fixo?** Fixo é mais rápido; DCR deixa conectar sem mexer no `.env`.
-- **Usuário dedicado ou contêiner worker?** O contêiner é mais seguro; o usuário é mais simples.
-- **Workspace persistente?** Guardar `/work` num volume (as ferramentas instaladas sobrevivem aos
-  deploys, como a home hoje) ou limpar periodicamente.
-- **Limite de saída das ferramentas:** o tamanho que cabe bem numa resposta para o agente ainda
-  precisa ser calibrado nos testes.
+- Cada chamada é uma ida e volta pela internet: bom para tarefas, ruim para dezenas de comandos
+  minúsculos em sequência (melhor mandar um script só).
+- O que a ferramenta devolve precisa ser curto; logs grandes vão para arquivo ou job.
+- Os dois ambientes continuam separados: o caminho natural é fazer o trabalho **no servidor**
+  (ele baixa, instala, gera), não transferir arquivos grandes entre os dois.
+- O app do Claude pode pedir sua confirmação antes de usar ferramentas do conector.
+- Para programar por horas num projeto, o Claude Code rodando **dentro** do MeuTerminal continua
+  melhor; a ponte é para o chat do claude.ai.
+
+---
+
+## 9. Decisões em aberto
+
+- **Modo de execução:** A (root, recomendado para uso pessoal), B ou C.
+- **Aprovação:** `só perigosos` (recomendado), `sempre` ou `nunca`.
+- **DCR já na fase 1** ou client fixo primeiro (recomendado: fixo).
+- **OAuth à mão ou com o SDK oficial de MCP** (recomendado: à mão, seguindo o estilo do projeto).
