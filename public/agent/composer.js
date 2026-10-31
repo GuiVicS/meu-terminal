@@ -13,6 +13,8 @@ import { toast } from '../ui/toast.js';
 import { esc } from './markdown.js';
 
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
+// iPhone layout: floating box + settings sheet (attribute set in index.html before first paint)
+const IPHONE = typeof document !== 'undefined' && document.documentElement.hasAttribute('data-iphone');
 const MAX_IMAGES = 5;
 const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024; // per image sent (base64 grows ~33%; the route takes 40 MB)
 const MAX_IMAGE_INPUT = 40 * 1024 * 1024;  // bigger photos are refused; smaller ones are reduced
@@ -111,7 +113,9 @@ export default class Composer {
             <div class="ag-images" hidden></div>
             <div class="ag-suggest" role="listbox" hidden></div>
             <form class="ag-input-row" autocomplete="off">
-                <button type="button" class="icon-btn ag-attach-btn" aria-label="Anexar" aria-haspopup="menu" title="Anexar">${icon('paperclip', 18)}</button>
+                <button type="button" class="icon-btn ag-attach-btn" aria-label="Anexar" aria-haspopup="menu" title="Anexar">${IPHONE ? icon('plus', 22) : icon('paperclip', 18)}</button>
+                <button type="button" class="ag-settings-btn" aria-haspopup="dialog" aria-label="Modelo e configurações" hidden>
+                    <span class="ag-settings-label"></span>${icon('chevronDown', 16)}</button>
                 <input type="file" multiple hidden>
                 <textarea rows="1" aria-label="Mensagem para o agente" enterkeyhint="send"
                     placeholder="Mensagem…"></textarea>
@@ -123,8 +127,106 @@ export default class Composer {
             selectors: q('.ag-selectors'), images: q('.ag-images'), suggest: q('.ag-suggest'), queue: q('.ag-queue'),
             form: q('form'), input: q('textarea'), file: q('input[type="file"]'),
             attach: q('.ag-attach-btn'), stop: q('.ag-stop'), send: q('.ag-send'),
+            settingsBtn: q('.ag-settings-btn'), settingsLabel: q('.ag-settings-label'),
         };
         this.bind();
+        if (IPHONE) this.setupIphone();
+    }
+
+    // ---------- iPhone layout ----------
+
+    /**
+     * On iPhones the box floats over the conversation (styles.css, "Liquid glass (iPhone)") and the
+     * row of selectors is replaced by one summary button ("Default  Auto") that opens a bottom
+     * sheet with all of them - like the Claude app. The selectors element itself moves into the
+     * sheet, so its change listener and the themed selects keep working as they are.
+     */
+    setupIphone() {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'ag-sheet-backdrop';
+        backdrop.hidden = true;
+        backdrop.innerHTML = `
+            <div class="ag-sheet" role="dialog" aria-modal="true" aria-label="Modelo e configurações">
+                <div class="ag-sheet-grabber" aria-hidden="true"></div>
+                <div class="ag-sheet-head"><h3>Modelo e configurações</h3>
+                    <button type="button" class="icon-btn ag-sheet-close" aria-label="Fechar">${icon('x', 18)}</button></div>
+                <div class="ag-sheet-body"></div>
+            </div>`;
+        document.body.appendChild(backdrop);
+        backdrop.querySelector('.ag-sheet-body').appendChild(this.ui.selectors);
+        this.ui.sheet = backdrop;
+        backdrop.addEventListener('click', e => {
+            if (e.target === backdrop || e.target.closest('.ag-sheet-close')) this.closeSheet();
+        });
+        this.ui.settingsBtn.addEventListener('click', () => this.openSheet());
+        this.onSheetKey = e => {
+            if (e.key === 'Escape' && !backdrop.hidden) this.closeSheet();
+        };
+        document.addEventListener('keydown', this.onSheetKey);
+
+        // Drag the sheet down to close it (from anywhere except the selects themselves)
+        const sheet = backdrop.querySelector('.ag-sheet');
+        let startY = null;
+        sheet.addEventListener('touchstart', e => {
+            startY = e.target.closest('.ui-select, select, input') || sheet.scrollTop > 0 ? null : e.touches[0].clientY;
+        }, { passive: true });
+        sheet.addEventListener('touchmove', e => {
+            if (startY === null) return;
+            sheet.style.transition = 'none';
+            sheet.style.transform = `translateY(${Math.max(0, e.touches[0].clientY - startY)}px)`;
+        }, { passive: true });
+        sheet.addEventListener('touchend', e => {
+            if (startY === null) return;
+            const dragged = e.changedTouches[0].clientY - startY;
+            startY = null;
+            sheet.style.transition = '';
+            sheet.style.transform = '';
+            if (dragged > 80) this.closeSheet();
+        });
+
+        // The conversation scrolls under the floating box: its height goes into --ag-composer-h on
+        // the parent, so the last message, the pending bar and the "jump" button stay clear of it.
+        const host = this.el.parentElement;
+        if (host && typeof ResizeObserver !== 'undefined') {
+            this.resizeObserver = new ResizeObserver(() => host.style.setProperty('--ag-composer-h', `${this.el.offsetHeight}px`));
+            this.resizeObserver.observe(this.el);
+        }
+    }
+
+    openSheet() {
+        const backdrop = this.ui.sheet;
+        if (!backdrop) return;
+        this.ui.input.blur(); // the keyboard would cover the sheet
+        backdrop.hidden = false;
+        requestAnimationFrame(() => requestAnimationFrame(() => backdrop.classList.add('open')));
+    }
+
+    closeSheet() {
+        const backdrop = this.ui.sheet;
+        if (!backdrop) return;
+        backdrop.classList.remove('open');
+        setTimeout(() => {
+            if (!backdrop.classList.contains('open')) backdrop.hidden = true;
+        }, 300);
+    }
+
+    /** Short text for the summary button: model, then mode - "Default (recommended)" -> "Default". */
+    settingsSummary() {
+        const caps = (this.session && this.session.capabilities) || {};
+        const short = text => String(text || '').replace(/\s*\([^)]*\)/g, '').trim();
+        const model = (caps.configOptions || []).find(o => o.category === 'model');
+        const modelName = model && (model.options.find(o => o.value === model.currentValue) || {}).name;
+        const mode = (caps.modeList || []).find(m => m.id === (this.session && this.session.mode));
+        const first = short(modelName) || short(mode && mode.name) || 'Configurações';
+        const second = modelName && mode ? short(mode.name) : '';
+        return `<strong>${esc(first)}</strong>${second ? `<span>${esc(second)}</span>` : ''}`;
+    }
+
+    /** Removes what lives outside the composer's own element (the iPhone sheet). */
+    dispose() {
+        this.resizeObserver?.disconnect();
+        if (this.onSheetKey) document.removeEventListener('keydown', this.onSheetKey);
+        this.ui.sheet?.remove();
     }
 
     bind() {
@@ -297,7 +399,7 @@ export default class Composer {
         const parts = [];
         const modes = caps.modeList || [];
         if (modes.length) {
-            parts.push(`<label class="ag-select" title="Modo"><span>${icon('shield', 13)}</span><select data-mode aria-label="Modo">${modes.map(m => `<option value="${esc(m.id)}"${m.id === this.session.mode ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>`);
+            parts.push(`<label class="ag-select" title="Modo"><span>${icon('shield', 13)}</span><em class="ag-select-name">Modo</em><select data-mode aria-label="Modo">${modes.map(m => `<option value="${esc(m.id)}"${m.id === this.session.mode ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>`);
         }
         for (const option of caps.configOptions || []) {
             if (option.category === 'mode' && caps.modeSource === 'config') continue; // shown as the mode select
@@ -315,11 +417,16 @@ export default class Composer {
                     const html = list.map(o => `<option value="${esc(o.value)}"${o.value === option.currentValue ? ' selected' : ''}>${esc(o.name)}</option>`).join('');
                     return group ? `<optgroup label="${esc(group)}">${html}</optgroup>` : html;
                 }).join('');
-                parts.push(`<label class="ag-select" title="${esc(option.name)}"><span>${label}</span><select data-config="${esc(option.id)}" aria-label="${esc(option.name)}">${opts}</select></label>`);
+                parts.push(`<label class="ag-select" title="${esc(option.name)}"><span>${label}</span><em class="ag-select-name">${esc(option.name)}</em><select data-config="${esc(option.id)}" aria-label="${esc(option.name)}">${opts}</select></label>`);
             }
         }
         this.ui.selectors.innerHTML = parts.join('');
         this.ui.selectors.hidden = !parts.length;
+        // iPhone: the selectors live in the sheet; the button shows what's selected
+        if (IPHONE) {
+            this.ui.settingsBtn.hidden = !parts.length;
+            this.ui.settingsLabel.innerHTML = this.settingsSummary();
+        }
     }
 
     async onSelector(e) {

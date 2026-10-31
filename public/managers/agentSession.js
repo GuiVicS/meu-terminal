@@ -687,6 +687,7 @@ export default class AgentSession {
         this.timers.forEach(clearTimeout);
         this.timers.clear();
         this.mediaQuery?.removeEventListener('change', this.onMedia);
+        this.composer.dispose(); // its iPhone settings sheet lives on <body>
         if (this.ws) {
             this.ws.onclose = null;
             this.ws.close();

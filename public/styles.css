@@ -2793,172 +2793,234 @@ audio.fm-media { width: min(520px, 90%); }
 }
 
 /* =========================================================
-   Liquid glass (phones)
-   On narrow screens the bars stop being solid strips and become floating, translucent
-   controls in the style of iOS 26: frosted pills and round buttons with a bright top rim,
-   sitting on the terminal's own background. Desktop and landscape layouts are untouched.
-   Without backdrop-filter support (or with "reduce transparency" on) they fall back to
-   solid surfaces with the same shapes.
+   Liquid glass (iPhone)
+   Follows Apple's Liquid Glass guidance (developer.apple.com, "Adopting Liquid Glass" and the
+   HIG "Materials" page), approximated with CSS since a web page can't use the system material:
+   - glass only on the control/navigation layer floating above the content, used sparingly;
+   - related controls share ONE glass capsule (toolbar grouping) instead of one each, and
+     text and icons are not mixed inside a shared capsule;
+   - no glass on glass: controls inside a glass container use plain fills;
+   - concentric corners: inner radius = outer radius - inset;
+   - content scrolling under floating controls fades out (scroll edge effect);
+   - sheets are inset from the screen edges, with large radii and taller list rows;
+   - "reduce transparency" and "increase contrast" switch to solid, higher-contrast surfaces.
+   Only on iPhones (data-iphone is set before first paint in index.html), only in portrait.
    ========================================================= */
 :root,
 [data-theme="dark"] {
     --glass-bg: var(--surface);
-    --glass-bg-strong: var(--surface-3);
+    --glass-bg-dense: var(--surface);              /* containers holding text input */
+    --glass-fill: rgba(255, 255, 255, 0.10);       /* plain fill for controls inside glass */
+    --glass-fill-pressed: rgba(255, 255, 255, 0.20);
     --glass-border: rgba(255, 255, 255, 0.12);
-    --glass-rim: rgba(255, 255, 255, 0.30);       /* specular highlight on the top edge */
-    --glass-rim-low: rgba(255, 255, 255, 0.06);   /* faint light caught on the bottom edge */
-    --glass-sheen: rgba(255, 255, 255, 0.10);
+    --glass-rim: rgba(255, 255, 255, 0.28);        /* specular highlight on the top edge */
+    --glass-rim-low: rgba(255, 255, 255, 0.06);    /* light caught on the bottom edge */
+    --glass-sheen: rgba(255, 255, 255, 0.08);
     --glass-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
     --glass-blur: blur(20px) saturate(180%);
 }
 [data-theme="light"] {
     --glass-bg: var(--surface);
-    --glass-bg-strong: #FFFFFF;
+    --glass-bg-dense: #FFFFFF;
+    --glass-fill: rgba(0, 0, 0, 0.06);
+    --glass-fill-pressed: rgba(0, 0, 0, 0.12);
     --glass-border: rgba(0, 0, 0, 0.08);
     --glass-rim: rgba(255, 255, 255, 0.95);
     --glass-rim-low: rgba(255, 255, 255, 0.45);
-    --glass-sheen: rgba(255, 255, 255, 0.55);
+    --glass-sheen: rgba(255, 255, 255, 0.50);
     --glass-shadow: 0 8px 22px rgba(40, 32, 10, 0.14), 0 1px 3px rgba(40, 32, 10, 0.10);
     --glass-blur: blur(20px) saturate(160%);
 }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     :root,
-    [data-theme="dark"] {
-        --glass-bg: rgba(255, 255, 255, 0.07);
-        --glass-bg-strong: rgba(255, 255, 255, 0.16);
-    }
-    [data-theme="light"] {
-        --glass-bg: rgba(255, 255, 255, 0.55);
-        --glass-bg-strong: rgba(255, 255, 255, 0.92);
-    }
+    [data-theme="dark"] { --glass-bg: rgba(40, 40, 40, 0.55); --glass-bg-dense: rgba(30, 30, 30, 0.78); }
+    [data-theme="light"] { --glass-bg: rgba(255, 255, 255, 0.55); --glass-bg-dense: rgba(255, 255, 255, 0.80); }
 }
-@media (prefers-reduced-transparency: reduce) {
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
     :root,
-    [data-theme="dark"] { --glass-bg: var(--surface); --glass-bg-strong: var(--surface-3); }
-    [data-theme="light"] { --glass-bg: var(--surface); --glass-bg-strong: #FFFFFF; }
+    [data-theme="dark"] { --glass-bg: var(--surface); --glass-bg-dense: var(--surface); --glass-border: var(--border-strong); }
+    [data-theme="light"] { --glass-bg: #FFFFFF; --glass-bg-dense: #FFFFFF; --glass-border: var(--border-strong); }
 }
 
-@media (max-width: 719px) {
-    /* One continuous surface: the controls float on the terminal's background */
-    .app { background: var(--term-bg); }
+/* Pieces that only exist in the iPhone layout (created by agent/composer.js) */
+.ag-settings-btn[hidden],
+.ag-sheet-backdrop[hidden] { display: none !important; }
+.ag-select-name { display: none; }
 
-    /* The shared glass material */
-    .topbar .brand,
-    .topbar-actions .icon-btn,
-    .tabstrip,
-    .statusbar,
-    .shortcut-key {
-        background-color: var(--glass-bg);
-        background-image: linear-gradient(180deg, var(--glass-sheen), transparent 60%);
-        -webkit-backdrop-filter: var(--glass-blur);
-        backdrop-filter: var(--glass-blur);
-        border: 0.5px solid var(--glass-border);
-        box-shadow:
-            inset 0 1px 0 var(--glass-rim),
-            inset 0 -1px 1px var(--glass-rim-low),
-            var(--glass-shadow);
-    }
+@media (orientation: portrait) {
+    [data-iphone] {
+        /* The glass material, on the few elements that carry it */
+        .topbar-actions .icon-btn,
+        .tabstrip,
+        .shortcut-scroll,
+        .shortcut-pinned,
+        .ag-composer,
+        .ag-jump {
+            background-color: var(--glass-bg);
+            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            -webkit-backdrop-filter: var(--glass-blur);
+            backdrop-filter: var(--glass-blur);
+            border: 0.5px solid var(--glass-border);
+            box-shadow:
+                inset 0 1px 0 var(--glass-rim),
+                inset 0 -1px 1px var(--glass-rim-low),
+                var(--glass-shadow);
+        }
 
-    /* ---------- top: brand pill + round action buttons + tabs pill ---------- */
-    .topbar {
-        background: transparent;
-        border-bottom: none;
-        padding: 6px 10px 8px;
-        grid-template-rows: 44px 48px;
-        row-gap: 8px;
-        column-gap: 8px;
-    }
-    .brand {
-        justify-self: start;
-        height: 44px;
-        padding: 0 16px 0 7px;
-        border-radius: 999px;
-    }
-    .brand-icon {
-        border-radius: 50%;
-        border: none;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
-    }
-    .topbar-actions { gap: 8px; padding: 0; }
-    .topbar-actions .icon-btn {
-        width: 44px;
-        height: 44px;
-        border-radius: 50%;
-        color: var(--text);
-    }
-    .topbar-actions .icon-btn:active { transform: scale(0.92); background-color: var(--glass-bg-strong); }
+        /* ---------- terminal page ---------- */
+        .app { background: var(--term-bg); }
 
-    .tabstrip {
-        border-top: none;
-        border-radius: 999px;
-        padding: 4px;
-        align-items: center;
-        overflow: hidden; /* tabs scroll inside the pill */
-    }
-    .new-tab {
-        width: 40px;
-        height: 40px;
-        margin: 0 4px 0 0;
-        border: none;
-        border-radius: 50%;
-        background: var(--glass-bg-strong);
-        color: var(--text);
-        flex-shrink: 0;
-    }
-    .tab-list { padding-top: 0; gap: 4px; align-items: center; border-radius: 999px; }
-    .tab {
-        height: 40px;
-        min-width: 140px;
-        border: none;
-        border-radius: 999px;
-        padding: 0 4px 0 14px;
-    }
-    .tab:hover { background: transparent; }
-    .tab.active {
-        background: var(--glass-bg-strong);
-        box-shadow: inset 0 1px 0 var(--glass-rim), 0 2px 10px rgba(0, 0, 0, 0.22);
-    }
-    .tab.active::before,
-    .tab.active::after { display: none; }
-    .tab-close { border-radius: 50%; }
+        /* Top: the title is plain text (navigation bars don't put glass behind titles);
+           actions are round glass buttons; the session tabs share one capsule. */
+        .topbar {
+            background: transparent;
+            border-bottom: none;
+            padding: 4px 12px 8px;
+            grid-template-rows: 44px 48px;
+            row-gap: 6px;
+            column-gap: 8px;
+        }
+        .brand { padding: 0 2px; }
+        .brand-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+        .brand-icon { border-radius: 50%; border: none; box-shadow: none; }
+        .topbar-actions { gap: 8px; padding: 0; }
+        .topbar-actions .icon-btn { width: 44px; height: 44px; border-radius: 50%; color: var(--text); }
+        .topbar-actions .icon-btn:active { transform: scale(0.92); }
 
-    /* ---------- bottom: status pill + glass keys ---------- */
-    .statusbar {
-        margin: 6px 10px 6px;
-        border-radius: 999px;
-        border-top: 0.5px solid var(--glass-border);
-        padding: 0 4px 0 16px;
-    }
-    .statusbar .status-sessions { border-radius: 50%; }
+        /* Capsule 48px tall, 4px inset: inner pieces are 40px capsules (24 - 4 = 20px radius) */
+        .tabstrip { border-top: 0.5px solid var(--glass-border); border-radius: 24px; padding: 4px; align-items: center; overflow: hidden; }
+        .new-tab {
+            width: 40px; height: 40px; margin: 0 4px 0 0; flex-shrink: 0;
+            border: none; border-radius: 20px; background: var(--glass-fill); color: var(--text);
+        }
+        .tab-list { padding-top: 0; gap: 4px; align-items: center; }
+        .tab { height: 40px; min-width: 140px; border: none; border-radius: 20px; padding: 0 4px 0 14px; }
+        .tab:hover { background: transparent; }
+        .tab.active { background: var(--glass-fill-pressed); }
+        .tab.active::before,
+        .tab.active::after { display: none; }
+        .tab-close { border-radius: 50%; }
 
-    .shortcut-bar {
-        background: transparent;
-        border-top: none;
-        padding: 2px 0 8px;
-    }
-    .shortcut-key {
-        border-radius: 14px;
-        color: var(--text);
-    }
-    .shortcut-key.icon-key { color: var(--text); }
-    .shortcut-key.pressed { background-color: var(--glass-bg-strong); transform: scale(0.94); }
-    .shortcut-key.active {
-        background-color: var(--accent);
-        color: var(--accent-fg);
-        border-color: transparent;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 6px 16px rgba(168, 85, 247, 0.35);
-    }
-    .shortcut-key.icon-key.recording { border-color: transparent; }
-    .shortcut-pinned { border-left: none; }
+        /* Bottom: the status line is information, not a control - plain text, no glass */
+        .statusbar { background: transparent; border-top: none; padding: 0 6px 0 18px; }
 
-    /* Focus mode and open keyboard: same pieces, tighter */
-    [data-expanded] .topbar { grid-template-rows: 48px; padding-bottom: 6px; }
-    [data-keyboard] .topbar { grid-template-rows: 40px 44px; row-gap: 6px; padding-top: 4px; padding-bottom: 6px; }
-    [data-keyboard] .brand,
-    [data-keyboard] .topbar-actions .icon-btn { height: 40px; }
-    [data-keyboard] .topbar-actions .icon-btn { width: 40px; }
-    [data-keyboard] .tab,
-    [data-keyboard] .new-tab { height: 36px; }
-    [data-keyboard] .new-tab { width: 36px; }
-    [data-keyboard] .statusbar { margin: 4px 10px; }
+        /* Shortcut keys in two capsules: text keys, then tool icons (never mixed) */
+        .shortcut-bar { background: transparent; border-top: none; padding: 2px 0 8px; }
+        .shortcut-row { gap: 8px; padding: 0 10px; }
+        .shortcut-scroll { border-radius: 24px; padding: 4px; gap: 2px; }
+        .shortcut-pinned { border-left: 0.5px solid var(--glass-border); border-radius: 24px; padding: 4px; gap: 2px; }
+        .shortcut-key {
+            height: 40px; min-width: 42px; border: none; border-radius: 20px;
+            background: transparent; color: var(--text); box-shadow: none;
+        }
+        .shortcut-key.icon-key { color: var(--text); min-width: 40px; }
+        .shortcut-key.pressed { background: var(--glass-fill-pressed); transform: scale(0.94); }
+        .shortcut-key.active { background: var(--accent); color: var(--accent-fg); border: none; box-shadow: none; }
+        .shortcut-key.icon-key.recording { border: none; }
+        .shortcut-key[data-key="more"][aria-expanded="true"] { background: var(--glass-fill-pressed); }
+
+        &[data-expanded] .topbar { grid-template-rows: 48px; padding-bottom: 6px; }
+        &[data-keyboard] .topbar { grid-template-rows: 38px 44px; row-gap: 4px; padding-top: 2px; padding-bottom: 6px; }
+        &[data-keyboard] .topbar-actions .icon-btn { width: 38px; height: 38px; }
+        &[data-keyboard] .brand-title { font-size: 17px; }
+        &[data-keyboard] .tabstrip { border-radius: 22px; }
+        &[data-keyboard] .tab,
+        &[data-keyboard] .new-tab { height: 36px; border-radius: 18px; }
+        &[data-keyboard] .new-tab { width: 36px; }
+
+        /* ---------- agent chat: the message box floats over the conversation ---------- */
+        .ag-head { border-bottom: 0.5px solid var(--glass-border); }
+        .ag-main { --ag-composer-h: 120px; }
+        .ag-log { padding-bottom: calc(var(--ag-composer-h) + 32px); }
+        .ag-pending { margin-bottom: calc(var(--ag-composer-h) + 16px); }
+        .ag-jump { bottom: calc(var(--ag-composer-h) + 22px); color: var(--text); }
+
+        /* Scroll edge effect: messages fade out as they reach the floating box */
+        .ag-main::after {
+            content: ''; position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; pointer-events: none;
+            height: calc(var(--ag-composer-h) + 36px);
+            background: linear-gradient(to bottom, transparent, var(--bg) 70%);
+        }
+
+        /* Card radius 32px, 10px inset: the inner capsules (44px tall) get 22px = 32 - 10 */
+        .ag-composer {
+            position: absolute; left: 10px; right: 10px; bottom: 8px; z-index: 4;
+            background-color: var(--glass-bg-dense);
+            border-radius: 32px; padding: 10px;
+        }
+        .ag-selectors { margin: 0; }
+        .ag-input-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
+            grid-template-areas: "text text text text" "attach settings stop send";
+            align-items: center;
+            gap: 8px;
+        }
+        .ag-input-row textarea {
+            grid-area: text; min-height: 40px; padding: 6px 8px 2px;
+            border: none; background: transparent; box-shadow: none; font-size: 17px;
+        }
+        .ag-input-row textarea:focus { box-shadow: none; }
+        .ag-input-row .icon-btn { width: 44px; height: 44px; border-radius: 22px; }
+        .ag-attach-btn { grid-area: attach; background: var(--glass-fill); color: var(--text); }
+        .ag-stop { grid-area: stop; background: var(--glass-fill); }
+        .ag-send { grid-area: send; }
+        .ag-settings-btn {
+            grid-area: settings; justify-self: start; min-width: 0; max-width: 100%;
+            display: inline-flex; align-items: center; gap: 6px; height: 44px; padding: 0 14px 0 18px;
+            border-radius: 22px; background: var(--glass-fill); color: var(--text); font-size: 16px;
+            transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease);
+        }
+        .ag-settings-btn:active { transform: scale(0.96); background: var(--glass-fill-pressed); }
+        .ag-settings-btn .icon { color: var(--text-3); flex-shrink: 0; }
+        .ag-settings-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ag-settings-label strong { font-weight: 500; }
+        .ag-settings-label span { color: var(--text-3); margin-left: 5px; }
+        .ag-suggest { left: 0; right: 0; border-radius: 22px; }
+    }
+}
+
+/* ---------- the agent settings sheet (created only on iPhones) ---------- */
+.ag-sheet-backdrop {
+    position: fixed; inset: 0; z-index: 900; display: flex; align-items: flex-end;
+    background: rgba(0, 0, 0, 0); transition: background-color 220ms var(--ease);
+}
+.ag-sheet-backdrop.open { background: rgba(0, 0, 0, 0.35); }
+/* Inset from the screen edges so the content peeks through, large radius */
+.ag-sheet {
+    width: calc(100% - 16px); margin: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
+    max-height: 78dvh; overflow-y: auto; overscroll-behavior: contain;
+    padding: 6px 16px 18px; border-radius: 34px;
+    background-color: var(--glass-bg-dense);
+    background-image: linear-gradient(180deg, var(--glass-sheen), transparent 40%);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border: 0.5px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+    transform: translateY(110%); transition: transform 280ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.ag-sheet-backdrop.open .ag-sheet { transform: none; }
+.ag-sheet-grabber { width: 36px; height: 5px; border-radius: 3px; background: var(--border-strong); margin: 4px auto 6px; }
+.ag-sheet-head { display: flex; align-items: center; justify-content: space-between; min-height: 44px; margin-bottom: 10px; }
+.ag-sheet-head h3 { font-size: 17px; font-weight: 600; padding-left: 4px; }
+.ag-sheet-close { border-radius: 50%; background: var(--glass-fill); color: var(--text); }
+/* The selectors as a grouped settings list: tall rows, rounded section, title-case names */
+.ag-sheet .ag-selectors {
+    display: flex; flex-direction: column; flex-wrap: nowrap; gap: 0; margin: 0;
+    border-radius: 22px; background: var(--glass-fill); overflow: hidden;
+}
+.ag-sheet .ag-select,
+.ag-sheet .ag-toggle {
+    display: flex; width: 100%; max-width: none; height: 56px; gap: 12px; padding: 0 10px 0 16px;
+    border: none; border-radius: 0; background: transparent; color: var(--text); font-size: 16px;
+}
+.ag-sheet .ag-selectors > * + * { border-top: 0.5px solid var(--glass-border); }
+.ag-sheet .ag-select > span { color: var(--text-2); }
+.ag-sheet .ag-select-name { display: block; flex: 1; min-width: 0; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag-sheet .ag-select .ui-select { max-width: 62%; height: 40px; font-size: 16px; color: var(--text-2); }
+.ag-sheet .ag-select:hover:has(.ui-select:not(:disabled)),
+.ag-sheet .ag-select:has(.ui-select.open) { color: var(--text); box-shadow: none; }
+.ag-sheet .ag-select select { max-width: 62%; font-size: 16px; }
+.ag-sheet .ag-toggle input { order: 2; margin-left: auto; width: 22px; height: 22px; accent-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+    .ag-sheet, .ag-sheet-backdrop { transition: none; }
 }

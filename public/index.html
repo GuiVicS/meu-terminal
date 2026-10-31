@@ -26,6 +26,9 @@
                 }
             } catch (e) { /* storage unavailable: keep dark */ }
             document.documentElement.setAttribute('data-theme', theme);
+            // iPhone-only layout (Liquid Glass look, floating agent message box): styles.css,
+            // agent/composer.js. Set before first paint so nothing jumps.
+            if (/iPhone|iPod/.test(navigator.userAgent)) document.documentElement.setAttribute('data-iphone', '');
         })();
     </script>
     <link rel="stylesheet" href="styles.css">
