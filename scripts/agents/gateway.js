@@ -152,6 +152,7 @@ class AgentGateway extends EventEmitter {
             cwd: row.cwd,
             title: row.title,
             route: row.route || null,
+            acpSessionId: row.acp_session_id || null, // the agent's own conversation id (history list)
             status: row.status,
             running: this.runtimes.has(row.id),
             mode: row.mode,

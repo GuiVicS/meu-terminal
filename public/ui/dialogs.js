@@ -221,11 +221,10 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
             <h3 class="section-label">Interface</h3>
             <label class="setting" data-iphone-visual>
                 <span class="setting-text">Visual do celular
-                    <span class="setting-help">Vidro flutuante, como no iPhone. “Em qualquer celular” leva o
-                    mesmo visual para outros celulares; “Clássico” mantém a interface normal.</span></span>
+                    <span class="setting-help">Vidro flutuante, como no iPhone, em qualquer celular (iPhone e
+                    Android). “Clássico” mantém a interface normal.</span></span>
                 <select data-setting="iphoneVisual">
-                    <option value="glass">Vidro (iPhone)</option>
-                    <option value="glass-any">Vidro em qualquer celular</option>
+                    <option value="glass">Vidro</option>
                     <option value="classic">Clássico</option>
                 </select>
             </label>

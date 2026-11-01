@@ -14,8 +14,9 @@
             try {
                 visual = JSON.parse(localStorage.getItem('meuterminal-settings') || '{}').iphoneVisual || 'glass';
             } catch (e) { /* storage unavailable: keep the iPhone default */ }
+            // Vidro em qualquer celular (iPhone e Android); 'glass-any' é o valor antigo, mesmo efeito
             var isPhone = /iPhone|iPod/.test(navigator.userAgent)
-                || (visual === 'glass-any' && window.matchMedia('(pointer: coarse)').matches
+                || (window.matchMedia('(pointer: coarse)').matches
                     && Math.min(window.screen.width || 0, window.screen.height || 0) < 720);
             if (visual !== 'classic' && isPhone) document.documentElement.setAttribute('data-iphone', '');
         })();

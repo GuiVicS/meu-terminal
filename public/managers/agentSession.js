@@ -297,7 +297,6 @@ export default class AgentSession {
     menuActions(anchor) {
         const vibe = !this.el.vibeBtn.hidden;
         return [
-            { label: 'Conversas anteriores', icon: 'history', run: () => this.openHistory(anchor) },
             { label: 'Abrir terminal na pasta', icon: 'terminal', run: () => this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id }) },
             { label: 'Abrir arquivos da pasta', icon: 'folder',
                 run: () => this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id }) },
@@ -662,25 +661,48 @@ export default class AgentSession {
         }
     }
 
-    /** "Conversas": new conversation, or a past one of this agent in this folder (incl. terminal ones). */
+    /** Whether this agent can list its past conversations (ACP session/list). */
+    get hasHistory() {
+        return !!(this.session && this.session.capabilities && this.session.capabilities.history);
+    }
+
+    /**
+     * Past conversations of this agent in this folder, newest first (incl. ones started in the
+     * terminal). The agent is started just to answer, so the result is kept for a minute.
+     * @returns {Promise<Array<{sessionId: string, title: string|null, updatedAt: string|null, cwd: string}>>}
+     */
+    async fetchHistory({ fresh = false } = {}) {
+        if (!this.hasHistory) return [];
+        const cached = this.historyCache;
+        if (!fresh && cached && Date.now() - cached.at < 60000) return cached.sessions;
+        const { sessions } = await api('GET', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/history`);
+        this.historyCache = { at: Date.now(), sessions };
+        return sessions;
+    }
+
+    /** New conversation ({}) or resumes a past one ({ resumeAcpSessionId, title }) in a new tab. */
+    startConversation(body = {}) {
+        if (!this.session) return Promise.resolve();
+        // Loading a long conversation from the terminal takes a few seconds
+        if (body.resumeAcpSessionId) toast(`Abrindo "${body.title || 'conversa'}"…`);
+        return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
+            .then(data => this.hooks.showTab?.(data.tab.id))
+            .catch(e => toast(e.message, { tone: 'error' }));
+    }
+
+    /** "Conversas" (desktop header button, /resume): new conversation, or a past one, as a menu. */
     async openHistory(anchor, { onlyPast = false, query = '' } = {}) {
         if (!this.session) return;
-        const start = (body) => {
-            // Loading a long conversation from the terminal takes a few seconds
-            if (body.resumeAcpSessionId) toast(`Abrindo "${body.title || 'conversa'}"…`);
-            return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
-                .then(data => this.hooks.showTab?.(data.tab.id))
-                .catch(e => toast(e.message, { tone: 'error' }));
-        };
+        const start = body => this.startConversation(body);
         const items = [{ label: 'Nova conversa', icon: 'plus', run: () => start({}) }];
-        if (onlyPast && !(this.session.capabilities && this.session.capabilities.history)) {
+        if (onlyPast && !this.hasHistory) {
             this.conversation.note('Este agente não lista conversas anteriores.', 'info');
             return;
         }
-        if (this.session.capabilities && this.session.capabilities.history) {
+        if (this.hasHistory) {
             showMenu([...items, 'separator', { label: 'Carregando conversas…', icon: 'loader', run: () => {} }], { anchor, label: 'Conversas' });
             try {
-                const { sessions } = await api('GET', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/history`);
+                const sessions = await this.fetchHistory();
                 const fmt = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
                 const q = query.toLowerCase();
                 const found = q ? sessions.filter(h => (h.title || '').toLowerCase().includes(q) || h.sessionId === query) : sessions;
