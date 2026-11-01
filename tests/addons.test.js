@@ -154,3 +154,15 @@ test('OmniRoute: conexão do Codex só oferece os modelos que a conta ChatGPT li
     assert.deepEqual((await b.models('c2')).map(m => m.id), ['openai/gpt-6-astra']); // outros provedores: sem filtro
     fs.rmSync(home, { recursive: true, force: true });
 });
+
+test('troca automática: lista de prioridade validada; o modelo antigo vira o primeiro item', () => {
+    const fs = require('fs'); const os = require('os'); const path = require('path');
+    const { Addons, ADDONS: LIST } = require('../scripts/addons');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mt-chain-'));
+    const a = new Addons({ stateFile: path.join(dir, 'addons.json'), home: dir, run: async () => ({ code: 0, stdout: '', stderr: '' }), runScript: async () => ({ code: 0 }), addons: LIST, env: { PATH: '/bin' } });
+    a.setPrefs({ fallback: { model: 'codex/gpt-6-luna' } });
+    assert.deepEqual(a.prefs().fallback.chain, ['modelo:codex/gpt-6-luna']);
+    a.setPrefs({ fallback: { chain: ['conta:', 'conta:trabalho', 'modelo:codex/gpt-6-luna', 'conta:../x', 'rm -rf', 'conta:trabalho'] } });
+    assert.deepEqual(a.prefs().fallback.chain, ['conta:', 'conta:trabalho', 'modelo:codex/gpt-6-luna']);
+    fs.rmSync(dir, { recursive: true, force: true });
+});

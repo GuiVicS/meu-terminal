@@ -9,6 +9,7 @@ import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
 import { api } from './remote.js';
 import { PANELS, esc } from './addonPanels.js';
+import { askText, askConfirm } from '../ui/prompt.js';
 
 // Complementos com painel completo (o do próprio serviço, desenhado pelo navegador do servidor)
 const FULL_PANEL = new Set(['omniroute', 'claude-mem', 'headroom']);
@@ -102,38 +103,78 @@ export function mountAddonsSection(section) {
             <h3 class="section-label rm-gap">Claude Code</h3>
             <label class="setting setting-stack">
                 <span class="setting-text">Rota padrão
-                    <span class="setting-help">Vale para terminais novos e para conversas novas do Modo UI. Dentro de uma conversa, troque em ⋮ → Rota.</span></span>
+                    <span class="setting-help">Vale para terminais novos e para conversas novas do Modo UI. Dentro de uma conversa, troque no botão da rota, no topo.</span></span>
                 <select data-terminal-route>
                     ${state.routes.map(r => `<option value="${esc(r.id)}" ${r.id === state.terminalRoute ? 'selected' : ''} ${routeOk(r) ? '' : 'disabled'}>${esc(r.label)}${routeOk(r) ? '' : ' (ligue o serviço)'}</option>`).join('')}
                 </select>
             </label>
             <label class="setting">
                 <span class="setting-text">Troca automática quando o limite do Claude acabar
-                    <span class="setting-help">No Modo UI, a conversa continua pelo OmniRoute com o modelo escolhido e a mensagem é reenviada. A sua assinatura do Claude não passa pelo OmniRoute.</span></span>
+                    <span class="setting-help">No Modo UI, a conversa continua pela próxima opção da lista abaixo (outra conta do Claude Code ou um modelo do OmniRoute), na mesma conversa, e a mensagem é reenviada.</span></span>
                 <input type="checkbox" class="switch" data-fallback ${state.fallback?.enabled ? 'checked' : ''}>
             </label>
-            ${state.fallback?.enabled ? `
-            <label class="setting setting-stack">
-                <span class="setting-text">Continuar com
-                    <span class="setting-help">${omniOn ? 'Modelos dos provedores conectados no OmniRoute.' : 'Ligue o OmniRoute e conecte um provedor para escolher.'}</span></span>
-                <select data-fallback-model ${omniOn ? '' : 'disabled'}>
-                    <option value="">${state.fallback.model ? esc(state.fallback.model) : 'Escolha um modelo…'}</option>
-                </select>
-            </label>` : ''}            </label>`;
+            <div data-claude-box><p class="setting-help">Carregando contas…</p></div>`;
     }
 
-    /** Preenche o seletor do modelo da troca automática com os modelos do OmniRoute. */
-    async function loadFallbackModels() {
-        const select = section.querySelector('[data-fallback-model]');
-        if (!select || select.disabled) return;
-        try {
-            const models = await api('POST', '/api/addons/omniroute/call', { action: 'allModels' });
-            if (!section.contains(select)) return;
-            const cur = state.fallback?.model || '';
-            select.innerHTML = `<option value="">${models.length ? 'Escolha um modelo…' : 'Nenhum modelo: conecte um provedor no OmniRoute'}</option>`
-                + models.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.provider)} · ${esc(m.name)}</option>`).join('');
-            if (cur && !models.some(m => m.id === cur)) select.insertAdjacentHTML('beforeend', `<option value="${esc(cur)}" selected>${esc(cur)}</option>`);
-        } catch { /* o seletor fica com o modelo atual */ }
+    const CHAIN_LABEL = (item, accounts, models) => {
+        if (item.startsWith('conta:')) {
+            const a = accounts.find(x => x.id === item.slice(6));
+            return { icon: 'user', text: `Conta ${a ? (a.email || a.name) : `${item.slice(6) || 'principal'} (removida)`}` };
+        }
+        const m = models.find(x => x.id === item.slice(7));
+        return { icon: 'bot', text: m ? `${m.provider} · ${m.name}` : item.slice(7) };
+    };
+
+    /** Contas do Claude Code + ordem da troca automática (carregados depois da tela). */
+    async function loadClaudeBox() {
+        const box = section.querySelector('[data-claude-box]');
+        if (!box) return;
+        const omniOn = !!state.addons.find(a => a.id === 'omniroute')?.enabled;
+        const [acc, models] = await Promise.all([
+            api('GET', '/api/claude-accounts').then(r => r.accounts).catch(() => []),
+            omniOn ? api('POST', '/api/addons/omniroute/call', { action: 'allModels' }).catch(() => []) : Promise.resolve([]),
+        ]);
+        if (!section.contains(box)) return;
+        const chain = state.fallback?.chain || [];
+        const statusOfAcc = a => a.limitedUntil ? ['wait', 'no limite agora'] : a.loggedIn ? ['on', a.plan ? `logada · ${a.plan}` : 'logada'] : ['off', 'sem login'];
+        const accRows = acc.map(a => {
+            const [cls, label] = statusOfAcc(a);
+            return `<li class="cc-row">
+                <span class="cc-ic">${icon('user', 16)}</span>
+                <span class="cc-txt"><b>${esc(a.email || a.name)}</b><small><span class="ad-dot ${cls}"></span> ${esc(a.id ? a.name : 'Principal')} · ${esc(label)}</small></span>
+                ${a.loggedIn ? '' : `<button type="button" class="btn btn-sm" data-acc-login="${esc(a.id)}">Entrar</button>`}
+                ${a.id ? `<button type="button" class="icon-btn" data-acc-remove="${esc(a.id)}" aria-label="Remover conta">${icon('trash', 16)}</button>` : ''}
+            </li>`;
+        }).join('');
+        const chainRows = chain.map((item, i) => {
+            const l = CHAIN_LABEL(item, acc, models);
+            return `<li class="cc-row">
+                <span class="cc-n">${i + 1}</span>
+                <span class="cc-txt"><b>${esc(l.text)}</b></span>
+                <button type="button" class="icon-btn" data-chain-up="${i}" aria-label="Subir" ${i ? '' : 'disabled'}>${icon('chevronUp', 16)}</button>
+                <button type="button" class="icon-btn" data-chain-down="${i}" aria-label="Descer" ${i < chain.length - 1 ? '' : 'disabled'}>${icon('chevronDown', 16)}</button>
+                <button type="button" class="icon-btn" data-chain-del="${i}" aria-label="Tirar da lista">${icon('x', 16)}</button>
+            </li>`;
+        }).join('');
+        const options = [
+            ...acc.filter(a => !chain.includes(`conta:${a.id}`)).map(a => `<option value="conta:${esc(a.id)}">Conta: ${esc(a.email || a.name)}</option>`),
+            ...models.filter(m => !chain.includes(`modelo:${m.id}`)).map(m => `<option value="modelo:${esc(m.id)}">OmniRoute: ${esc(m.provider)} · ${esc(m.name)}</option>`),
+        ];
+        box.innerHTML = `
+            <p class="setting-text cc-title">Contas do Claude Code neste servidor</p>
+            <ul class="cc-list">${accRows}</ul>
+            <button type="button" class="btn btn-sm cc-add" data-acc-add>${icon('plus', 15)} Adicionar conta</button>
+            <p class="setting-help">O login é o do próprio Claude Code, num terminal que abre aqui. As conversas e configurações são as mesmas em todas as contas; só o login muda. Usar várias contas para driblar limites pode contrariar os termos da Anthropic: a decisão é sua.</p>
+            ${state.fallback?.enabled ? `
+            <p class="setting-text cc-title">Ordem da troca automática</p>
+            ${chain.length ? `<ol class="cc-list">${chainRows}</ol>` : '<p class="setting-help">Lista vazia: adicione contas ou modelos abaixo. Vale a primeira opção disponível, de cima para baixo.</p>'}
+            ${options.length ? `<label class="setting setting-stack"><span class="setting-text">Adicionar à lista</span>
+                <select data-chain-add><option value="">Escolha…</option>${options.join('')}</select></label>`
+                : `<p class="setting-help">${omniOn ? '' : 'Ligue o OmniRoute para incluir modelos de outros provedores.'}</p>`}` : ''}`;
+    }
+
+    function saveChain(chain, msg) {
+        save({ fallback: { chain } }, msg);
     }
 
     function renderApp() {
@@ -218,7 +259,7 @@ export function mountAddonsSection(section) {
             return;
         }
         if (open) renderApp();
-        else { renderGrid(); loadFallbackModels(); }
+        else { renderGrid(); loadClaudeBox(); }
     }
 
     section.addEventListener('change', e => {
@@ -232,11 +273,49 @@ export function mountAddonsSection(section) {
         if (route) { save({ terminalRoute: route.value }, 'Rota padrão salva. Vale para terminais e conversas novos.'); return; }
         const fb = e.target.closest('[data-fallback]');
         if (fb) { save({ fallback: { enabled: fb.checked } }, fb.checked ? 'Troca automática ligada.' : 'Troca automática desligada.'); return; }
-        const fbModel = e.target.closest('[data-fallback-model]');
-        if (fbModel && fbModel.value) save({ fallback: { model: fbModel.value } }, `Troca automática vai usar ${fbModel.value}.`);
+        const add = e.target.closest('[data-chain-add]');
+        if (add && add.value) saveChain([...(state.fallback?.chain || []), add.value], 'Adicionado à troca automática.');
     });
 
-    section.addEventListener('click', e => {
+    section.addEventListener('click', async e => {
+        const chain = [...(state.fallback?.chain || [])];
+        const up = e.target.closest('[data-chain-up]');
+        const down = e.target.closest('[data-chain-down]');
+        const del = e.target.closest('[data-chain-del]');
+        if (up || down) {
+            const i = Number((up || down).dataset[up ? 'chainUp' : 'chainDown']);
+            const j = up ? i - 1 : i + 1;
+            [chain[i], chain[j]] = [chain[j], chain[i]];
+            return saveChain(chain, 'Ordem salva.');
+        }
+        if (del) { chain.splice(Number(del.dataset.chainDel), 1); return saveChain(chain, 'Tirado da troca automática.'); }
+        const login = e.target.closest('[data-acc-add], [data-acc-login]');
+        if (login) {
+            let name = '';
+            if (login.matches('[data-acc-add]')) {
+                name = await askText({ title: 'Nova conta do Claude Code', label: 'Nome da conta', placeholder: 'ex.: trabalho', confirm: 'Continuar' });
+                if (name == null) return;
+            }
+            try {
+                const r = await api('POST', '/api/claude-accounts', login.dataset.accLogin ? { id: login.dataset.accLogin } : { name });
+                toast(`Abri a aba "${r.tab.name}": faça o login do Claude Code nela e volte aqui.`, { duration: 9000 });
+            } catch (err) {
+                toast(err.message, { tone: 'error' });
+            }
+            return;
+        }
+        const rm = e.target.closest('[data-acc-remove]');
+        if (rm) {
+            if (!await askConfirm({ title: 'Remover conta', message: `Remover a conta "${rm.dataset.accRemove}" deste servidor? Sai o login dela; as conversas ficam.`, confirm: 'Remover', danger: true })) return;
+            try {
+                await api('DELETE', `/api/claude-accounts/${encodeURIComponent(rm.dataset.accRemove)}`);
+                toast('Conta removida.');
+                await refresh();
+            } catch (err) {
+                toast(err.message, { tone: 'error' });
+            }
+            return;
+        }
         const opener = e.target.closest('[data-open]');
         if (opener) {
             open = opener.dataset.open;

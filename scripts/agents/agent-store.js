@@ -8,7 +8,7 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 const SESSION_COLUMNS = ['title', 'status', 'mode', 'model', 'acp_session_id', 'capabilities',
-    'updated_at', 'closed_at', 'last_seq', 'route', 'route_model'];
+    'updated_at', 'closed_at', 'last_seq', 'route', 'route_model', 'account'];
 
 function parseJson(text, fallback) {
     if (text == null) return fallback;
@@ -63,6 +63,8 @@ class AgentStore {
         if (!columns.has('route')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN route TEXT');
         // route_model: modelo fixado na rota (troca automática ao acabar o limite do Claude)
         if (!columns.has('route_model')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN route_model TEXT');
+        // account: conta extra do Claude Code (scripts/claude-accounts.js); null = a principal
+        if (!columns.has('account')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN account TEXT');
     }
 
     // ---------- sessions ----------

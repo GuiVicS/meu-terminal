@@ -44,6 +44,7 @@ const { execFile } = require('child_process');
 const { Addons, SERVICES } = require('./scripts/addons');
 const { deleteConversation, canDelete: canDeleteConversation } = require('./scripts/agents/history-files');
 const { detectAgents, searchDirs } = require('./scripts/agents/detect');
+const { ClaudeAccounts } = require('./scripts/claude-accounts');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
@@ -800,9 +801,12 @@ const addons = new Addons({
 const addonServices = new ServiceManager({ defs: SERVICES, home: HOME_DIR, env: childEnv(), secrets: id => addons.serviceSecrets(id), log: (...a) => console.log(...a) });
 
 /** Env da rota para um agente; liga o serviço se precisar. Só o Claude Code fala o protocolo da Anthropic. */
-async function agentRouteEnv({ agent, route, routeModel = null }) {
+async function agentRouteEnv({ agent, route, routeModel = null, account = null }) {
     route = normalizeRoute(route);
-    if (agent !== 'claude' || route === DEFAULT_ROUTE) return {};
+    if (agent !== 'claude') return {};
+    // Conta extra do Claude Code (a rota do OmniRoute não usa a assinatura, então não precisa)
+    const acct = account && route !== 'omniroute' ? claudeAccounts.env(account) : {};
+    if (route === DEFAULT_ROUTE) return acct;
     const prefs = addons.prefs();
     const service = ROUTES[route].service;
     if (!prefs.services[service]?.enabled) {
@@ -811,7 +815,7 @@ async function agentRouteEnv({ agent, route, routeModel = null }) {
     if (service === 'omniroute') await ensureOmniKey();
     const env = routeEnv(route, addons.prefs(), SERVICES, { model: routeModel }); // valida a chave antes de ligar o serviço
     await addonServices.ensure(service);
-    return env;
+    return { ...env, ...acct };
 }
 
 /** Rota padrão do terminal, valendo só se o serviço dela estiver ligado. */
@@ -849,22 +853,50 @@ async function extraAgentModels({ agent }) {
     }));
 }
 
+/** Contas do Claude Code que bateram o limite (chave '' = principal) -> até quando evitar. */
+const limitedAccounts = new Map();
+const LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
+
+/**
+ * Troca automática ao acabar o limite: a conversa vai para o primeiro item da lista de prioridade
+ * (Configurações → Complementos) que não seja o atual e esteja disponível: outra conta do Claude
+ * Code ou um modelo do OmniRoute. Se esse também estiver no limite, o próximo aviso move de novo.
+ */
 async function usageLimitFallback({ sessionId, row, text, images }) {
     const prefs = addons.prefs();
     if (!prefs.fallback.enabled || row.agent !== 'claude' || normalizeRoute(row.route) === 'omniroute') return;
-    if (!prefs.services.omniroute?.enabled) {
-        agentGateway.emitEvent(sessionId, 'notice', { text: 'O limite do Claude acabou. A troca automática está ligada, mas o OmniRoute está desligado (Configurações → Complementos).' });
+    const now = Date.now();
+    const current = row.account || '';
+    limitedAccounts.set(current, now + LIMIT_COOLDOWN_MS);
+    const known = new Set(claudeAccounts.ids());
+    const skipped = [];
+    let target = null;
+    for (const item of prefs.fallback.chain) {
+        if (item.startsWith('conta:')) {
+            const id = item.slice(6);
+            if (id === current || (limitedAccounts.get(id) || 0) > now) continue;
+            if (id && !known.has(id)) { skipped.push(`conta ${id} (não existe mais)`); continue; }
+            if (!(await claudeAccounts.status(id || null)).loggedIn) { skipped.push(`conta ${id || 'principal'} (sem login)`); continue; }
+            target = { account: id || null, label: `pela conta ${id || 'principal'}` };
+        } else {
+            if (!prefs.services.omniroute?.enabled) { skipped.push('OmniRoute (desligado)'); continue; }
+            const model = item.slice(7);
+            target = { model, label: `pelo OmniRoute com ${model}` };
+        }
+        break;
+    }
+    if (!target) {
+        const why = prefs.fallback.chain.length ? 'nenhuma opção da lista de troca está disponível' : 'a lista de troca automática está vazia';
+        agentGateway.emitEvent(sessionId, 'notice', { text: `O limite do Claude acabou e ${why}${skipped.length ? ` (${skipped.join(', ')})` : ''}. Configure em Configurações → Complementos.` });
         return;
     }
-    const model = prefs.fallback.model || prefs.services.omniroute?.model || null;
-    if (!model) {
-        agentGateway.emitEvent(sessionId, 'notice', { text: 'O limite do Claude acabou. Escolha o modelo da troca automática em Configurações → Complementos.' });
-        return;
-    }
-    agentGateway.emitEvent(sessionId, 'notice', { text: `O limite do Claude acabou: continuando pelo OmniRoute com ${model}…` });
-    await agentGateway.setRoute(sessionId, 'omniroute', model);
+    agentGateway.emitEvent(sessionId, 'notice', { text: `O limite do Claude acabou: continuando ${target.label}…` });
+    if (target.model) await agentGateway.setRoute(sessionId, 'omniroute', target.model);
+    else await agentGateway.setAccount(sessionId, target.account);
     if (text && text.trim() || (images && images.length)) await agentGateway.prompt(sessionId, text, { images });
 }
+
+const claudeAccounts = new ClaudeAccounts({ home: HOME_DIR, env: childEnv({ HOME: HOME_DIR }) });
 
 const agentGateway = new AgentGateway({
     store: new AgentStore(DB_PATH),
@@ -1189,6 +1221,46 @@ app.put(BASE_PATH + '/api/agent-pins', (req, res) => {
     sessionStore.setMeta('agent-pins', JSON.stringify(clean));
     res.json({ pins: clean });
 });
+
+// Contas do Claude Code (troca automática): a principal (~/.claude) + as extras
+app.get(BASE_PATH + '/api/claude-accounts', async (req, res) => {
+    const ids = ['', ...claudeAccounts.ids()];
+    const list = await Promise.all(ids.map(async id => ({
+        id, name: id || 'Principal', ...(await claudeAccounts.status(id || null)),
+        limitedUntil: (limitedAccounts.get(id) || 0) > Date.now() ? limitedAccounts.get(id) : null,
+    })));
+    res.json({ accounts: list });
+});
+
+// Nova conta: cria a pasta e abre um terminal com o login do próprio Claude Code
+app.post(BASE_PATH + '/api/claude-accounts', (req, res) => {
+    try {
+        const id = req.body?.id && claudeAccounts.ids().includes(req.body.id) ? req.body.id : claudeAccounts.create(req.body?.name);
+        const tab = sessions.create({ kind: 'terminal', name: `Login Claude: ${id}`, cwd: HOME_DIR });
+        sessions.runCommand(tab.id, claudeAccounts.loginCommand(id));
+        res.status(201).json({ id, tab });
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
+});
+
+app.delete(BASE_PATH + '/api/claude-accounts/:id', (req, res) => {
+    try {
+        if (!claudeAccounts.remove(req.params.id)) return res.status(404).json({ error: 'Conta não encontrada.' });
+        const prefs = addons.prefs();
+        addons.setPrefs({ fallback: { chain: prefs.fallback.chain.filter(x => x !== `conta:${req.params.id}`) } });
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
+});
+
+// Trocar a conta do Claude Code de uma conversa (null/'' = principal)
+app.post(BASE_PATH + '/api/agent-sessions/:id/account', agentRoute(async (req, res) => {
+    const id = String(req.body?.account || '');
+    if (id && !claudeAccounts.ids().includes(id)) return res.status(400).json({ error: 'Conta não encontrada.' });
+    res.json(await agentGateway.setAccount(req.params.id, id || null));
+}));
 
 app.get(BASE_PATH + '/api/agents', async (req, res) => {
     await refreshAgents();

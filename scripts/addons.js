@@ -280,7 +280,13 @@ class Addons {
             services: st.services || {},
             terminalRoute: st.terminalRoute || 'direto',
             // Troca automática: quando o limite do Claude acaba numa conversa do Modo UI
-            fallback: { enabled: !!st.fallback?.enabled, model: st.fallback?.model || null },
+            fallback: {
+                enabled: !!st.fallback?.enabled,
+                model: st.fallback?.model || null,
+                // Ordem da troca automática: "conta:<id>" ("conta:" = principal) e "modelo:<id OmniRoute>"
+                chain: Array.isArray(st.fallback?.chain) ? st.fallback.chain
+                    : (st.fallback?.model ? [`modelo:${st.fallback.model}`] : []),
+            },
         };
     }
 
@@ -306,6 +312,10 @@ class Addons {
                 const cur = st.fallback || {};
                 if (typeof patch.fallback.enabled === 'boolean') cur.enabled = patch.fallback.enabled;
                 if (typeof patch.fallback.model === 'string') cur.model = patch.fallback.model.trim().slice(0, 200) || undefined;
+                if (Array.isArray(patch.fallback.chain)) {
+                    cur.chain = [...new Set(patch.fallback.chain
+                        .filter(x => typeof x === 'string' && /^(conta:[a-z0-9-]{0,31}|modelo:[\w./:@-]{1,200})$/.test(x)))].slice(0, 12);
+                }
                 st.fallback = cur;
             }
         });

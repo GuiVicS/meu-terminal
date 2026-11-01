@@ -353,3 +353,19 @@ test('modelos: os de fora (OmniRoute) entram no seletor e escolher um troca a ro
     assert.equal(findModel().currentValue, 'omniroute:codex/gpt-5');
     await gateway.shutdown();
 });
+
+test('conta: setAccount grava a conta, passa para o ambiente e retoma a mesma conversa', async () => {
+    const calls = [];
+    const { store, gateway } = setupRoutes(async ({ route, account }) => { calls.push([route, account]); return account ? { FAKE_ACCOUNT: account } : {}; });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const acp = gateway.get(s.id).acpSessionId;
+    await gateway.setAccount(s.id, 'trabalho');
+    assert.equal(store.getSession(s.id).account, 'trabalho');
+    assert.equal(gateway.get(s.id).account, 'trabalho');
+    assert.equal(gateway.get(s.id).acpSessionId, acp);
+    assert.deepEqual(calls.at(-1), [null, 'trabalho']);
+    // trocar a rota mantém a conta
+    await gateway.setRoute(s.id, 'economia');
+    assert.deepEqual(calls.at(-1), ['economia', 'trabalho']);
+    await gateway.shutdown();
+});

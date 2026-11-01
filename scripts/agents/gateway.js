@@ -190,6 +190,7 @@ class AgentGateway extends EventEmitter {
             cwd: row.cwd,
             title: row.title,
             route: row.route || null,
+            account: row.account || null,
             acpSessionId: row.acp_session_id || null, // the agent's own conversation id (history list)
             status: row.status,
             running: this.runtimes.has(row.id),
@@ -260,10 +261,10 @@ class AgentGateway extends EventEmitter {
      * started in the terminal. Starts a short-lived agent process just to ask.
      */
     /** Environment for an agent process: the gateway's own plus the session's route. */
-    async envFor({ agent, route, routeModel, route_model: rowModel }) {
+    async envFor({ agent, route, routeModel, route_model: rowModel, account = null }) {
         if (!this.routeEnv) return this.env;
         try {
-            return { ...this.env, ...(await this.routeEnv({ agent, route, routeModel: routeModel || rowModel || null })) };
+            return { ...this.env, ...(await this.routeEnv({ agent, route, routeModel: routeModel || rowModel || null, account })) };
         } catch (e) {
             throw new GatewayError(e.message, e.status || 400);
         }
@@ -437,16 +438,31 @@ class AgentGateway extends EventEmitter {
      */
     async setRoute(sessionId, route, routeModel = null) {
         const row = this.requireSession(sessionId);
+        return this.switchTarget(sessionId, { route, routeModel, account: row.account || null });
+    }
+
+    /** Troca a conta do Claude Code da conversa (null = principal), pela rota direta. */
+    async setAccount(sessionId, account) {
+        return this.switchTarget(sessionId, { route: null, routeModel: null, account: account || null });
+    }
+
+    /**
+     * Para o agente e o retoma na mesma conversa com outra rota/modelo/conta (o ambiente é
+     * validado antes de parar qualquer coisa).
+     */
+    async switchTarget(sessionId, { route, routeModel = null, account = null }) {
+        const row = this.requireSession(sessionId);
         if (row.status === 'closed') throw new GatewayError('Sessão encerrada.', 409);
         const runtime = this.runtimes.get(sessionId);
         if (runtime && runtime.prompting) throw new GatewayError('Espere o agente terminar a resposta para trocar a rota.', 409);
         const next = route && route !== 'direto' ? route : null;
         const model = next ? routeModel || null : null;
-        await this.envFor({ agent: row.agent, route: next, routeModel: model }); // falha aqui, sem parar nada
-        this.store.updateSession(sessionId, { route: next, route_model: model });
+        await this.envFor({ agent: row.agent, route: next, routeModel: model, account }); // falha aqui, sem parar nada
+        this.store.updateSession(sessionId, { route: next, route_model: model, account });
         await this.stopAgent(sessionId);
         await this.spawnAgent(sessionId, { resume: true });
-        this.emitEvent(sessionId, 'notice', { text: `Rota trocada: ${next ? `${next}${model ? ` (${model})` : ''}` : 'direto'}.` });
+        const where = next ? `${next}${model ? ` (${model})` : ''}` : 'direto';
+        this.emitEvent(sessionId, 'notice', { text: account !== (row.account || null) && !next ? `Conta trocada: ${account || 'principal'}.` : `Rota trocada: ${where}.` });
         return this.get(sessionId);
     }
 

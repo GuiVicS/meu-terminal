@@ -676,24 +676,40 @@ export default class AgentSession {
     /** Rota da conversa do Claude Code: troca e retoma a mesma conversa (POST .../route). */
     async openRouteMenu(anchor) {
         let routes = [];
+        let accounts = [];
         try {
-            routes = (await api('GET', 'agents')).claudeRoutes || [];
+            [routes, accounts] = await Promise.all([
+                api('GET', 'agents').then(r => r.claudeRoutes || []),
+                api('GET', 'claude-accounts').then(r => r.accounts || []).catch(() => []),
+            ]);
         } catch (e) {
             return toast(e.message, { tone: 'error' });
         }
         const current = this.session?.route || 'direto';
-        showMenu(routes.map(r => ({
+        const switchTo = (path, body, label) => async () => {
+            toast(`Trocando para ${label}…`);
+            try {
+                this.session = await api('POST', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/${path}`, body);
+                this.renderHead();
+            } catch (e) {
+                toast(e.message, { tone: 'error', duration: 6000 });
+            }
+        };
+        const items = routes.map(r => ({
             label: r.label, icon: r.id === current ? 'check' : 'swap', disabled: r.id === current,
-            run: async () => {
-                toast(`Trocando para ${r.label}…`);
-                try {
-                    this.session = await api('POST', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/route`, { route: r.id });
-                    this.renderHead();
-                } catch (e) {
-                    toast(e.message, { tone: 'error', duration: 6000 });
-                }
-            },
-        })), { anchor, label: 'Rota do Claude Code' });
+            run: switchTo('route', { route: r.id }, r.label),
+        }));
+        // Várias contas do Claude Code: trocar a conta da conversa (pela rota direta)
+        if (accounts.length > 1) {
+            const cur = this.session?.account || '';
+            items.push(...accounts.map(a => ({
+                label: `Conta: ${a.email || a.name}`, icon: a.id === cur && current === 'direto' ? 'check' : 'user',
+                hint: a.loggedIn ? (a.limitedUntil ? 'no limite' : '') : 'sem login',
+                disabled: !a.loggedIn || (a.id === cur && current === 'direto'),
+                run: switchTo('account', { account: a.id }, `a conta ${a.email || a.name}`),
+            })));
+        }
+        showMenu(items, { anchor, label: 'Rota e conta do Claude Code' });
     }
 
     /** Whether this agent can list its past conversations (ACP session/list). */
