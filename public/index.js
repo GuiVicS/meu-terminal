@@ -295,41 +295,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ---------- dialogs ----------
     settingsDialog = createSettingsDialog(settings, () => workspace?.active, commands);
-    /** Configurações: on iPhone, opens a sheet inside the app; on desktop, goes to /admin. */
+    /** Configurações: the /admin page (the iPhone opens a sheet instead, inside the app). */
     function openSettings() {
-        if (isIphonePortrait()) {
-            // Open settings sheet inside the app, focusing the Interface section
-            const sheet = document.createElement('div');
-            sheet.className = 'ag-settings-sheet';
-            sheet.innerHTML = `
-                <div class="ag-sheet-header">
-                    <h3>Configurações</h3>
-                    <button type="button" class="ag-sheet-close" aria-label="Fechar">${icon('x')}</button>
-                </div>
-                <div class="ag-sheet-content">
-                    <!-- mountSettingsSections will fill this -->
-                </div>
-            `;
-            document.body.appendChild(sheet);
-            // Re-mount the settings sections into the sheet
-            const sections = mountSettingsSections(sheet.querySelector('.ag-sheet-content'), {
-                settings,
-                getSession: () => workspace?.active,
-                commands,
-            });
-            // Close sheet on backdrop click or close button
-            sheet.querySelector('.ag-sheet-close').addEventListener('click', () => sheet.remove());
-            sheet.addEventListener('click', e => {
-                if (e.target === sheet) sheet.remove();
-            });
-            // Focus the interface section initially
-            setTimeout(() => {
-                const interfaceSection = sheet.querySelector('[data-page="interface"]');
-                if (interfaceSection) interfaceSection.scrollIntoView({ behavior: 'smooth' });
-            }, 100);
-        } else {
-            window.location.href = joinPath('admin');
-        }
+        window.location.href = joinPath('admin');
     }
     const vibeForm = new VibeForm();
     const agentLaunch = new AgentLaunch();

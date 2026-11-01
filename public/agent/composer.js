@@ -12,7 +12,6 @@ import { pickServerFiles, serverFileUrl } from '../ui/filePicker.js';
 import { toast } from '../ui/toast.js';
 import { esc } from './markdown.js';
 import Dictation from '../ui/dictation.js';
-import { bindVibecodeEdgeSwipe } from '../ui/edgeSwipe.js';
 
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
 // iPhone layout: floating box + settings sheet (attribute set in index.html before first paint)
@@ -116,9 +115,6 @@ export default class Composer {
             <div class="ag-suggest" role="listbox" hidden></div>
             <form class="ag-input-row" autocomplete="off">
                 <button type="button" class="icon-btn ag-attach-btn" aria-label="Anexar" aria-haspopup="menu" title="Anexar">${IPHONE ? icon('plus', 22) : icon('paperclip', 18)}</button>
-                <button type="button" class="icon-btn ag-preview-btn" aria-label="Prévia" hidden>
-                    <span class="ag-preview-label">Prévia</span>${icon('eye', 18)}
-                </button>
                 <button type="button" class="ag-settings-btn" aria-haspopup="dialog" aria-label="Modelo e configurações" hidden>
                     <span class="ag-settings-label"></span>${icon('chevronDown', 16)}</button>
                 <input type="file" multiple hidden>
@@ -133,7 +129,6 @@ export default class Composer {
             form: q('form'), input: q('textarea'), file: q('input[type="file"]'),
             attach: q('.ag-attach-btn'), stop: q('.ag-stop'), send: q('.ag-send'),
             settingsBtn: q('.ag-settings-btn'), settingsLabel: q('.ag-settings-label'),
-            previewBtn: q('.ag-preview-btn'),
         };
         this.bind();
         if (IPHONE) this.setupIphone();
@@ -194,38 +189,7 @@ export default class Composer {
         // phrase per tap; the words land in the box so the user reviews before sending.
         this.setupDictation();
 
-        // Vibecoding edge swipes: right edge of agent chat opens preview, left edge of preview goes back
-        const previewContainer = document.querySelector('.ag-preview-container');
-        bindVibecodeEdgeSwipe(
-            // getAgentChat: returns the agent chat element (the composer's el)
-            () => this.el,
-            // getPreviewContainer: returns the preview container element
-            () => previewContainer,
-            // onOpenPreview: called when user swipes right on agent chat
-            () => {
-                // Open the preview
-                vibeState.isPreviewOpen = true;
-                this.el.classList.add('preview-open');
-                // Show the eye button
-                if (this.ui.previewBtn) this.ui.previewBtn.hidden = false;
-                // Render a minimal preview of the last messages
-                renderPreview(previewContainer);
-            },
-            // onClosePreview: called when user swipes left on preview or taps back
-            () => {
-                vibeState.isPreviewOpen = false;
-                this.el.classList.remove('preview-open');
-                // Hide the eye button
-                if (this.ui.previewBtn) this.ui.previewBtn.hidden = true;
-                // Remove the preview
-                if (previewContainer && previewContainer.parentNode) {
-                    previewContainer.remove();
-                }
-            }
-        );
-
         // The conversation scrolls under the floating box: its height goes into --ag-composer-h on
-        // the parent, so the last message, the pending bar and the "jump" button stay clear of it.
         // the parent, so the last message, the pending bar and the "jump" button stay clear of it.
         const host = this.el.parentElement;
         if (host && typeof ResizeObserver !== 'undefined') {

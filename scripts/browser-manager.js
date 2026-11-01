@@ -23,6 +23,7 @@ const CHROMIUM_CANDIDATES = [
 ].filter(Boolean);
 
 const DEFAULT_URL = 'about:blank';
+const SINGLETON_FILES = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
 const OPEN = 1; // WebSocket.OPEN
 
 function findChromium() {
@@ -64,6 +65,30 @@ function normalizeUrl(input) {
 }
 
 /**
+ * Chromium locks its profile with a SingletonLock symlink pointing to "<hostname>-<pid>".
+ * A recreated Docker container gets a new hostname, so the old lock looks like another
+ * computer using the profile and Chromium exits at once (code 21). Only this server uses
+ * the profile, so a lock from another host is stale: remove it. Locks from this host are
+ * left alone (Chromium itself checks whether that PID is still alive).
+ * @returns {boolean} true when a stale lock was removed
+ */
+function clearForeignProfileLock(profileDir, hostname = os.hostname()) {
+    let target;
+    try {
+        target = fs.readlinkSync(path.join(profileDir, 'SingletonLock'));
+    } catch {
+        return false; // no lock
+    }
+    const dash = target.lastIndexOf('-');
+    const lockHost = dash > 0 ? target.slice(0, dash) : target;
+    if (lockHost === hostname) return false;
+    for (const name of SINGLETON_FILES) {
+        try { fs.unlinkSync(path.join(profileDir, name)); } catch { /* already gone */ }
+    }
+    return true;
+}
+
+/**
  * Chrome DevTools Protocol over a pipe (--remote-debugging-pipe): no debugging port is
  * opened on the server. Messages are JSON separated by NUL bytes (fd 3 in, fd 4 out).
  */
@@ -71,6 +96,10 @@ class PipeCdp {
     constructor(proc, log) {
         this.out = proc.stdio[3];
         this.log = log;
+        // If Chromium exits with commands still unread, the pipes fail with ECONNRESET/EPIPE.
+        // Without a listener that 'error' would crash the whole server; 'exit' handles cleanup.
+        proc.stdio[3].on('error', e => this.log('CDP pipe error (entrada):', e.message));
+        proc.stdio[4].on('error', e => this.log('CDP pipe error (saída):', e.message));
         this.nextId = 0;
         this.pending = new Map();
         this.listeners = new Set();
@@ -185,6 +214,7 @@ class BrowserManager {
         ];
         // Chromium refuses to run as root without this (the usual case inside Docker)
         if (process.getuid && process.getuid() === 0) args.push('--no-sandbox');
+        if (clearForeignProfileLock(this.profileDir)) this.log('Trava antiga do perfil do Chromium removida (outro hostname)');
 
         this.proc = spawn(this.exe, args, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
         this.proc.once('exit', () => this.onExit());
@@ -721,4 +751,4 @@ function listPorts(exclude = []) {
     return Promise.resolve([]);
 }
 
-module.exports = { BrowserManager, listPorts, normalizeUrl };
+module.exports = { BrowserManager, listPorts, normalizeUrl, clearForeignProfileLock, PipeCdp };
