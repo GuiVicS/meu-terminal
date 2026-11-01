@@ -3985,3 +3985,5 @@ audio.fm-media { width: min(520px, 90%); }
 .mt-loading-text { margin: 0; font-weight: 600; font-size: 16px; }
 .mt-loading-sub { margin: 0; font-size: 13px; color: var(--text-2, #aaa); }
 @media (prefers-reduced-motion: reduce) { .mt-loading-spin { animation-duration: 2.4s; } .mt-loading { transition: none; } }
+/* A lista lateral é só do layout de celular: no computador o app não tem fundo próprio e ela vazava */
+:root:not([data-iphone]) .cv-drawer { display: none; }

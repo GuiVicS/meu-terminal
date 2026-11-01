@@ -449,9 +449,10 @@ export default class TerminalManager {
         this.agentList = agents; // nomes para a tela "Abrindo…"
         // Um Claude Code só: a rota (Direto / Economia / Outros modelos) é a padrão de Complementos e
         // se troca dentro da conversa (⋮ → Rota)
-        const items = agents.map(a => ({ label: a.label, icon: 'bot', hint: a.installed ? '' : 'não instalado', disabled: !a.installed,
+        // Só as IAs instaladas no servidor (detectadas sozinhas: scripts/agents/detect.js)
+        const items = agents.filter(a => a.installed).map(a => ({ label: a.label, icon: 'bot',
             run: () => this.createAgent(a.id, folder) }));
-        showMenu(items.length ? items : [{ label: 'Nenhum agente com modo UI', icon: 'info', disabled: true }],
+        showMenu(items.length ? items : [{ label: 'Nenhuma IA de terminal instalada', icon: 'info', disabled: true }],
         { anchor, label: `Nova conversa em ${folder}` });
     }
 

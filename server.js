@@ -43,6 +43,7 @@ const { writeShims, writeRcFile } = require('./scripts/agents/shims');
 const { execFile } = require('child_process');
 const { Addons, SERVICES } = require('./scripts/addons');
 const { deleteConversation, canDelete: canDeleteConversation } = require('./scripts/agents/history-files');
+const { detectAgents, searchDirs } = require('./scripts/agents/detect');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
@@ -879,6 +880,31 @@ const agentGateway = new AgentGateway({
     extraModels: extraAgentModels,
     log: debugLog,
 });
+// Os agentes acham os programas instalados nas pastas do usuário (~/.local/bin, ~/.opencode/bin...)
+agentGateway.env.PATH = searchDirs(agentGateway.env, HOME_DIR).join(path.delimiter);
+
+/**
+ * IAs de terminal instaladas (scripts/agents/detect.js): as que falam ACP entram no Modo UI
+ * sozinhas. Refeito no máximo a cada 20 s, quando o menu de agentes é aberto.
+ */
+const BUILTIN_AGENTS = new Set(Object.keys(agentGateway.agents));
+let agentScan = { at: 0, running: null };
+function refreshAgents() {
+    if (Date.now() - agentScan.at < 20000) return Promise.resolve();
+    agentScan.running ||= detectAgents({ known: Object.fromEntries([...BUILTIN_AGENTS].map(id => [id, agentGateway.agents[id]])), env: agentGateway.env, home: HOME_DIR })
+        .then(({ found }) => {
+            // Some quem foi desinstalado (e não tem conversa aberta); entra quem apareceu
+            for (const id of Object.keys(agentGateway.agents)) {
+                if (!BUILTIN_AGENTS.has(id) && !found[id]) delete agentGateway.agents[id];
+            }
+            Object.assign(agentGateway.agents, found);
+            agentScan.at = Date.now();
+        })
+        .catch(e => debugLog(`detectAgents: ${e.message}`))
+        .finally(() => { agentScan.running = null; });
+    return agentScan.running;
+}
+refreshAgents();
 const agentLauncher = new AgentLauncher({
     gateway: agentGateway,
     sessions,
@@ -943,7 +969,7 @@ function commandExists(command) {
     if (!command) return false;
     const candidates = path.isAbsolute(command)
         ? [command]
-        : (process.env.PATH || '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, command));
+        : searchDirs(process.env, HOME_DIR).map(dir => path.join(dir, command));
     return candidates.some(file => {
         try {
             fs.accessSync(file, fs.constants.X_OK);
@@ -1164,13 +1190,15 @@ app.put(BASE_PATH + '/api/agent-pins', (req, res) => {
     res.json({ pins: clean });
 });
 
-app.get(BASE_PATH + '/api/agents', (req, res) => {
+app.get(BASE_PATH + '/api/agents', async (req, res) => {
+    await refreshAgents();
     res.json({
         enabled: AGENT_UI_ENABLED && isAuthRequired,
         needsLogin: !isAuthRequired,
         agents: agentGateway.listAgents().map(a => ({
             ...a,
             installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].requires || agentGateway.agents[a.id].command),
+            detected: !!agentGateway.agents[a.id].detected,
         })),
         // Rotas do Claude Code para trocar dentro da conversa: Direto + as dos complementos ligados
         claudeRoutes: Object.entries(ROUTES)
