@@ -19,6 +19,7 @@ import { openSessionSheet, sessionIcon } from '../ui/sessionSheet.js';
 import { toast } from '../ui/toast.js';
 import { playChime } from '../ui/sound.js';
 import { isHandset } from '../ui/device.js';
+import { withLoading, KIND_LABEL } from '../ui/loading.js';
 
 const RECONCILE_DELAY = 250;
 
@@ -204,7 +205,12 @@ export default class TerminalManager {
      * Creates a new session on the server and opens its tab.
      * @param {{name?: string, cwd?: string, color?: string, afterId?: string, reopenId?: string}} opts
      */
-    async create({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
+    create(opts = {}) {
+        const [label, ico] = KIND_LABEL[opts.kind || 'terminal'] || KIND_LABEL.terminal;
+        return withLoading(label, ico, () => this.createNow(opts));
+    }
+
+    async createNow({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
         try {
             const row = await api('POST', 'sessions', {
                 name,
@@ -440,6 +446,7 @@ export default class TerminalManager {
         }
         const folder = this.currentFolder();
         const agents = (info.agents || []).filter(a => !a.terminalOnly);
+        this.agentList = agents; // nomes para a tela "Abrindo…"
         // Um Claude Code só: a rota (Direto / Economia / Outros modelos) é a padrão de Complementos e
         // se troca dentro da conversa (⋮ → Rota)
         const items = agents.map(a => ({ label: a.label, icon: 'bot', hint: a.installed ? '' : 'não instalado', disabled: !a.installed,
@@ -448,7 +455,12 @@ export default class TerminalManager {
         { anchor, label: `Nova conversa em ${folder}` });
     }
 
-    async createAgent(agent, cwd, route) {
+    createAgent(agent, cwd, route) {
+        const label = this.agentList?.find?.(a => a.id === agent)?.label || 'o agente';
+        return withLoading(label, 'bot', () => this.createAgentNow(agent, cwd, route));
+    }
+
+    async createAgentNow(agent, cwd, route) {
         try {
             const r = await fetch(joinPath('api/agent-sessions'), {
                 method: 'POST',

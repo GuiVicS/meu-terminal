@@ -3969,3 +3969,19 @@ audio.fm-media { width: min(520px, 90%); }
 @keyframes cv-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .cv-spin { animation-duration: 2.4s; } }
 .cv-foot { justify-content: flex-end; }
+/* "Abrindo…": aparece ao tocar num app; segura toques repetidos até a aba abrir */
+.mt-loading { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center;
+    background: color-mix(in srgb, var(--bg, #000) 35%, transparent); opacity: 0; pointer-events: auto;
+    transition: opacity 0.18s ease 0.12s; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.mt-loading.is-on { opacity: 1; }
+.mt-loading[hidden] { display: none; }
+.mt-loading-card { position: relative; display: grid; justify-items: center; gap: 6px; padding: 26px 30px 22px;
+    min-width: 220px; border-radius: 22px; background: var(--surface-1, #1c1c1e); color: var(--text, #fff);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.35); border: 1px solid color-mix(in srgb, var(--text, #fff) 8%, transparent); }
+.mt-loading-icon { position: absolute; top: 34px; color: var(--accent); }
+.mt-loading-spin { width: 58px; height: 58px; border-radius: 50%; margin-bottom: 8px;
+    border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent); border-top-color: var(--accent);
+    animation: cv-spin 0.85s linear infinite; }
+.mt-loading-text { margin: 0; font-weight: 600; font-size: 16px; }
+.mt-loading-sub { margin: 0; font-size: 13px; color: var(--text-2, #aaa); }
+@media (prefers-reduced-motion: reduce) { .mt-loading-spin { animation-duration: 2.4s; } .mt-loading { transition: none; } }
