@@ -12,6 +12,7 @@ import { icon } from '../ui/icons.js';
 import { showMenu } from '../ui/contextMenu.js';
 import { toast } from '../ui/toast.js';
 import { askText, askConfirm, showInfo } from '../ui/prompt.js';
+import { haptic } from '../ui/haptics.js';
 
 const prefs = new StorageManager('meuterminal-');
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
@@ -1080,7 +1081,7 @@ export default class FilesSession {
             press.timer = setTimeout(() => {
                 suppressClick = true;
                 try {
-                    navigator.vibrate?.(15);
+                    haptic('medium');
                 } catch { /* needs a user gesture on some browsers */ }
                 const entry = this.visible[i];
                 if (entry && !this.selection.has(entry.path)) this.toggle(i);

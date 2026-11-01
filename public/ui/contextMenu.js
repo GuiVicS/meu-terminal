@@ -4,6 +4,7 @@
  * header overflow menu. Keyboard: arrows move, Enter activates, Esc closes.
  */
 import { icon } from './icons.js';
+import { haptic } from './haptics.js';
 
 let openMenu = null;
 
@@ -60,6 +61,7 @@ export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', r
         if (item.hint) btn.querySelector('.menu-hint').textContent = item.hint;
         btn.addEventListener('click', () => {
             closeMenu();
+            haptic('select');
             item.run?.();
         });
         el.appendChild(btn);

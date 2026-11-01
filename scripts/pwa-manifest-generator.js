@@ -38,9 +38,15 @@ function generatePWAManifest(siteTitle) {
   const pwaManifest = {
     name: siteTitle,
     short_name: siteTitle,
-    description: "Navegador de sessões de terminal",
+    description: "Terminal, agentes de IA, arquivos e anotações do seu servidor",
     lang: "pt-BR",
+    // Mesmo app instalado mesmo se o endereço de início mudar
+    id: BASE_PATH || "/",
     start_url: BASE_PATH || "/",
+    // Tocar no ícone com o app já aberto volta para ele (sem recarregar terminais e conversas)
+    launch_handler: { client_mode: ["focus-existing", "auto"] },
+    handle_links: "preferred",
+    categories: ["developer", "productivity", "utilities"],
     scope: BASE_PATH || "/",
     display: "standalone",
     display_override: ["standalone", "minimal-ui"],

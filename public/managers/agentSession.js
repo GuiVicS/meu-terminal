@@ -14,6 +14,8 @@ import Composer from '../agent/composer.js';
 import SidePanel from '../agent/sidepanel.js';
 import { esc } from '../agent/markdown.js';
 import { isIphonePortrait } from '../ui/device.js';
+import { haptic } from '../ui/haptics.js';
+import { keepScreenOn } from '../ui/permissions.js';
 
 const MAX_RECONNECT_ATTEMPTS = 8;
 const CLOSE_SESSION_GONE = 4404;
@@ -518,6 +520,7 @@ export default class AgentSession {
         this.el.status.dataset.tone = st.tone;
         const busy = this.status === 'thinking' || this.status === 'waiting_permission';
         this.composer.setBusy(busy, this.status);
+        keepScreenOn(this.id, busy); // se liberado em Permissões: tela ligada enquanto o agente trabalha
         this.process = busy ? 'agente' : null;
     }
 
@@ -561,6 +564,7 @@ export default class AgentSession {
     }
 
     async sendPrompt({ text, images }) {
+        haptic('light');
         try {
             await this.action('prompt', { text, images });
         } catch (e) {
@@ -570,6 +574,7 @@ export default class AgentSession {
     }
 
     async answerPermission(permissionId, optionId) {
+        haptic('medium');
         try {
             await this.action('permission', { permissionId, optionId });
         } catch (e) {

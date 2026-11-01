@@ -244,6 +244,11 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
                 </select>
             </label>
             <label class="setting">
+                <span class="setting-text">Feedback tátil
+                    <span class="setting-help">Vibração leve ao tocar (Android; iPhone com iOS 18+)</span></span>
+                <input type="checkbox" class="switch" data-setting="haptics">
+            </label>
+            <label class="setting">
                 <span class="setting-text">Barra de atalhos (celular)
                     <span class="setting-help">ESC, TAB, CTRL e setas acima do teclado</span></span>
                 <select data-setting="shortcutBar">
