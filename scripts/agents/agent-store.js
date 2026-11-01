@@ -8,7 +8,7 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 const SESSION_COLUMNS = ['title', 'status', 'mode', 'model', 'acp_session_id', 'capabilities',
-    'updated_at', 'closed_at', 'last_seq', 'route'];
+    'updated_at', 'closed_at', 'last_seq', 'route', 'route_model'];
 
 function parseJson(text, fallback) {
     if (text == null) return fallback;
@@ -61,6 +61,8 @@ class AgentStore {
         // route: por onde o agente fala com o modelo (scripts/addon-services.js ROUTES); null = direto
         const columns = new Set(this.db.prepare('PRAGMA table_info(agent_sessions)').all().map(c => c.name));
         if (!columns.has('route')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN route TEXT');
+        // route_model: modelo fixado na rota (troca automática ao acabar o limite do Claude)
+        if (!columns.has('route_model')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN route_model TEXT');
     }
 
     // ---------- sessions ----------

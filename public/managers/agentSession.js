@@ -30,6 +30,8 @@ const STATUS = {
     closed: { label: 'Encerrado', tone: 'bad' },
 };
 
+const ROUTE_LABELS = { direto: 'Direto', economia: 'Economia de tokens', omniroute: 'Outros modelos' };
+
 async function api(method, route, body) {
     const response = await fetch(`${basePath()}/api/${route}`, {
         method,
@@ -112,6 +114,7 @@ export default class AgentSession {
                 <span class="ag-status" role="status"></span>
                 <button type="button" class="btn btn-ghost btn-sm ag-publish" data-act="vibe-publish" aria-label="Publicar no Vercel" title="Publicar no Vercel" hidden>${icon('cloudUpload', 16)} <span class="ag-publish-label">Publicar</span></button>
                 <button type="button" class="icon-btn" data-act="vibe-agent" aria-label="Trocar agente" title="Trocar agente (vibecoding)" hidden>${icon('swap', 18)}</button>
+                <button type="button" class="btn btn-ghost btn-sm ag-route" data-act="route" aria-haspopup="menu" title="Rota do Claude Code" hidden></button>
                 <button type="button" class="icon-btn" data-act="history" aria-label="Conversas">${icon('history', 18)}</button>
                 <button type="button" class="icon-btn" data-act="terminal" aria-label="Abrir terminal nesta pasta">${icon('terminal', 18)}</button>
                 <button type="button" class="icon-btn" data-act="files" aria-label="Abrir os arquivos da pasta">${icon('folder', 18)}</button>
@@ -175,6 +178,7 @@ export default class AgentSession {
             else if (btn.dataset.act === 'terminal') this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id });
             else if (btn.dataset.act === 'files') this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id });
             else if (btn.dataset.act === 'history') this.openHistory(btn);
+            else if (btn.dataset.act === 'route') this.openRouteMenu(btn);
             else if (btn.dataset.act === 'vibe-agent') this.openVibeAgentMenu(btn);
             else if (btn.dataset.act === 'vibe-publish') this.publishVibeProject();
         });
@@ -296,7 +300,10 @@ export default class AgentSession {
      */
     menuActions(anchor) {
         const vibe = !this.el.vibeBtn.hidden;
+        const route = this.session?.agent === 'claude'
+            ? [{ label: `Rota: ${ROUTE_LABELS[this.session.route || 'direto'] || this.session.route}`, icon: 'swap', run: () => this.openRouteMenu(anchor) }] : [];
         return [
+            ...route,
             { label: 'Abrir terminal na pasta', icon: 'terminal', run: () => this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id }) },
             { label: 'Abrir arquivos da pasta', icon: 'folder',
                 run: () => this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id }) },
@@ -501,6 +508,11 @@ export default class AgentSession {
         this.el.agent.textContent = (s && s.agentLabel) || this.name;
         this.el.cwd.textContent = this.cwd || '';
         this.el.cwd.title = this.cwd || '';
+        const route = this.panel.querySelector('.ag-route');
+        if (route) {
+            route.hidden = !(s && s.agent === 'claude');
+            route.innerHTML = `${icon('swap', 14)} ${ROUTE_LABELS[(s && s.route) || 'direto'] || s.route}`;
+        }
         const st = STATUS[this.status] || { label: this.status, tone: '' };
         this.el.status.textContent = st.label;
         this.el.status.dataset.tone = st.tone;
@@ -659,6 +671,29 @@ export default class AgentSession {
             default:
                 return undefined;
         }
+    }
+
+    /** Rota da conversa do Claude Code: troca e retoma a mesma conversa (POST .../route). */
+    async openRouteMenu(anchor) {
+        let routes = [];
+        try {
+            routes = (await api('GET', 'agents')).claudeRoutes || [];
+        } catch (e) {
+            return toast(e.message, { tone: 'error' });
+        }
+        const current = this.session?.route || 'direto';
+        showMenu(routes.map(r => ({
+            label: r.label, icon: r.id === current ? 'check' : 'swap', disabled: r.id === current,
+            run: async () => {
+                toast(`Trocando para ${r.label}…`);
+                try {
+                    this.session = await api('POST', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/route`, { route: r.id });
+                    this.renderHead();
+                } catch (e) {
+                    toast(e.message, { tone: 'error', duration: 6000 });
+                }
+            },
+        })), { anchor, label: 'Rota do Claude Code' });
     }
 
     /** Whether this agent can list its past conversations (ACP session/list). */

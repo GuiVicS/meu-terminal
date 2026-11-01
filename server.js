@@ -798,7 +798,7 @@ const addons = new Addons({
 const addonServices = new ServiceManager({ defs: SERVICES, home: HOME_DIR, env: childEnv(), secrets: id => addons.serviceSecrets(id), log: (...a) => console.log(...a) });
 
 /** Env da rota para um agente; liga o serviço se precisar. Só o Claude Code fala o protocolo da Anthropic. */
-async function agentRouteEnv({ agent, route }) {
+async function agentRouteEnv({ agent, route, routeModel = null }) {
     route = normalizeRoute(route);
     if (agent !== 'claude' || route === DEFAULT_ROUTE) return {};
     const prefs = addons.prefs();
@@ -806,7 +806,8 @@ async function agentRouteEnv({ agent, route }) {
     if (!prefs.services[service]?.enabled) {
         throw new RouteError(`Ligue o ${SERVICES[service].label} em Configurações → Complementos para usar "${ROUTES[route].label}".`);
     }
-    const env = routeEnv(route, prefs, SERVICES); // valida a chave antes de ligar o serviço
+    if (service === 'omniroute') await ensureOmniKey();
+    const env = routeEnv(route, addons.prefs(), SERVICES, { model: routeModel }); // valida a chave antes de ligar o serviço
     await addonServices.ensure(service);
     return env;
 }
@@ -823,6 +824,28 @@ function terminalRouteEnv() {
     try { return routeEnv(terminalRoute(), addons.prefs(), SERVICES); } catch { return {}; }
 }
 
+/**
+ * Troca automática: o limite do Claude acabou numa conversa do Modo UI. Se estiver ligada
+ * (Configurações → Complementos), a conversa passa para o OmniRoute com o modelo escolhido, é
+ * retomada e a mensagem que falhou é reenviada. A assinatura do Claude nunca passa pelo OmniRoute.
+ */
+async function usageLimitFallback({ sessionId, row, text, images }) {
+    const prefs = addons.prefs();
+    if (!prefs.fallback.enabled || row.agent !== 'claude' || normalizeRoute(row.route) === 'omniroute') return;
+    if (!prefs.services.omniroute?.enabled) {
+        agentGateway.emitEvent(sessionId, 'notice', { text: 'O limite do Claude acabou. A troca automática está ligada, mas o OmniRoute está desligado (Configurações → Complementos).' });
+        return;
+    }
+    const model = prefs.fallback.model || prefs.services.omniroute?.model || null;
+    if (!model) {
+        agentGateway.emitEvent(sessionId, 'notice', { text: 'O limite do Claude acabou. Escolha o modelo da troca automática em Configurações → Complementos.' });
+        return;
+    }
+    agentGateway.emitEvent(sessionId, 'notice', { text: `O limite do Claude acabou: continuando pelo OmniRoute com ${model}…` });
+    await agentGateway.setRoute(sessionId, 'omniroute', model);
+    if (text && text.trim() || (images && images.length)) await agentGateway.prompt(sessionId, text, { images });
+}
+
 const agentGateway = new AgentGateway({
     store: new AgentStore(DB_PATH),
     // Images/files produced by agents (or attached to prompts), next to the database (same volume)
@@ -833,6 +856,7 @@ const agentGateway = new AgentGateway({
     // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
     mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
     routeEnv: agentRouteEnv,
+    onUsageLimit: usageLimitFallback,
     log: debugLog,
 });
 const agentLauncher = new AgentLauncher({
@@ -972,6 +996,7 @@ app.get(BASE_PATH + '/api/addons', async (req, res) => {
         enabled: !DEMO_MODE,
         routes: Object.entries(ROUTES).map(([id, r]) => ({ id, label: r.label, service: r.service })),
         terminalRoute: normalizeRoute(prefs.terminalRoute),
+        fallback: prefs.fallback,
         addons: await addons.status({ services: addonServices }),
     });
 });
@@ -986,7 +1011,7 @@ app.put(BASE_PATH + '/api/addons', async (req, res) => {
     } catch (e) {
         return res.status(e.status || 500).json({ error: e.message });
     }
-    res.json({ terminalRoute: normalizeRoute(addons.prefs().terminalRoute), addons: await addons.status({ services: addonServices }) });
+    res.json({ terminalRoute: normalizeRoute(addons.prefs().terminalRoute), fallback: addons.prefs().fallback, addons: await addons.status({ services: addonServices }) });
 });
 
 // Telas dos complementos dentro das Configurações (scripts/addon-bridges.js): o servidor fala com
@@ -1081,6 +1106,7 @@ const BRIDGE_ACTIONS = {
         removeProvider: (b, a) => b.removeProvider(String(a.id || '')),
         testProvider: (b, a) => b.testProvider(String(a.id || '')),
         models: (b, a) => b.models(String(a.id || '')),
+        allModels: b => b.allModels(),
         importCodex: b => b.importCodex(HOME_DIR),
         setModel: (b, a) => {
             const model = typeof a.model === 'string' ? a.model : '';
@@ -1126,9 +1152,9 @@ app.get(BASE_PATH + '/api/agents', (req, res) => {
             ...a,
             installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].requires || agentGateway.agents[a.id].command),
         })),
-        // Rotas extras do Claude Code: só as dos complementos ligados (Configurações → Complementos)
+        // Rotas do Claude Code para trocar dentro da conversa: Direto + as dos complementos ligados
         claudeRoutes: Object.entries(ROUTES)
-            .filter(([id, r]) => id !== DEFAULT_ROUTE && addons.prefs().services[r.service]?.enabled)
+            .filter(([id, r]) => !r.service || addons.prefs().services[r.service]?.enabled)
             .map(([id, r]) => ({ id, label: r.label })),
     });
 });
@@ -1156,11 +1182,12 @@ app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
         cwd: folder,
         title: typeof title === 'string' ? title.slice(0, 120) : null,
         resumeAcpSessionId: typeof resumeAcpSessionId === 'string' ? resumeAcpSessionId : null,
-        route: ROUTES[route] && route !== DEFAULT_ROUTE ? route : null,
+        // Sem rota pedida: a rota padrão do Claude Code (Configurações → Complementos)
+        route: ROUTES[route] ? (route !== DEFAULT_ROUTE ? route : null)
+            : (String(agent) === 'claude' && terminalRoute() !== DEFAULT_ROUTE ? terminalRoute() : null),
     });
     const def = agentGateway.agents[session.agent];
-    const routeName = session.route && ROUTES[session.route] ? ` · ${ROUTES[session.route].label.split(' (')[0]}` : '';
-    const tab = sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName + routeName, afterId: typeof afterId === 'string' ? afterId : undefined });
+    const tab = sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName, afterId: typeof afterId === 'string' ? afterId : undefined });
     res.status(201).json({ tab, session });
 }));
 
@@ -1196,6 +1223,13 @@ app.delete(BASE_PATH + '/api/agent-sessions/:id/queue/:item', agentRoute(async (
 app.post(BASE_PATH + '/api/agent-sessions/:id/cancel', agentRoute(async (req, res) => {
     agentGateway.cancel(req.params.id);
     res.json({ success: true });
+}));
+
+// Troca a rota da conversa (Direto / Economia / Outros modelos), retomando a mesma conversa
+app.post(BASE_PATH + '/api/agent-sessions/:id/route', agentRoute(async (req, res) => {
+    const route = String((req.body || {}).route || '');
+    if (!ROUTES[route]) return res.status(400).json({ error: 'Rota desconhecida.' });
+    res.json(await agentGateway.setRoute(req.params.id, route));
 }));
 
 app.post(BASE_PATH + '/api/agent-sessions/:id/mode', agentRoute(async (req, res) => {

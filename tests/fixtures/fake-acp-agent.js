@@ -102,6 +102,11 @@ function playRich() {
 function playTurn(text) {
     if (text.includes('crash')) process.exit(7);
     if (text.includes('markdown')) return playRich();
+    // "limite": responde como o Claude Code quando o limite da conta acaba (texto sintético)
+    if (text.includes('limite')) {
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: "You've hit your 5-hour limit · resets 12:30am" }, messageId: 'lim' });
+        return finishTurn('end_turn');
+    }
     update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Pensando...' } });
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Vou criar ' }, messageId: 'm1' });
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'o arquivo.' }, messageId: 'm1' });

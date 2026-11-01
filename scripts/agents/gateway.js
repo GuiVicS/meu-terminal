@@ -90,6 +90,20 @@ function lastLine(text) {
     return line.length > 240 ? `${line.slice(0, 240)}…` : line;
 }
 
+/**
+ * Como o Claude Code avisa que o limite da conta acabou: uma resposta sintética que começa com uma
+ * destas frases (USAGE_LIMIT_ERROR_PREFIXES do @anthropic-ai/claude-agent-sdk). Clientes ACP comuns
+ * recebem só o texto, então é por ele que a troca automática percebe.
+ */
+const USAGE_LIMIT_PREFIXES = ["You've hit your", "You've reached your", "You're out of usage credits",
+    'Your org is out of usage', "Your seat type doesn't include usage", 'Your usage allocation has been disabled',
+    "Your group's usage limit is set to $0", 'requires usage credits', "You're out of extra usage",
+    "Your seat type doesn't include extra usage"];
+const isUsageLimitText = text => {
+    const t = String(text || '').trimStart();
+    return USAGE_LIMIT_PREFIXES.some(p => (p.startsWith('requires') ? t.split('\n')[0].includes(p) : t.startsWith(p)));
+};
+
 class AgentGateway extends EventEmitter {
     /**
      * @param {object} deps
@@ -107,13 +121,15 @@ class AgentGateway extends EventEmitter {
      * Emits 'event' with every normalized event envelope ({ sessionId, seq, type, at, data }).
      */
     constructor({ store, agents = loadAgents(), env = process.env, maxSessions = 4, startTimeoutMs = 60000,
-        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, log = () => {} }) {
+        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, onUsageLimit = null, log = () => {} }) {
         super();
         this.store = store;
         this.agents = agents;
         this.env = env;
         // async ({ agent, route }) => extra env (scripts/addon-services.js); may start a service or throw
         this.routeEnv = routeEnv;
+        // async ({ sessionId, row, text, images }) => chamado quando uma resposta é o aviso de limite
+        this.onUsageLimit = onUsageLimit;
         this.maxSessions = maxSessions;
         this.startTimeoutMs = startTimeoutMs;
         this.maxText = maxText;
@@ -222,10 +238,10 @@ class AgentGateway extends EventEmitter {
      * started in the terminal. Starts a short-lived agent process just to ask.
      */
     /** Environment for an agent process: the gateway's own plus the session's route. */
-    async envFor({ agent, route }) {
+    async envFor({ agent, route, routeModel, route_model: rowModel }) {
         if (!this.routeEnv) return this.env;
         try {
-            return { ...this.env, ...(await this.routeEnv({ agent, route })) };
+            return { ...this.env, ...(await this.routeEnv({ agent, route, routeModel: routeModel || rowModel || null })) };
         } catch (e) {
             throw new GatewayError(e.message, e.status || 400);
         }
@@ -392,6 +408,25 @@ class AgentGateway extends EventEmitter {
         this.emit('sessions');
     }
 
+    /**
+     * Troca a rota da conversa (Direto / Economia / Outros modelos): para o agente e o inicia de
+     * novo com o ambiente da rota nova, retomando a mesma conversa. Valida a rota antes de parar.
+     */
+    async setRoute(sessionId, route, routeModel = null) {
+        const row = this.requireSession(sessionId);
+        if (row.status === 'closed') throw new GatewayError('Sessão encerrada.', 409);
+        const runtime = this.runtimes.get(sessionId);
+        if (runtime && runtime.prompting) throw new GatewayError('Espere o agente terminar a resposta para trocar a rota.', 409);
+        const next = route && route !== 'direto' ? route : null;
+        const model = next ? routeModel || null : null;
+        await this.envFor({ agent: row.agent, route: next, routeModel: model }); // falha aqui, sem parar nada
+        this.store.updateSession(sessionId, { route: next, route_model: model });
+        await this.stopAgent(sessionId);
+        await this.spawnAgent(sessionId, { resume: true });
+        this.emitEvent(sessionId, 'notice', { text: `Rota trocada: ${next ? `${next}${model ? ` (${model})` : ''}` : 'direto'}.` });
+        return this.get(sessionId);
+    }
+
     /** Stops the agent process but keeps the session (it can be resumed). */
     async stopAgent(sessionId) {
         const runtime = this.runtimes.get(sessionId);
@@ -443,6 +478,8 @@ class AgentGateway extends EventEmitter {
             }
         }
         runtime.prompting = true;
+        runtime.turnText = '';
+        let limited = false;
         const row = this.store.getSession(sessionId);
         if (!row.title && text.trim()) this.store.updateSession(sessionId, { title: text.trim().replace(/\s+/g, ' ').slice(0, 60) });
         // The event log keeps only the images' type and size (not the bytes)
@@ -464,6 +501,7 @@ class AgentGateway extends EventEmitter {
             const stopReason = (result && result.stopReason) || 'end_turn';
             this.emitEvent(sessionId, 'message.assistant.done', { stopReason });
             if (this.runtimes.has(sessionId)) this.setState(sessionId, 'idle');
+            limited = isUsageLimitText(runtime.turnText);
             return stopReason;
         } catch (error) {
             // A dead agent is reported by onExit; only report errors of a live agent here
@@ -474,8 +512,15 @@ class AgentGateway extends EventEmitter {
             throw new GatewayError(error.message, 502);
         } finally {
             runtime.prompting = false;
-            // "modo fila": the next message goes on its own (setImmediate: after this turn's events)
-            if ((runtime.queue || []).length) setImmediate(() => this.drainQueue(sessionId));
+            if (limited && this.onUsageLimit) {
+                // Depois deste turno: quem decide (troca automática) pode trocar a rota e reenviar
+                const after = this.store.getSession(sessionId);
+                setImmediate(() => Promise.resolve(this.onUsageLimit({ sessionId, row: after, text, images }))
+                    .catch(e => this.log('Troca automática:', e.message)));
+            } else if ((runtime.queue || []).length) {
+                // "modo fila": the next message goes on its own (setImmediate: after this turn's events)
+                setImmediate(() => this.drainQueue(sessionId));
+            }
         }
     }
 
@@ -746,6 +791,10 @@ class AgentGateway extends EventEmitter {
     }
 
     emitEvent(sessionId, type, data) {
+        if (type === 'message.assistant.delta' && data && data.text) {
+            const rt = this.runtimes.get(sessionId);
+            if (rt && rt.prompting && (rt.turnText || '').length < 2000) rt.turnText = (rt.turnText || '') + data.text;
+        }
         const event = this.store.appendEvent(sessionId, type, data);
         if (this.validate) {
             const problems = validateEvent(event);
@@ -756,4 +805,4 @@ class AgentGateway extends EventEmitter {
     }
 }
 
-module.exports = { AgentGateway, GatewayError, deriveCapabilities, deriveModes };
+module.exports = { AgentGateway, GatewayError, deriveCapabilities, deriveModes, USAGE_LIMIT_PREFIXES, isUsageLimitText };

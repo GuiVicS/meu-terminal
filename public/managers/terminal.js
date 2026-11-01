@@ -412,15 +412,10 @@ export default class TerminalManager {
         }
         const folder = this.currentFolder();
         const agents = (info.agents || []).filter(a => !a.terminalOnly);
-        // Claude Code também pelas rotas dos complementos ligados (Headroom, OmniRoute)
-        const items = agents.flatMap(a => [
-            { label: a.label, icon: 'bot', hint: a.installed ? '' : 'não instalado', disabled: !a.installed,
-                run: () => this.createAgent(a.id, folder) },
-            ...(a.id === 'claude' && a.installed ? (info.claudeRoutes || []).map(r => ({
-                label: `${a.label} · ${r.label.split(' (')[0]}`, icon: 'bot', hint: r.label.match(/\((.+)\)/)?.[1] || '',
-                run: () => this.createAgent(a.id, folder, r.id),
-            })) : []),
-        ]);
+        // Um Claude Code só: a rota (Direto / Economia / Outros modelos) é a padrão de Complementos e
+        // se troca dentro da conversa (⋮ → Rota)
+        const items = agents.map(a => ({ label: a.label, icon: 'bot', hint: a.installed ? '' : 'não instalado', disabled: !a.installed,
+            run: () => this.createAgent(a.id, folder) }));
         showMenu(items.length ? items : [{ label: 'Nenhum agente com modo UI', icon: 'info', disabled: true }],
         { anchor, label: `Nova conversa em ${folder}` });
     }

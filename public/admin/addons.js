@@ -84,6 +84,7 @@ export function mountAddonsSection(section) {
     function renderGrid() {
         const services = state.addons.filter(a => a.kind === 'service');
         const routeOk = r => !r.service || services.find(s => s.id === r.service)?.enabled;
+        const omniOn = !!services.find(x => x.id === 'omniroute')?.enabled;
         section.innerHTML = `
             <h3 class="section-label">Complementos</h3>
             <p class="setting-help">Já vêm no MeuTerminal e valem no terminal e no Modo UI. Toque num para abrir.</p>
@@ -98,14 +99,41 @@ export function mountAddonsSection(section) {
                 </button>`;
             }).join('')}</div>
 
-            <h3 class="section-label rm-gap">Rota do Claude Code no terminal</h3>
+            <h3 class="section-label rm-gap">Claude Code</h3>
             <label class="setting setting-stack">
-                <span class="setting-text">Terminal
-                    <span class="setting-help">Vale para terminais novos e para o Modo UI aberto a partir deles. No menu "Nova conversa" você escolhe a rota de cada conversa.</span></span>
+                <span class="setting-text">Rota padrão
+                    <span class="setting-help">Vale para terminais novos e para conversas novas do Modo UI. Dentro de uma conversa, troque em ⋮ → Rota.</span></span>
                 <select data-terminal-route>
                     ${state.routes.map(r => `<option value="${esc(r.id)}" ${r.id === state.terminalRoute ? 'selected' : ''} ${routeOk(r) ? '' : 'disabled'}>${esc(r.label)}${routeOk(r) ? '' : ' (ligue o serviço)'}</option>`).join('')}
                 </select>
-            </label>`;
+            </label>
+            <label class="setting">
+                <span class="setting-text">Troca automática quando o limite do Claude acabar
+                    <span class="setting-help">No Modo UI, a conversa continua pelo OmniRoute com o modelo escolhido e a mensagem é reenviada. A sua assinatura do Claude não passa pelo OmniRoute.</span></span>
+                <input type="checkbox" class="switch" data-fallback ${state.fallback?.enabled ? 'checked' : ''}>
+            </label>
+            ${state.fallback?.enabled ? `
+            <label class="setting setting-stack">
+                <span class="setting-text">Continuar com
+                    <span class="setting-help">${omniOn ? 'Modelos dos provedores conectados no OmniRoute.' : 'Ligue o OmniRoute e conecte um provedor para escolher.'}</span></span>
+                <select data-fallback-model ${omniOn ? '' : 'disabled'}>
+                    <option value="">${state.fallback.model ? esc(state.fallback.model) : 'Escolha um modelo…'}</option>
+                </select>
+            </label>` : ''}            </label>`;
+    }
+
+    /** Preenche o seletor do modelo da troca automática com os modelos do OmniRoute. */
+    async function loadFallbackModels() {
+        const select = section.querySelector('[data-fallback-model]');
+        if (!select || select.disabled) return;
+        try {
+            const models = await api('POST', '/api/addons/omniroute/call', { action: 'allModels' });
+            if (!section.contains(select)) return;
+            const cur = state.fallback?.model || '';
+            select.innerHTML = `<option value="">${models.length ? 'Escolha um modelo…' : 'Nenhum modelo: conecte um provedor no OmniRoute'}</option>`
+                + models.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.provider)} · ${esc(m.name)}</option>`).join('');
+            if (cur && !models.some(m => m.id === cur)) select.insertAdjacentHTML('beforeend', `<option value="${esc(cur)}" selected>${esc(cur)}</option>`);
+        } catch { /* o seletor fica com o modelo atual */ }
     }
 
     function renderApp() {
@@ -190,7 +218,7 @@ export function mountAddonsSection(section) {
             return;
         }
         if (open) renderApp();
-        else renderGrid();
+        else { renderGrid(); loadFallbackModels(); }
     }
 
     section.addEventListener('change', e => {
@@ -201,7 +229,11 @@ export function mountAddonsSection(section) {
             return;
         }
         const route = e.target.closest('[data-terminal-route]');
-        if (route) save({ terminalRoute: route.value }, 'Rota salva. Vale para terminais novos.');
+        if (route) { save({ terminalRoute: route.value }, 'Rota padrão salva. Vale para terminais e conversas novos.'); return; }
+        const fb = e.target.closest('[data-fallback]');
+        if (fb) { save({ fallback: { enabled: fb.checked } }, fb.checked ? 'Troca automática ligada.' : 'Troca automática desligada.'); return; }
+        const fbModel = e.target.closest('[data-fallback-model]');
+        if (fbModel && fbModel.value) save({ fallback: { model: fbModel.value } }, `Troca automática vai usar ${fbModel.value}.`);
     });
 
     section.addEventListener('click', e => {

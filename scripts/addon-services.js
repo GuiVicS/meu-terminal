@@ -35,7 +35,7 @@ const normalizeRoute = route => (ROUTES[route] ? route : DEFAULT_ROUTE);
  * @param {string} route
  * @param {{ services?: object }} prefs - addons.json preferences
  */
-function routeEnv(route, prefs = {}, defs = {}) {
+function routeEnv(route, prefs = {}, defs = {}, { model = null } = {}) {
     route = normalizeRoute(route);
     if (route === 'direto') return {};
     const def = defs[ROUTES[route].service];
@@ -46,7 +46,7 @@ function routeEnv(route, prefs = {}, defs = {}) {
     return {
         ANTHROPIC_BASE_URL: base,
         ANTHROPIC_AUTH_TOKEN: omni.apiKey,
-        ...(omni.model ? { ANTHROPIC_MODEL: omni.model } : {}),
+        ...((model || omni.model) ? { ANTHROPIC_MODEL: model || omni.model } : {}),
         // O /model do Claude Code lista os modelos que o OmniRoute expõe
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
     };

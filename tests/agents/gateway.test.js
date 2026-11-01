@@ -270,3 +270,50 @@ test('routes: a route that cannot start fails before any session is saved (no de
     assert.equal(store.listSessions().length, 0);
     await gateway.shutdown();
 });
+
+// ---------- limite do Claude e troca de rota ----------
+
+const { isUsageLimitText } = require('../../scripts/agents/gateway');
+
+test('limite: reconhece os avisos de limite do Claude Code e mais nada', () => {
+    assert.ok(isUsageLimitText("You've hit your 5-hour limit · resets 12:30am"));
+    assert.ok(isUsageLimitText("You're out of extra usage"));
+    assert.ok(isUsageLimitText('  Your org is out of usage · add funds to continue'));
+    assert.ok(!isUsageLimitText('Vou criar o arquivo.'));
+    assert.ok(!isUsageLimitText("Ok. You've hit your goal!"));
+});
+
+test('limite: a resposta de limite chama onUsageLimit com a mensagem que falhou', async () => {
+    const calls = [];
+    const store = new AgentStore(':memory:');
+    const gateway = new AgentGateway({
+        store, agents: { fake: { label: 'Fake', command: process.execPath, args: [FAKE], install: 'n/a' } },
+        env: { ...process.env }, onUsageLimit: info => calls.push(info), log: () => {},
+    });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.prompt(s.id, 'teste do limite');
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].text, 'teste do limite');
+    assert.equal(calls[0].sessionId, s.id);
+    await gateway.prompt(s.id, 'markdown'); // resposta normal, que termina sozinha
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(calls.length, 1, 'uma resposta normal não dispara');
+    await gateway.shutdown();
+});
+
+test('rota: setRoute grava a rota, reinicia com o ambiente novo e retoma a mesma conversa', async () => {
+    const envCalls = [];
+    const { store, gateway } = setupRoutes(async ({ route, routeModel }) => { envCalls.push([route, routeModel]); return {}; });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const before = store.getSession(s.id).acp_session_id;
+    const after = await gateway.setRoute(s.id, 'omniroute', 'groq/llama');
+    assert.equal(store.getSession(s.id).route, 'omniroute');
+    assert.equal(store.getSession(s.id).route_model, 'groq/llama');
+    assert.equal(after.route, 'omniroute');
+    assert.deepEqual(envCalls.at(-1), ['omniroute', 'groq/llama']);
+    assert.equal(store.getSession(s.id).acp_session_id, before, 'mesma conversa');
+    await gateway.setRoute(s.id, 'direto');
+    assert.equal(store.getSession(s.id).route, null);
+    await gateway.shutdown();
+});

@@ -178,6 +178,18 @@ class OmniRouteBridge {
         return fs.existsSync(path.join(home, '.codex', 'auth.json'));
     }
 
+    /** Modelos de todas as conexões ativas (para escolher o da troca automática). */
+    async allModels() {
+        const { connections = [] } = await this.api('GET', '/api/providers');
+        const out = [];
+        for (const c of connections) {
+            try {
+                for (const m of await this.models(c.id)) out.push({ ...m, provider: c.name });
+            } catch { /* conexão sem lista de modelos */ }
+        }
+        return out;
+    }
+
     /** Cria a chave da rota "Outros modelos" (uma vez). */
     async createKey() {
         const r = await this.api('POST', '/api/keys', { name: 'MeuTerminal' });
