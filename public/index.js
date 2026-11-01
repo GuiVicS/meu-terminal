@@ -19,6 +19,7 @@ import { showMenu } from './ui/contextMenu.js';
 import { icon } from './ui/icons.js';
 import { sessionIcon } from './ui/sessionSheet.js';
 import ConversationDrawer, { MENU_ICON } from './ui/conversationDrawer.js';
+import DesktopSidebar from './ui/desktopSidebar.js';
 import VibeForm from './ui/vibeForm.js';
 import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
@@ -84,6 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ---------- quick commands & clipboard ----------
     let workspace;
+    let sidebar = null; // desktop: barra lateral (criada quando a tela é de desktop)
     let settingsDialog;
     const commands = new CommandsManager();
     commands.load().catch(e => console.warn('Could not load quick commands:', e));
@@ -244,6 +246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const renderActive = session => {
         renderPill(session);
         syncConvBtn();
+        sidebar?.syncActive();
         statusBar.render(session);
         if (typeof updateShortcutBar === 'function') updateShortcutBar();
         brandConn.dataset.state = session.state;
@@ -404,6 +407,34 @@ document.addEventListener('DOMContentLoaded', async () => {
         drawer.sync();
     };
     syncConvBtn();
+
+    // ---------- desktop: barra lateral e atalhos (docs/PLANO-DESKTOP.md) ----------
+    const isDesktopNow = () => !document.documentElement.hasAttribute('data-iphone')
+        && window.innerWidth >= 900 && !window.matchMedia('(pointer: coarse)').matches;
+    const ensureSidebar = () => {
+        const on = isDesktopNow();
+        document.documentElement.toggleAttribute('data-desktop', on);
+        if (on && !sidebar) sidebar = new DesktopSidebar({ workspace, openSettings: () => openSettings() });
+    };
+    ensureSidebar();
+    window.addEventListener('resize', () => requestAnimationFrame(ensureSidebar));
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+    document.addEventListener('keydown', e => {
+        if (!sidebar || !document.documentElement.hasAttribute('data-desktop')) return;
+        // Mac: ⌘B, ⌘⇧O, ⌘K, ⌘\ · Windows/Linux: Ctrl+Alt+L/J/K/\ (Ctrl+B sozinho é do terminal)
+        const mod = mac ? e.metaKey && !e.ctrlKey && !e.altKey : e.ctrlKey && e.altKey && !e.metaKey;
+        if (!mod) return;
+        const k = e.key.toLowerCase();
+        let run = null;
+        if ((mac && k === 'b' && !e.shiftKey) || (!mac && k === 'l')) run = () => sidebar.toggle();
+        else if ((mac && k === 'o' && e.shiftKey) || (!mac && k === 'j')) run = () => sidebar.newConversation();
+        else if (k === 'k') run = () => sidebar.focusSearch();
+        else if (e.key === '\\') run = () => workspace.active?.togglePanel?.();
+        if (!run) return;
+        e.preventDefault();
+        e.stopPropagation();
+        run();
+    }, true);
 
     // ---------- overflow menu ----------
     const logout = () => {

@@ -100,6 +100,7 @@ async function detectAgents({ known, env = process.env, home, helpImpl = helpTex
         const file = which(cmd, dirs);
         if (file) paths[id] = file;
         claimed.add(path.basename(def.command));
+        if (def.defaultCommand) claimed.add(path.basename(def.defaultCommand));
         if (def.requires) claimed.add(def.requires);
         claimed.add(id);
     }

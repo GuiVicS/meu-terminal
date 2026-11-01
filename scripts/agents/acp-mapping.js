@@ -69,6 +69,15 @@ function normalizeConfigOptions(list) {
     });
 }
 
+// Botões de permissão em português pelo tipo do ACP; nomes específicos (que não são o genérico em
+// inglês, ex.: "Yes, and don't ask again for git commands") ficam como o agente mandou
+const OPTION_LABELS = { allow_once: 'Permitir', allow_always: 'Permitir sempre', reject_once: 'Recusar', reject_always: 'Recusar sempre' };
+function optionLabel(o) {
+    const name = String(o.name || '');
+    const generic = !name || /^(allow|always allow|allow always|reject|deny|always deny|yes|no)( once| always)?$/i.test(name.trim());
+    return generic && OPTION_LABELS[o.kind] ? OPTION_LABELS[o.kind] : name || OPTION_LABELS[o.kind] || o.optionId;
+}
+
 function toolKind(update) {
     const name = toolNameOf(update);
     if (name && name.startsWith('mcp__')) return 'mcp';
@@ -360,7 +369,7 @@ class AcpMapper {
             title: toolCall.title || (known && known.title) || 'Permissão',
             kind: toolCall.kind ? toolKind(toolCall) : (known ? known.kind : 'other'),
             ...this.toolDetails({ ...toolCall, title: undefined }),
-            options: (params.options || []).map(o => ({ id: o.optionId, name: o.name, kind: o.kind })),
+            options: (params.options || []).map(o => ({ id: o.optionId, name: optionLabel(o), kind: o.kind })),
         };
     }
 }

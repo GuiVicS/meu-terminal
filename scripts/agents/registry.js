@@ -58,7 +58,9 @@ function loadAgents(env = process.env) {
             const parsed = JSON.parse(env[`MT_AGENT_${id.toUpperCase()}_ARGS`] || 'null');
             if (Array.isArray(parsed)) args = parsed.map(String);
         } catch { /* invalid JSON: ignored */ }
-        agents[id] = { ...def };
+        // defaultCommand: o adaptador de sempre continua "deste agente" mesmo com o comando trocado
+        // (a detecção não o mostra como um agente a mais)
+        agents[id] = { ...def, defaultCommand: def.command };
         if (command) Object.assign(agents[id], { command, args: args || [] });
         else if (args) agents[id].args = args;
     }

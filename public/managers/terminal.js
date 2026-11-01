@@ -464,20 +464,31 @@ export default class TerminalManager {
             agent, folder, source: anchor,
             onNew: () => this.createAgent(agent.id, folder),
             onResume: (acpSessionId, title) => this.createAgent(agent.id, folder, undefined, { resumeAcpSessionId: acpSessionId, title }),
-            onOpen: session => withLoading(agent.label, 'bot', async () => {
-                // Aberta agora: mostra na aba do agente (uma aba por agente)
-                const tab = [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agent.id);
-                try {
-                    if (tab) {
-                        if (tab.agentSessionId !== session.id) await this.switchAgentTab(tab.id, session.id);
-                        this.activate(tab.id, { focus: true });
-                    } else if (session.acpSessionId) {
-                        await this.createAgentNow(agent.id, session.cwd || folder, undefined, { resumeAcpSessionId: session.acpSessionId, title: session.title });
-                    }
-                } catch (e) {
-                    toast(e.message, { tone: 'error' });
+            onOpen: session => this.openAgentConversation(agent.id, { session }),
+        });
+    }
+
+    /**
+     * Mostra uma conversa de agente: a aberta (session) vai para a aba do agente (uma aba por
+     * agente); uma anterior (acpSessionId) é retomada. Usado pela escolha do menu e pela barra
+     * lateral do desktop.
+     */
+    openAgentConversation(agentId, { session = null, acpSessionId = null, title = null, cwd = null } = {}) {
+        const label = this.agentList?.find?.(a => a.id === agentId)?.label || 'o agente';
+        return withLoading(label, 'bot', async () => {
+            const tab = [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agentId);
+            try {
+                if (session && tab) {
+                    if (tab.agentSessionId !== session.id) await this.switchAgentTab(tab.id, session.id);
+                    this.activate(tab.id, { focus: true });
+                } else {
+                    const acp = acpSessionId || session?.acpSessionId;
+                    await this.createAgentNow(agentId, cwd || session?.cwd || this.currentFolder(), undefined,
+                        acp ? { resumeAcpSessionId: acp, title: title || session?.title || null } : {});
                 }
-            }),
+            } catch (e) {
+                toast(e.message, { tone: 'error' });
+            }
         });
     }
 
@@ -1004,6 +1015,12 @@ export default class TerminalManager {
             { keys: `${c}+F`, label: 'Buscar no terminal' },
             { keys: `${m}+F`, label: 'Tela cheia' },
             { keys: `${c}+,`, label: 'Configurações' },
+            // Desktop (barra lateral, index.js)
+            { keys: this.isMacOS ? '⌘B' : 'Ctrl+Alt+L', label: 'Mostrar/recolher a barra lateral' },
+            { keys: this.isMacOS ? '⌘⇧O' : 'Ctrl+Alt+J', label: 'Nova conversa com o agente' },
+            { keys: this.isMacOS ? '⌘K' : 'Ctrl+Alt+K', label: 'Buscar conversas' },
+            { keys: this.isMacOS ? '⌘\\' : 'Ctrl+Alt+\\', label: 'Painel do agente' },
+            { keys: 'Enter / Esc', label: 'Permitir / recusar o pedido do agente (campo vazio)' },
         ];
     }
 
