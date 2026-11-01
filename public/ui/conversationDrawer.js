@@ -15,6 +15,7 @@ import { esc } from '../agent/markdown.js';
 import { showMenu } from './contextMenu.js';
 import { toast } from './toast.js';
 import { askConfirm } from './prompt.js';
+import { haptic } from './haptics.js';
 
 const root = document.documentElement;
 const RECENT_LIMIT = 15;
@@ -154,23 +155,28 @@ export default class ConversationDrawer {
     setP(p) {
         this.p = Math.max(0, Math.min(1, p));
         const x = this.p * this.width;
+        // Só transform e opacity, em três elementos: uma variável CSS no .app forçava recalcular o
+        // estilo da tela inteira (e redesenhar todos os vidros) a cada quadro - a lista abria a 10 fps
         if (this.p > 0) {
             this.app.classList.add('cv-pushed');
             this.app.style.transform = `translate3d(${x}px, 0, 0)`;
-            this.app.style.setProperty('--cv-p', this.p.toFixed(3));
             this.dim.hidden = false;
-            this.el.style.setProperty('--cv-p', this.p.toFixed(3));
+            this.dim.style.opacity = (this.p * 0.32).toFixed(3);
+            this.el.style.opacity = (0.4 + 0.6 * this.p).toFixed(3);
+            if (!this.el.classList.contains('cv-fade')) this.el.style.transform = `translate3d(${((this.p - 1) * 18).toFixed(2)}%, 0, 0)`;
         } else {
             this.app.classList.remove('cv-pushed');
             this.app.style.transform = '';
-            this.app.style.removeProperty('--cv-p');
             this.dim.hidden = true;
+            this.el.style.opacity = '';
+            this.el.style.transform = '';
         }
         this.el.inert = this.p < 0.5;
     }
 
     animateTo(target, velocity = 0) {
         this.stop?.();
+        if ((target > 0.5) !== (this.p > 0.5)) haptic('light'); // encaixou aberta/fechada
         if (reducedMotion()) {
             // Sem deslize: cross-fade curto (apple-design §14)
             this.el.classList.add('cv-fade');
@@ -213,6 +219,10 @@ export default class ConversationDrawer {
         try {
             const r = await agentApi('GET', `agent-sessions?agent=${encodeURIComponent(agent.session.agent)}`);
             if (this.getAgent() !== agent) return;
+            // Só redesenha se algo mudou: redesenhar a cada 3 s perdia o toque que caísse no meio
+            const sig = JSON.stringify([r.sessions, r.canDelete]);
+            if (sig === this.openSig) return;
+            this.openSig = sig;
             this.open_ = r.sessions || [];
             this.canDelete = !!r.canDelete;
             this.render();

@@ -3,6 +3,7 @@
  * User preferences (persistent state), kept apart from terminal/connection state.
  * Every setting here is actually applied somewhere - no placeholder options.
  */
+import { setHaptics } from '../ui/haptics.js';
 import StorageManager from './storage.js';
 
 export const DEFAULT_SETTINGS = {
@@ -11,6 +12,8 @@ export const DEFAULT_SETTINGS = {
     motion: 'system',         // 'system' | 'reduced'
     // 'glass' (any phone: iPhone and Android) | 'classic' (no phone layout); 'glass-any' (valor antigo) = 'glass'
     iphoneVisual: 'glass',
+    // Vibração leve ao tocar (ui/haptics.js): Android e iPhone com iOS 18+
+    haptics: true,
     // Terminal
     fontSize: 15,
     lineHeight: 1.2,
@@ -36,6 +39,7 @@ export default class SettingsManager {
         });
         this.applyTheme();
         this.applyMotion();
+        setHaptics(this.values.haptics);
         this.applyIphoneVisual();
         // Another tab (e.g. /admin) changed a setting: pick it up here too
         window.addEventListener('storage', e => {
@@ -47,6 +51,7 @@ export default class SettingsManager {
                 if (key === 'theme') this.applyTheme();
                 if (key === 'motion') this.applyMotion();
                 if (key === 'iphoneVisual') this.applyIphoneVisual();
+        if (key === 'haptics') setHaptics(value);
                 this.listeners.forEach(fn => fn(key, next[key]));
             });
         });

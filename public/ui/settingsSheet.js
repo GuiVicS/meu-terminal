@@ -17,6 +17,7 @@ const SECTIONS = [
     { slug: 'interface', label: 'Interface', icon: 'monitor', color: 'blue' },
     { slug: 'sessoes', label: 'Sessão', icon: 'history', color: 'cyan' },
     { slug: 'aparelhos', label: 'Aparelhos', icon: 'smartphone', color: 'orange' },
+    { slug: 'permissoes', label: 'Permissões', icon: 'shield', color: 'green', mount: async el => (await import('./permissions.js')).mountPermissions(el) },
     { slug: 'notificacoes', label: 'Notificações', icon: 'bell', color: 'pink' },
     { slug: 'agentes', label: 'Agentes', icon: 'bot', color: 'purple' },
     // Same modules as /admin, loaded on first open (they talk to the server)

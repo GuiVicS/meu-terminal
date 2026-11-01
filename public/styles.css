@@ -3701,19 +3701,20 @@ audio.fm-media { width: min(520px, 90%); }
     display: flex; flex-direction: column;
     padding: calc(10px + var(--safe-top)) 0 calc(14px + var(--safe-bottom)) var(--safe-left);
     background: var(--bg); color: var(--text);
-    opacity: calc(0.4 + 0.6 * var(--cv-p, 0));
-    transform: translateX(calc((var(--cv-p, 0) - 1) * 18%)); /* entra um pouco atrás do dedo (paralaxe) */
+    opacity: 0.4; /* opacity e transform (paralaxe) vêm do JS a cada quadro, sem variável CSS */
+    transform: translateX(-18%);
+    will-change: transform, opacity;
 }
 .cv-drawer.cv-fade { transition: opacity 180ms ease; transform: none; }
 [data-iphone] .app { position: relative; z-index: 1; background: var(--bg); }
 .app.cv-pushed {
-    border-radius: calc(var(--cv-p, 0) * 34px); overflow: hidden;
-    box-shadow: -1px 0 0 var(--border), -18px 0 40px rgba(0, 0, 0, calc(var(--cv-p, 0) * 0.35));
+    border-radius: 30px; overflow: hidden; /* fixos: animar raio e sombra redesenhava a tela toda */
+    box-shadow: -1px 0 0 var(--border), -18px 0 40px rgba(0, 0, 0, 0.3);
     will-change: transform;
 }
 .cv-dim {
     position: absolute; inset: 0; z-index: 60; background: #000;
-    opacity: calc(var(--cv-p, 0) * 0.32); touch-action: pan-y;
+    opacity: 0; touch-action: pan-y; will-change: opacity;
 }
 .cv-dim[hidden] { display: none; }
 .cv-head { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 14px 0 22px; }
@@ -4014,3 +4015,22 @@ audio.fm-media { width: min(520px, 90%); }
 .ap-txt b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ap-txt small { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ap-list .cv-note { display: flex; align-items: center; gap: 8px; }
+/* Conversas longas: o navegador só calcula estilo/layout dos turnos perto da tela (o tamanho
+   real de cada um fica lembrado depois de aparecer uma vez, então a rolagem não pula) */
+.ag-log .ag-turn { content-visibility: auto; contain-intrinsic-size: auto 240px; }
+.ag-log .ag-turn:last-child { content-visibility: visible; }
+/* Permissões (Configurações → Permissões e a oferta no primeiro uso do app instalado) */
+.pm-all { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; margin: 10px 0 12px;
+    border: 0; border-radius: 14px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; font-size: 16px; cursor: pointer; }
+.pm-all:active { filter: brightness(0.92); }
+.pm-list { list-style: none; margin: 0; padding: 0; border-radius: 14px; overflow: hidden; background: var(--surface-1, rgba(255,255,255,0.04)); }
+.pm-row { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 12px; }
+.pm-row + .pm-row { border-top: 1px solid var(--border); }
+.pm-ic { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.pm-txt { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.pm-txt b { font-weight: 500; }
+.pm-txt small { color: var(--text-2); font-size: 12px; line-height: 1.35; }
+.pm-txt .pm-note { color: var(--text-3); font-style: italic; }
+.pm-state { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.pm-sheet .sheet-body { padding-bottom: 16px; }

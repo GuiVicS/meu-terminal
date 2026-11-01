@@ -25,6 +25,8 @@ import AgentLaunch from './ui/agentLaunch.js';
 import { isHandset, isIphonePortrait } from './ui/device.js';
 import { openSettingsSheet } from './ui/settingsSheet.js';
 import { toast } from './ui/toast.js';
+import { haptic } from './ui/haptics.js';
+import { offerPermissionsOnce } from './ui/permissions.js';
 
 const STATE_LABELS = {
     connecting: 'Conectando',
@@ -483,3 +485,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const serviceWorkerManager = new ServiceWorkerManager();
     serviceWorkerManager.initialize(() => {});
 });
+
+// Interruptores: toque tátil (como no iPhone); permissões oferecidas uma vez no app instalado
+document.addEventListener('change', e => { if (e.target.matches?.('input.switch')) haptic('select'); }, true);
+setTimeout(() => { try { offerPermissionsOnce(); } catch { /* sem armazenamento */ } }, 2500);

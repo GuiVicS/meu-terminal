@@ -7,6 +7,7 @@
 import { icon } from './icons.js';
 import { toast } from './toast.js';
 import Dictation from './dictation.js';
+import { haptic } from './haptics.js';
 
 // Arrow/navigation keys: [normal mode, application cursor mode, xterm modifier final]
 const NAV = {
@@ -175,7 +176,7 @@ export default class ShortcutBar {
             longFired = false;
             timer = setTimeout(() => {
                 longFired = true;
-                navigator.vibrate?.(15);
+                haptic('medium');
                 this.onAction?.(key.longAction, btn);
             }, 500);
         });
@@ -184,7 +185,7 @@ export default class ShortcutBar {
             clearTimeout(timer);
             timer = null;
             if (run && !longFired) {
-                navigator.vibrate?.(8);
+                haptic('select');
                 this.onAction?.(key.action, btn);
             }
         };
@@ -199,7 +200,7 @@ export default class ShortcutBar {
     }
 
     press(key, repeating = false) {
-        if (!repeating) navigator.vibrate?.(8);
+        if (!repeating) haptic('select');
         if (key.action) {
             this.onAction?.(key.action, this.el.querySelector(`[data-key="${key.id}"]`));
             return;

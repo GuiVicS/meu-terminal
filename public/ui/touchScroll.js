@@ -1,3 +1,4 @@
+import { haptic } from './haptics.js';
 /**
  * touchScroll.js
  * Touch gestures for the terminal on phones/tablets:
@@ -187,7 +188,7 @@ export function attachTouchScroll(panel, term, sendInput, { onSecondaryTap } = {
             e.preventDefault();
             e.stopPropagation();
             if (!tap) return;
-            navigator.vibrate?.(10);
+            haptic('light');
             if (mouseMode()) rightClickAt(x, y);
             else onSecondaryTap?.(x, y);
             return;

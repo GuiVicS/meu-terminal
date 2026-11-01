@@ -5,6 +5,7 @@
  * Holds no session logic - it only reports user intent through the handlers.
  */
 import { icon } from './icons.js';
+import { haptic } from './haptics.js';
 
 const STATE_LABELS = {
     connecting: 'Conectando',
@@ -106,7 +107,7 @@ export default class TabBar {
             pressStart = { x: e.clientX, y: e.clientY };
             pressTimer = setTimeout(() => {
                 suppressClick = true;
-                navigator.vibrate?.(10);
+                haptic('medium');
                 openMenu(pressStart.x, pressStart.y);
             }, LONG_PRESS_MS);
         });
