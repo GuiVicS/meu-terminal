@@ -3,6 +3,8 @@ services:
     build: .
     container_name: meuterminal
     restart: unless-stopped
+    # Recolhe processos órfãos (Chromium, OmniRoute...): o npm, PID 1 do container, não faz isso
+    init: true
     ports:
       - ${MEUTERMINAL_PORT:-3000}:3000
     volumes:

@@ -239,3 +239,34 @@ test('modo fila: messages sent while the agent works wait and go in order', asyn
     assert.deepEqual(gateway.get(session.id).queue, []);
     assertValidSequence(gateway.events(session.id));
 });
+
+// ---------- routes (scripts/addon-services.js) ----------
+
+function setupRoutes(routeEnv) {
+    const store = new AgentStore(':memory:');
+    const gateway = new AgentGateway({
+        store,
+        agents: { fake: { label: 'Fake', command: process.execPath, args: [FAKE], install: 'n/a' } },
+        env: { ...process.env },
+        routeEnv,
+        log: () => {},
+    });
+    return { store, gateway };
+}
+
+test('routes: the session keeps its route and the agent process gets the route env', async () => {
+    const calls = [];
+    const { store, gateway } = setupRoutes(async ({ agent, route }) => { calls.push([agent, route]); return { FAKE_ROUTE_MARK: route }; });
+    const session = await gateway.startSession({ agent: 'fake', cwd: process.cwd(), route: 'economia' });
+    assert.equal(store.getSession(session.id).route, 'economia');
+    assert.deepEqual(calls, [['fake', 'economia'], ['fake', 'economia']]); // checked before saving, then for the process
+    await gateway.closeSession?.(session.id);
+    await gateway.shutdown();
+});
+
+test('routes: a route that cannot start fails before any session is saved (no dead tab)', async () => {
+    const { store, gateway } = setupRoutes(async () => { const e = new Error('Ligue o Headroom'); e.status = 400; throw e; });
+    await assert.rejects(gateway.startSession({ agent: 'fake', cwd: process.cwd(), route: 'economia' }), /Ligue o Headroom/);
+    assert.equal(store.listSessions().length, 0);
+    await gateway.shutdown();
+});

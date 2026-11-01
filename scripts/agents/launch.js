@@ -19,8 +19,10 @@ class AgentLauncher {
      * @param {number} [deps.timeoutMs] - no answer -> terminal (never leave the user stuck)
      * @param {Function} [deps.log]
      */
-    constructor({ gateway, sessions, prefs, commandExists, timeoutMs = DEFAULT_TIMEOUT_MS, log = () => {} }) {
+    constructor({ gateway, sessions, prefs, commandExists, timeoutMs = DEFAULT_TIMEOUT_MS, defaultRoute = () => null, log = () => {} }) {
         this.gateway = gateway;
+        // Rota da conversa aberta a partir do terminal: a mesma do terminal (Configurações → Complementos)
+        this.defaultRoute = defaultRoute;
         this.sessions = sessions;
         this.prefs = prefs;
         this.commandExists = commandExists;
@@ -121,7 +123,7 @@ class AgentLauncher {
 
     /** Starts the agent session and opens its tab next to the terminal that launched it. */
     async openUi({ agent, cwd, tabId, prompt, uiName }) {
-        const session = await this.gateway.startSession({ agent, cwd });
+        const session = await this.gateway.startSession({ agent, cwd, route: this.defaultRoute(agent) });
         const tab = this.sessions.create({ kind: 'agent', url: session.id, cwd, name: uiName, afterId: tabId || undefined });
         this.sessions.broadcast({ type: 'open-tab', id: tab.id });
         // "claude 'corrija o bug'": the initial prompt becomes the first message

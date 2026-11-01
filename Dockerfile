@@ -53,6 +53,16 @@ RUN npm install -g --prefix /usr/local @anthropic-ai/claude-code && npm cache cl
 # Agent UI ("Deseja usar o modo Claude Code UI?"): Claude Code over ACP (scripts/agents/).
 # OpenCode speaks ACP natively; Codex needs @agentclientprotocol/codex-acp (installed by the user).
 RUN npm install -g --prefix /usr/local @agentclientprotocol/claude-agent-acp && npm cache clean --force
+# Complementos (scripts/addons.js): o Claude Mem roda o trabalhador dele com Bun e a busca
+# semântica com uv. Ficam em /usr/local para não depender do volume da home.
+RUN npm install -g --prefix /usr/local bun@1 && npm cache clean --force && bun --version
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh && uv --version
+# Complementos que são serviços (scripts/addon-services.js): desligados por padrão, só 127.0.0.1.
+# Headroom (proxy que comprime o contexto) sem o extra [ml], que traria o PyTorch.
+RUN UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin UV_PYTHON_PREFERENCE=only-system \
+    uv tool install --python 3.13 "headroom-ai[proxy,code]==0.42.0" && headroom --help >/dev/null
+# OmniRoute (gateway para outros provedores/modelos)
+RUN npm install -g --prefix /usr/local omniroute@3.8.52 && npm cache clean --force && omniroute --version
 
 # Vibecoding "Publicar": deploys the project with the Vercel CLI (needs VERCEL_TOKEN set by the user).
 RUN npm install -g --prefix /usr/local vercel && npm cache clean --force

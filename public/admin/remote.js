@@ -12,7 +12,7 @@ function basePath() {
     return (window.appConfig?.basePath || '').replace(/\/+$/, '');
 }
 
-async function api(method, route, body, { retried = false } = {}) {
+export async function api(method, route, body, { retried = false } = {}) {
     const response = await fetch(`${basePath()}${route}`, {
         method,
         credentials: 'same-origin',
