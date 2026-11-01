@@ -139,3 +139,30 @@ test('addons: what the user turns on while the plugins install is not lost (no s
     assert.strictEqual(a.serviceSecrets('omniroute').INITIAL_PASSWORD, secret);
     assert.strictEqual(Object.keys(a.state().seeded).length, 3);
 });
+
+test('OmniRoute: conexão do Codex só oferece os modelos que a conta ChatGPT libera (models_cache.json)', async () => {
+    const fs = require('fs'); const os = require('os'); const path = require('path');
+    const { OmniRouteBridge } = require('../scripts/addon-bridges');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mt-codex-'));
+    fs.mkdirSync(path.join(home, '.codex'));
+    fs.writeFileSync(path.join(home, '.codex', 'models_cache.json'), JSON.stringify({ models: [
+        { slug: 'gpt-6-luna', visibility: 'list' }, { slug: 'gpt-5.6-terra', visibility: 'list' }, { slug: 'codex-auto-review', visibility: 'hide' }] }));
+    const b = new OmniRouteBridge({ password: () => 'x', home });
+    b.api = async () => ({ provider: 'codex', models: [{ id: 'gpt-6-astra' }, { id: 'gpt-6-luna' }, { id: 'gpt-5.6-terra' }, { id: 'codex-auto-review' }] });
+    assert.deepEqual((await b.models('c1')).map(m => m.id), ['codex/gpt-6-luna', 'codex/gpt-5.6-terra']);
+    b.api = async () => ({ provider: 'openai', models: [{ id: 'gpt-6-astra' }] });
+    assert.deepEqual((await b.models('c2')).map(m => m.id), ['openai/gpt-6-astra']); // outros provedores: sem filtro
+    fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('troca automática: lista de prioridade validada; o modelo antigo vira o primeiro item', () => {
+    const fs = require('fs'); const os = require('os'); const path = require('path');
+    const { Addons, ADDONS: LIST } = require('../scripts/addons');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mt-chain-'));
+    const a = new Addons({ stateFile: path.join(dir, 'addons.json'), home: dir, run: async () => ({ code: 0, stdout: '', stderr: '' }), runScript: async () => ({ code: 0 }), addons: LIST, env: { PATH: '/bin' } });
+    a.setPrefs({ fallback: { model: 'codex/gpt-6-luna' } });
+    assert.deepEqual(a.prefs().fallback.chain, ['modelo:codex/gpt-6-luna']);
+    a.setPrefs({ fallback: { chain: ['conta:', 'conta:trabalho', 'modelo:codex/gpt-6-luna', 'conta:../x', 'rm -rf', 'conta:trabalho'] } });
+    assert.deepEqual(a.prefs().fallback.chain, ['conta:', 'conta:trabalho', 'modelo:codex/gpt-6-luna']);
+    fs.rmSync(dir, { recursive: true, force: true });
+});

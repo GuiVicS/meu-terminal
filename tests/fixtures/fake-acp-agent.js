@@ -40,7 +40,13 @@ function configOptions() {
     return options;
 }
 
+let legacyModel = 'm-a';
 function sessionResult() {
+    // Agentes que mandam os modelos no campo antigo "models" (OpenCode, Gemini...)
+    if (process.env.FAKE_AGENT_LEGACY_MODELS) {
+        return { sessionId: SESSION_ID, models: { currentModelId: legacyModel,
+            availableModels: [{ modelId: 'm-a', name: 'Modelo A' }, { modelId: 'm-b', name: 'Modelo B' }, { modelId: 'm-c', name: 'Modelo C' }] } };
+    }
     const result = { sessionId: SESSION_ID, configOptions: configOptions() };
     if (!CONFIG_STYLE) {
         result.modes = {
@@ -102,6 +108,11 @@ function playRich() {
 function playTurn(text) {
     if (text.includes('crash')) process.exit(7);
     if (text.includes('markdown')) return playRich();
+    // "limite": responde como o Claude Code quando o limite da conta acaba (texto sintético)
+    if (text.includes('limite')) {
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: "You've hit your 5-hour limit · resets 12:30am" }, messageId: 'lim' });
+        return finishTurn('end_turn');
+    }
     update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Pensando...' } });
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Vou criar ' }, messageId: 'm1' });
     update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'o arquivo.' }, messageId: 'm1' });
@@ -227,6 +238,10 @@ rl.on('line', (line) => {
             send({ id: msg.id, result: page });
             break;
         }
+        case 'session/set_model':
+            legacyModel = msg.params.modelId;
+            send({ id: msg.id, result: {} });
+            break;
         case 'session/set_config_option': {
             const { configId, value } = msg.params;
             config[configId] = value;

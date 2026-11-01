@@ -633,6 +633,15 @@ class BrowserManager {
     // ---------- used by the MCP server (agents), no viewer needed ----------
 
     /** Opens (if needed) and returns the page of a browser tab row. */
+    /**
+     * Grava um cookie no Chromium do servidor (perfil compartilhado pelas páginas). Usado pelo
+     * painel completo dos complementos: a página do serviço local já abre com a sessão feita.
+     */
+    async setCookie({ url, name, value }) {
+        await this.start();
+        await this.cdp.send('Storage.setCookies', { cookies: [{ name, value, url, httpOnly: true, sameSite: 'Lax' }] });
+    }
+
     async ensurePage(row) {
         const page = this.getPage(row);
         await this.openPage(page);

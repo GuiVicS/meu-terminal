@@ -40,6 +40,8 @@ const EVENT_FIELDS = {
     'commands.update': ['commands'],
     'queue.update': ['items'],          // "modo fila": messages waiting for the current turn
     'error': ['message'],
+    // Aviso do próprio MeuTerminal na conversa (rota trocada, troca automática ao acabar o limite)
+    'notice': ['text'],
     // Anything an adapter cannot map. The UI shows it as a generic card: nothing disappears.
     'raw': ['source', 'payload'],
 };

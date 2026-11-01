@@ -393,7 +393,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         getAgent: () => (workspace.active?.kind === 'agent' ? workspace.active : null),
         getOpenAgents: () => [...workspace.sessions.values()].filter(s => s.kind === 'agent'),
         activate: id => workspace.activate(id, { focus: true }),
-        openSettings: source => openSettings(undefined, source),
+        switchTo: (tabId, agentSessionId) => workspace.switchAgentTab(tabId, agentSessionId),
     });
     convBtn.innerHTML = MENU_ICON;
     convBtn.addEventListener('click', () => drawer.toggle());

@@ -29,6 +29,7 @@ const ICONS = {
     edit: 'pencil',
     history: 'rotate-ccw-clock',
     keyboard: 'keyboard',
+    user: 'user',
     folder: 'folder',
     chevronRight: 'chevron-right',
     chevronLeft: 'chevron-left',

@@ -19,6 +19,7 @@ import { openSessionSheet, sessionIcon } from '../ui/sessionSheet.js';
 import { toast } from '../ui/toast.js';
 import { playChime } from '../ui/sound.js';
 import { isHandset } from '../ui/device.js';
+import { withLoading, KIND_LABEL } from '../ui/loading.js';
 
 const RECONCILE_DELAY = 250;
 
@@ -173,10 +174,43 @@ export default class TerminalManager {
     }
 
     /**
+     * Aba de agente que passou a mostrar outra conversa do mesmo agente: recria só o componente da
+     * conversa no mesmo lugar (sem estado sobrando da anterior); a conversa anterior segue rodando
+     * no servidor e continua na lista lateral.
+     */
+    replaceAgentView(row) {
+        const old = this.sessions.get(row.id);
+        const wasActive = this.activeId === row.id;
+        old.dispose();
+        const fresh = new AgentSession({ row, settings: this.settings, hooks: this.hooks });
+        this.sessions.set(row.id, fresh);
+        fresh.mount(this.workspaceEl.querySelector('.terminal-panels'));
+        fresh.shown = false;
+        fresh.setActive(false);
+        this.tabBar.update(fresh);
+        if (wasActive) {
+            this.activeId = null;
+            this.activate(row.id, { focus: !isCoarse() });
+        }
+        this.onSessionChanged(fresh);
+    }
+
+    /** Lista lateral: mostra outra conversa (aberta) do mesmo agente nesta aba. */
+    async switchAgentTab(tabId, agentSessionId) {
+        await api('PATCH', `sessions/${encodeURIComponent(tabId)}`, { agentSession: agentSessionId });
+        await this.reconcile();
+    }
+
+    /**
      * Creates a new session on the server and opens its tab.
      * @param {{name?: string, cwd?: string, color?: string, afterId?: string, reopenId?: string}} opts
      */
-    async create({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
+    create(opts = {}) {
+        const [label, ico] = KIND_LABEL[opts.kind || 'terminal'] || KIND_LABEL.terminal;
+        return withLoading(label, ico, () => this.createNow(opts));
+    }
+
+    async createNow({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
         try {
             const row = await api('POST', 'sessions', {
                 name,
@@ -412,26 +446,30 @@ export default class TerminalManager {
         }
         const folder = this.currentFolder();
         const agents = (info.agents || []).filter(a => !a.terminalOnly);
-        // Claude Code também pelas rotas dos complementos ligados (Headroom, OmniRoute)
-        const items = agents.flatMap(a => [
-            { label: a.label, icon: 'bot', hint: a.installed ? '' : 'não instalado', disabled: !a.installed,
-                run: () => this.createAgent(a.id, folder) },
-            ...(a.id === 'claude' && a.installed ? (info.claudeRoutes || []).map(r => ({
-                label: `${a.label} · ${r.label.split(' (')[0]}`, icon: 'bot', hint: r.label.match(/\((.+)\)/)?.[1] || '',
-                run: () => this.createAgent(a.id, folder, r.id),
-            })) : []),
-        ]);
-        showMenu(items.length ? items : [{ label: 'Nenhum agente com modo UI', icon: 'info', disabled: true }],
+        this.agentList = agents; // nomes para a tela "Abrindo…"
+        // Um Claude Code só: a rota (Direto / Economia / Outros modelos) é a padrão de Complementos e
+        // se troca dentro da conversa (⋮ → Rota)
+        // Só as IAs instaladas no servidor (detectadas sozinhas: scripts/agents/detect.js)
+        const items = agents.filter(a => a.installed).map(a => ({ label: a.label, icon: 'bot',
+            run: () => this.createAgent(a.id, folder) }));
+        showMenu(items.length ? items : [{ label: 'Nenhuma IA de terminal instalada', icon: 'info', disabled: true }],
         { anchor, label: `Nova conversa em ${folder}` });
     }
 
-    async createAgent(agent, cwd, route) {
+    createAgent(agent, cwd, route) {
+        const label = this.agentList?.find?.(a => a.id === agent)?.label || 'o agente';
+        return withLoading(label, 'bot', () => this.createAgentNow(agent, cwd, route));
+    }
+
+    async createAgentNow(agent, cwd, route) {
         try {
             const r = await fetch(joinPath('api/agent-sessions'), {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ agent, cwd, route, afterId: this.activeId || undefined }),
+                // Uma aba por agente: se já há uma deste agente, a conversa nova abre nela
+                body: JSON.stringify({ agent, cwd, route, afterId: this.activeId || undefined,
+                    intoTab: [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agent)?.id }),
             });
             const data = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(data.error || `Erro ${r.status}`);
@@ -1007,7 +1045,9 @@ export default class TerminalManager {
         this.order.filter(id => !ids.has(id)).forEach(id => this.removeLocal(id));
         rows.forEach(row => {
             const existing = this.sessions.get(row.id);
-            if (existing) {
+            if (existing && existing.kind === 'agent' && row.url && row.url !== existing.agentSessionId) {
+                this.replaceAgentView(row); // a aba passou a mostrar outra conversa (lista lateral)
+            } else if (existing) {
                 existing.applyRow(row);
                 this.onSessionChanged(existing);
             } else {

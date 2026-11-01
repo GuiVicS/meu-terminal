@@ -42,6 +42,9 @@ const { AgentLauncher } = require('./scripts/agents/launch');
 const { writeShims, writeRcFile } = require('./scripts/agents/shims');
 const { execFile } = require('child_process');
 const { Addons, SERVICES } = require('./scripts/addons');
+const { deleteConversation, canDelete: canDeleteConversation } = require('./scripts/agents/history-files');
+const { detectAgents, searchDirs } = require('./scripts/agents/detect');
+const { ClaudeAccounts } = require('./scripts/claude-accounts');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
@@ -798,17 +801,21 @@ const addons = new Addons({
 const addonServices = new ServiceManager({ defs: SERVICES, home: HOME_DIR, env: childEnv(), secrets: id => addons.serviceSecrets(id), log: (...a) => console.log(...a) });
 
 /** Env da rota para um agente; liga o serviço se precisar. Só o Claude Code fala o protocolo da Anthropic. */
-async function agentRouteEnv({ agent, route }) {
+async function agentRouteEnv({ agent, route, routeModel = null, account = null }) {
     route = normalizeRoute(route);
-    if (agent !== 'claude' || route === DEFAULT_ROUTE) return {};
+    if (agent !== 'claude') return {};
+    // Conta extra do Claude Code (a rota do OmniRoute não usa a assinatura, então não precisa)
+    const acct = account && route !== 'omniroute' ? claudeAccounts.env(account) : {};
+    if (route === DEFAULT_ROUTE) return acct;
     const prefs = addons.prefs();
     const service = ROUTES[route].service;
     if (!prefs.services[service]?.enabled) {
         throw new RouteError(`Ligue o ${SERVICES[service].label} em Configurações → Complementos para usar "${ROUTES[route].label}".`);
     }
-    const env = routeEnv(route, prefs, SERVICES); // valida a chave antes de ligar o serviço
+    if (service === 'omniroute') await ensureOmniKey();
+    const env = routeEnv(route, addons.prefs(), SERVICES, { model: routeModel }); // valida a chave antes de ligar o serviço
     await addonServices.ensure(service);
-    return env;
+    return { ...env, ...acct };
 }
 
 /** Rota padrão do terminal, valendo só se o serviço dela estiver ligado. */
@@ -823,6 +830,74 @@ function terminalRouteEnv() {
     try { return routeEnv(terminalRoute(), addons.prefs(), SERVICES); } catch { return {}; }
 }
 
+/**
+ * Troca automática: o limite do Claude acabou numa conversa do Modo UI. Se estiver ligada
+ * (Configurações → Complementos), a conversa passa para o OmniRoute com o modelo escolhido, é
+ * retomada e a mensagem que falhou é reenviada. A assinatura do Claude nunca passa pelo OmniRoute.
+ */
+/**
+ * Modelos do OmniRoute no seletor do Claude Code no Modo UI (Codex, GPT, Gemini... conectados lá):
+ * escolher um passa a conversa para a rota "Outros modelos" com aquele modelo. Cache curto, para
+ * não consultar o OmniRoute a cada conversa aberta.
+ */
+let omniModelsCache = { at: 0, list: [] };
+async function extraAgentModels({ agent }) {
+    if (agent !== 'claude' || !addons.prefs().services.omniroute?.enabled) return [];
+    if (Date.now() - omniModelsCache.at > 60000) {
+        const models = await bridges.omniroute.allModels();
+        omniModelsCache = { at: Date.now(), list: models };
+    }
+    return omniModelsCache.list.map(m => ({
+        value: `omniroute:${m.id}`, name: m.name || m.id, model: m.id, route: 'omniroute',
+        group: `OmniRoute${m.provider ? ` · ${m.provider}` : ''}`,
+    }));
+}
+
+/** Contas do Claude Code que bateram o limite (chave '' = principal) -> até quando evitar. */
+const limitedAccounts = new Map();
+const LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
+
+/**
+ * Troca automática ao acabar o limite: a conversa vai para o primeiro item da lista de prioridade
+ * (Configurações → Complementos) que não seja o atual e esteja disponível: outra conta do Claude
+ * Code ou um modelo do OmniRoute. Se esse também estiver no limite, o próximo aviso move de novo.
+ */
+async function usageLimitFallback({ sessionId, row, text, images }) {
+    const prefs = addons.prefs();
+    if (!prefs.fallback.enabled || row.agent !== 'claude' || normalizeRoute(row.route) === 'omniroute') return;
+    const now = Date.now();
+    const current = row.account || '';
+    limitedAccounts.set(current, now + LIMIT_COOLDOWN_MS);
+    const known = new Set(claudeAccounts.ids());
+    const skipped = [];
+    let target = null;
+    for (const item of prefs.fallback.chain) {
+        if (item.startsWith('conta:')) {
+            const id = item.slice(6);
+            if (id === current || (limitedAccounts.get(id) || 0) > now) continue;
+            if (id && !known.has(id)) { skipped.push(`conta ${id} (não existe mais)`); continue; }
+            if (!(await claudeAccounts.status(id || null)).loggedIn) { skipped.push(`conta ${id || 'principal'} (sem login)`); continue; }
+            target = { account: id || null, label: `pela conta ${id || 'principal'}` };
+        } else {
+            if (!prefs.services.omniroute?.enabled) { skipped.push('OmniRoute (desligado)'); continue; }
+            const model = item.slice(7);
+            target = { model, label: `pelo OmniRoute com ${model}` };
+        }
+        break;
+    }
+    if (!target) {
+        const why = prefs.fallback.chain.length ? 'nenhuma opção da lista de troca está disponível' : 'a lista de troca automática está vazia';
+        agentGateway.emitEvent(sessionId, 'notice', { text: `O limite do Claude acabou e ${why}${skipped.length ? ` (${skipped.join(', ')})` : ''}. Configure em Configurações → Complementos.` });
+        return;
+    }
+    agentGateway.emitEvent(sessionId, 'notice', { text: `O limite do Claude acabou: continuando ${target.label}…` });
+    if (target.model) await agentGateway.setRoute(sessionId, 'omniroute', target.model);
+    else await agentGateway.setAccount(sessionId, target.account);
+    if (text && text.trim() || (images && images.length)) await agentGateway.prompt(sessionId, text, { images });
+}
+
+const claudeAccounts = new ClaudeAccounts({ home: HOME_DIR, env: childEnv({ HOME: HOME_DIR }) });
+
 const agentGateway = new AgentGateway({
     store: new AgentStore(DB_PATH),
     // Images/files produced by agents (or attached to prompts), next to the database (same volume)
@@ -833,8 +908,35 @@ const agentGateway = new AgentGateway({
     // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
     mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
     routeEnv: agentRouteEnv,
+    onUsageLimit: usageLimitFallback,
+    extraModels: extraAgentModels,
     log: debugLog,
 });
+// Os agentes acham os programas instalados nas pastas do usuário (~/.local/bin, ~/.opencode/bin...)
+agentGateway.env.PATH = searchDirs(agentGateway.env, HOME_DIR).join(path.delimiter);
+
+/**
+ * IAs de terminal instaladas (scripts/agents/detect.js): as que falam ACP entram no Modo UI
+ * sozinhas. Refeito no máximo a cada 20 s, quando o menu de agentes é aberto.
+ */
+const BUILTIN_AGENTS = new Set(Object.keys(agentGateway.agents));
+let agentScan = { at: 0, running: null };
+function refreshAgents() {
+    if (Date.now() - agentScan.at < 20000) return Promise.resolve();
+    agentScan.running ||= detectAgents({ known: Object.fromEntries([...BUILTIN_AGENTS].map(id => [id, agentGateway.agents[id]])), env: agentGateway.env, home: HOME_DIR })
+        .then(({ found }) => {
+            // Some quem foi desinstalado (e não tem conversa aberta); entra quem apareceu
+            for (const id of Object.keys(agentGateway.agents)) {
+                if (!BUILTIN_AGENTS.has(id) && !found[id]) delete agentGateway.agents[id];
+            }
+            Object.assign(agentGateway.agents, found);
+            agentScan.at = Date.now();
+        })
+        .catch(e => debugLog(`detectAgents: ${e.message}`))
+        .finally(() => { agentScan.running = null; });
+    return agentScan.running;
+}
+refreshAgents();
 const agentLauncher = new AgentLauncher({
     gateway: agentGateway,
     sessions,
@@ -899,7 +1001,7 @@ function commandExists(command) {
     if (!command) return false;
     const candidates = path.isAbsolute(command)
         ? [command]
-        : (process.env.PATH || '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, command));
+        : searchDirs(process.env, HOME_DIR).map(dir => path.join(dir, command));
     return candidates.some(file => {
         try {
             fs.accessSync(file, fs.constants.X_OK);
@@ -972,6 +1074,7 @@ app.get(BASE_PATH + '/api/addons', async (req, res) => {
         enabled: !DEMO_MODE,
         routes: Object.entries(ROUTES).map(([id, r]) => ({ id, label: r.label, service: r.service })),
         terminalRoute: normalizeRoute(prefs.terminalRoute),
+        fallback: prefs.fallback,
         addons: await addons.status({ services: addonServices }),
     });
 });
@@ -986,13 +1089,13 @@ app.put(BASE_PATH + '/api/addons', async (req, res) => {
     } catch (e) {
         return res.status(e.status || 500).json({ error: e.message });
     }
-    res.json({ terminalRoute: normalizeRoute(addons.prefs().terminalRoute), addons: await addons.status({ services: addonServices }) });
+    res.json({ terminalRoute: normalizeRoute(addons.prefs().terminalRoute), fallback: addons.prefs().fallback, addons: await addons.status({ services: addonServices }) });
 });
 
 // Telas dos complementos dentro das Configurações (scripts/addon-bridges.js): o servidor fala com
 // cada serviço em 127.0.0.1; o usuário não abre painel no navegador nem faz outro login.
 const bridges = {
-    omniroute: new OmniRouteBridge({ port: SERVICES.omniroute.port, password: () => addons.serviceSecrets('omniroute').INITIAL_PASSWORD }),
+    omniroute: new OmniRouteBridge({ port: SERVICES.omniroute.port, password: () => addons.serviceSecrets('omniroute').INITIAL_PASSWORD, home: HOME_DIR }),
     'claude-mem': new ClaudeMemBridge(),
     headroom: new HeadroomBridge({ port: SERVICES.headroom.port }),
 };
@@ -1051,6 +1154,28 @@ app.get(BASE_PATH + '/api/addons/:id/panel', async (req, res) => {
     }
 });
 
+// Painel completo de cada complemento: endereço local e como entrar sem login
+const ADDON_PANELS = {
+    omniroute: {
+        url: `http://localhost:${SERVICES.omniroute.port}/dashboard`,
+        prepare: async () => browsers.setCookie({ url: `http://localhost:${SERVICES.omniroute.port}`, name: 'auth_token', value: await bridges.omniroute.sessionToken() }),
+    },
+    'claude-mem': { url: 'http://localhost:37700/viewer', prepare: () => withMem(() => bridges['claude-mem'].panel()) },
+    headroom: { url: `http://localhost:${SERVICES.headroom.port}/dashboard` },
+};
+
+async function attachAddonPanel(ws, id, params) {
+    const def = ADDON_PANELS[id];
+    if (!def) throw new BridgeError('Complemento sem painel completo.', 404);
+    if (!browsers.available) throw new BridgeError('O navegador interno não está instalado no servidor.', 503);
+    await bridgeFor(id); // ligado? sobe o serviço se preciso
+    await def.prepare?.();
+    browsers.attach(ws, { id: `addon-panel-${id}`, url: def.url, cwd: null }, {
+        width: params.get('width'), height: params.get('height'), dpr: params.get('dpr'),
+        mobile: params.get('mobile') === '1', quality: params.get('quality'), visible: params.get('visible') !== '0',
+    });
+}
+
 // Só as ações que as telas usam (nada de repassar rotas arbitrárias)
 const BRIDGE_ACTIONS = {
     omniroute: {
@@ -1059,6 +1184,7 @@ const BRIDGE_ACTIONS = {
         removeProvider: (b, a) => b.removeProvider(String(a.id || '')),
         testProvider: (b, a) => b.testProvider(String(a.id || '')),
         models: (b, a) => b.models(String(a.id || '')),
+        allModels: b => b.allModels(),
         importCodex: b => b.importCodex(HOME_DIR),
         setModel: (b, a) => {
             const model = typeof a.model === 'string' ? a.model : '';
@@ -1096,17 +1222,59 @@ app.put(BASE_PATH + '/api/agent-pins', (req, res) => {
     res.json({ pins: clean });
 });
 
-app.get(BASE_PATH + '/api/agents', (req, res) => {
+// Contas do Claude Code (troca automática): a principal (~/.claude) + as extras
+app.get(BASE_PATH + '/api/claude-accounts', async (req, res) => {
+    const ids = ['', ...claudeAccounts.ids()];
+    const list = await Promise.all(ids.map(async id => ({
+        id, name: id || 'Principal', ...(await claudeAccounts.status(id || null)),
+        limitedUntil: (limitedAccounts.get(id) || 0) > Date.now() ? limitedAccounts.get(id) : null,
+    })));
+    res.json({ accounts: list });
+});
+
+// Nova conta: cria a pasta e abre um terminal com o login do próprio Claude Code
+app.post(BASE_PATH + '/api/claude-accounts', (req, res) => {
+    try {
+        const id = req.body?.id && claudeAccounts.ids().includes(req.body.id) ? req.body.id : claudeAccounts.create(req.body?.name);
+        const tab = sessions.create({ kind: 'terminal', name: `Login Claude: ${id}`, cwd: HOME_DIR });
+        sessions.runCommand(tab.id, claudeAccounts.loginCommand(id));
+        res.status(201).json({ id, tab });
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
+});
+
+app.delete(BASE_PATH + '/api/claude-accounts/:id', (req, res) => {
+    try {
+        if (!claudeAccounts.remove(req.params.id)) return res.status(404).json({ error: 'Conta não encontrada.' });
+        const prefs = addons.prefs();
+        addons.setPrefs({ fallback: { chain: prefs.fallback.chain.filter(x => x !== `conta:${req.params.id}`) } });
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
+});
+
+// Trocar a conta do Claude Code de uma conversa (null/'' = principal)
+app.post(BASE_PATH + '/api/agent-sessions/:id/account', agentRoute(async (req, res) => {
+    const id = String(req.body?.account || '');
+    if (id && !claudeAccounts.ids().includes(id)) return res.status(400).json({ error: 'Conta não encontrada.' });
+    res.json(await agentGateway.setAccount(req.params.id, id || null));
+}));
+
+app.get(BASE_PATH + '/api/agents', async (req, res) => {
+    await refreshAgents();
     res.json({
         enabled: AGENT_UI_ENABLED && isAuthRequired,
         needsLogin: !isAuthRequired,
         agents: agentGateway.listAgents().map(a => ({
             ...a,
             installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].requires || agentGateway.agents[a.id].command),
+            detected: !!agentGateway.agents[a.id].detected,
         })),
-        // Rotas extras do Claude Code: só as dos complementos ligados (Configurações → Complementos)
+        // Rotas do Claude Code para trocar dentro da conversa: Direto + as dos complementos ligados
         claudeRoutes: Object.entries(ROUTES)
-            .filter(([id, r]) => id !== DEFAULT_ROUTE && addons.prefs().services[r.service]?.enabled)
+            .filter(([id, r]) => !r.service || addons.prefs().services[r.service]?.enabled)
             .map(([id, r]) => ({ id, label: r.label })),
     });
 });
@@ -1125,7 +1293,7 @@ app.get(BASE_PATH + '/api/agent-media/:session/:file', (req, res) => {
 });
 // New agent conversation in its own tab ("Nova conversa"), or an old one resumed ("Conversas")
 app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
-    const { agent, cwd, resumeAcpSessionId, title, afterId, route } = req.body || {};
+    const { agent, cwd, resumeAcpSessionId, title, afterId, route, intoTab } = req.body || {};
     if (typeof cwd !== 'string' || !cwd.trim()) return res.status(400).json({ error: 'Pasta inválida.' });
     const folder = path.resolve(HOME_DIR, cwd.replace(/^~(?=$|[\\/])/, HOME_DIR));
     if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return res.status(400).json({ error: 'Pasta não encontrada.' });
@@ -1134,12 +1302,43 @@ app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
         cwd: folder,
         title: typeof title === 'string' ? title.slice(0, 120) : null,
         resumeAcpSessionId: typeof resumeAcpSessionId === 'string' ? resumeAcpSessionId : null,
-        route: ROUTES[route] && route !== DEFAULT_ROUTE ? route : null,
+        // Sem rota pedida: a rota padrão do Claude Code (Configurações → Complementos)
+        route: ROUTES[route] ? (route !== DEFAULT_ROUTE ? route : null)
+            : (String(agent) === 'claude' && terminalRoute() !== DEFAULT_ROUTE ? terminalRoute() : null),
     });
     const def = agentGateway.agents[session.agent];
-    const routeName = session.route && ROUTES[session.route] ? ` · ${ROUTES[session.route].label.split(' (')[0]}` : '';
-    const tab = sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName + routeName, afterId: typeof afterId === 'string' ? afterId : undefined });
+    // Lista lateral: a conversa nova abre na aba do mesmo agente, em vez de uma aba a mais
+    const host = typeof intoTab === 'string' ? sessionStore.get(intoTab) : null;
+    const hostSession = host && host.kind === 'agent' && host.status === 'open' ? agentGateway.get(host.url) : null;
+    const tab = hostSession && hostSession.agent === session.agent
+        ? sessions.update(host.id, { agentSession: session.id })
+        : sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName, afterId: typeof afterId === 'string' ? afterId : undefined });
     res.status(201).json({ tab, session });
+}));
+
+// Conversas abertas de um agente (lista lateral): estado de cada uma (online / trabalhando)
+app.get(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
+    const agent = String(req.query.agent || '');
+    res.json({
+        sessions: agentGateway.list().filter(s => !agent || s.agent === agent).map(s => ({
+            id: s.id, agent: s.agent, title: s.title, cwd: s.cwd, status: s.status, route: s.route || null,
+            acpSessionId: s.acpSessionId || null, updatedAt: s.updatedAt,
+        })),
+        canDelete: canDeleteConversation(agent),
+    });
+}));
+
+// Apagar uma conversa do histórico do agente (vai para a lixeira); fecha se estiver aberta
+app.delete(BASE_PATH + '/api/agent-history/:agent/:acpId', agentRoute(async (req, res) => {
+    const { agent, acpId } = req.params;
+    for (const s of agentGateway.list().filter(x => x.agent === agent && x.acpSessionId === acpId)) {
+        await agentGateway.closeSession(s.id).catch(() => {});
+    }
+    try {
+        res.json(deleteConversation(agent, acpId, HOME_DIR));
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
 }));
 
 app.get(BASE_PATH + '/api/agent-sessions/:id', agentRoute(async (req, res) => {
@@ -1174,6 +1373,13 @@ app.delete(BASE_PATH + '/api/agent-sessions/:id/queue/:item', agentRoute(async (
 app.post(BASE_PATH + '/api/agent-sessions/:id/cancel', agentRoute(async (req, res) => {
     agentGateway.cancel(req.params.id);
     res.json({ success: true });
+}));
+
+// Troca a rota da conversa (Direto / Economia / Outros modelos), retomando a mesma conversa
+app.post(BASE_PATH + '/api/agent-sessions/:id/route', agentRoute(async (req, res) => {
+    const route = String((req.body || {}).route || '');
+    if (!ROUTES[route]) return res.status(400).json({ error: 'Rota desconhecida.' });
+    res.json(await agentGateway.setRoute(req.params.id, route));
 }));
 
 app.post(BASE_PATH + '/api/agent-sessions/:id/mode', agentRoute(async (req, res) => {
@@ -1235,7 +1441,17 @@ app.put(BASE_PATH + '/api/sessions/order', (req, res) => {
 });
 
 app.patch(BASE_PATH + '/api/sessions/:id', (req, res) => {
-    const updated = sessions.update(req.params.id, req.body || {});
+    const body = req.body || {};
+    if (body.agentSession !== undefined) {
+        // Só outra conversa do MESMO agente, e que exista
+        const tab = sessionStore.get(req.params.id);
+        const from = tab && tab.kind === 'agent' ? agentGateway.get(tab.url) : null;
+        const to = agentGateway.get(String(body.agentSession));
+        if (!tab || tab.kind !== 'agent' || !to || to.status === 'closed' || (from && from.agent !== to.agent)) {
+            return res.status(400).json({ error: 'Conversa inválida para esta aba.' });
+        }
+    }
+    const updated = sessions.update(req.params.id, body);
     if (!updated) return res.status(404).json({ error: 'Session not found' });
     res.json(updated);
 });
@@ -1971,6 +2187,16 @@ wss.on('connection', (ws, req) => {
         const params = new URL(req.url, 'http://localhost').searchParams;
         const sessionId = params.get('session');
         const row = sessionId ? sessionStore.get(sessionId) : null;
+        const panel = params.get('panel');
+        if (panel) {
+            // Painel completo de um complemento (Configurações → Complementos): o Chromium do
+            // servidor abre o painel do serviço local já com a sessão feita; não vira aba.
+            attachAddonPanel(ws, panel, params).catch(e => {
+                if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'status', message: e.message }));
+                ws.close(1011, 'Painel indisponível');
+            });
+            return;
+        }
         if (row && row.status === 'open' && row.kind === 'browser') {
             debugLog('Attaching to browser tab', sessionId);
             // Also receives "tab list changed" notices, like terminal tabs

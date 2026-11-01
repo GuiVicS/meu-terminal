@@ -276,7 +276,18 @@ class Addons {
     /** Preferências dos serviços e rota padrão do terminal (mesmo arquivo do estado). */
     prefs() {
         const st = this.state();
-        return { services: st.services || {}, terminalRoute: st.terminalRoute || 'direto' };
+        return {
+            services: st.services || {},
+            terminalRoute: st.terminalRoute || 'direto',
+            // Troca automática: quando o limite do Claude acaba numa conversa do Modo UI
+            fallback: {
+                enabled: !!st.fallback?.enabled,
+                model: st.fallback?.model || null,
+                // Ordem da troca automática: "conta:<id>" ("conta:" = principal) e "modelo:<id OmniRoute>"
+                chain: Array.isArray(st.fallback?.chain) ? st.fallback.chain
+                    : (st.fallback?.model ? [`modelo:${st.fallback.model}`] : []),
+            },
+        };
     }
 
     /**
@@ -297,6 +308,16 @@ class Addons {
                 st.services[id] = cur;
             }
             if (typeof patch.terminalRoute === 'string') st.terminalRoute = patch.terminalRoute;
+            if (patch.fallback && typeof patch.fallback === 'object') {
+                const cur = st.fallback || {};
+                if (typeof patch.fallback.enabled === 'boolean') cur.enabled = patch.fallback.enabled;
+                if (typeof patch.fallback.model === 'string') cur.model = patch.fallback.model.trim().slice(0, 200) || undefined;
+                if (Array.isArray(patch.fallback.chain)) {
+                    cur.chain = [...new Set(patch.fallback.chain
+                        .filter(x => typeof x === 'string' && /^(conta:[a-z0-9-]{0,31}|modelo:[\w./:@-]{1,200})$/.test(x)))].slice(0, 12);
+                }
+                st.fallback = cur;
+            }
         });
         return this.prefs();
     }

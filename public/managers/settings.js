@@ -27,6 +27,8 @@ export default class SettingsManager {
         this.storage = new StorageManager('meuterminal-');
         this.listeners = new Set();
         this.values = { ...DEFAULT_SETTINGS, ...(this.storage.get('settings') || {}) };
+        // 'glass-any' (antigo "Vidro em qualquer celular") agora é o próprio 'glass'
+        if (this.values.iphoneVisual === 'glass-any') this.values.iphoneVisual = 'glass';
         this.systemDark = window.matchMedia('(prefers-color-scheme: dark)');
         // Follow OS theme changes while "system" is selected
         this.systemDark.addEventListener?.('change', () => {

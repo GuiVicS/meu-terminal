@@ -270,3 +270,102 @@ test('routes: a route that cannot start fails before any session is saved (no de
     assert.equal(store.listSessions().length, 0);
     await gateway.shutdown();
 });
+
+// ---------- limite do Claude e troca de rota ----------
+
+const { isUsageLimitText } = require('../../scripts/agents/gateway');
+
+test('limite: reconhece os avisos de limite do Claude Code e mais nada', () => {
+    assert.ok(isUsageLimitText("You've hit your 5-hour limit · resets 12:30am"));
+    assert.ok(isUsageLimitText("You're out of extra usage"));
+    assert.ok(isUsageLimitText('  Your org is out of usage · add funds to continue'));
+    assert.ok(!isUsageLimitText('Vou criar o arquivo.'));
+    assert.ok(!isUsageLimitText("Ok. You've hit your goal!"));
+});
+
+test('limite: a resposta de limite chama onUsageLimit com a mensagem que falhou', async () => {
+    const calls = [];
+    const store = new AgentStore(':memory:');
+    const gateway = new AgentGateway({
+        store, agents: { fake: { label: 'Fake', command: process.execPath, args: [FAKE], install: 'n/a' } },
+        env: { ...process.env }, onUsageLimit: info => calls.push(info), log: () => {},
+    });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.prompt(s.id, 'teste do limite');
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].text, 'teste do limite');
+    assert.equal(calls[0].sessionId, s.id);
+    await gateway.prompt(s.id, 'markdown'); // resposta normal, que termina sozinha
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(calls.length, 1, 'uma resposta normal não dispara');
+    await gateway.shutdown();
+});
+
+test('rota: setRoute grava a rota, reinicia com o ambiente novo e retoma a mesma conversa', async () => {
+    const envCalls = [];
+    const { store, gateway } = setupRoutes(async ({ route, routeModel }) => { envCalls.push([route, routeModel]); return {}; });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const before = store.getSession(s.id).acp_session_id;
+    const after = await gateway.setRoute(s.id, 'omniroute', 'groq/llama');
+    assert.equal(store.getSession(s.id).route, 'omniroute');
+    assert.equal(store.getSession(s.id).route_model, 'groq/llama');
+    assert.equal(after.route, 'omniroute');
+    assert.deepEqual(envCalls.at(-1), ['omniroute', 'groq/llama']);
+    assert.equal(store.getSession(s.id).acp_session_id, before, 'mesma conversa');
+    await gateway.setRoute(s.id, 'direto');
+    assert.equal(store.getSession(s.id).route, null);
+    await gateway.shutdown();
+});
+
+test('modelos: agente com o campo antigo "models" ganha o seletor com todos os modelos e troca por session/set_model', async () => {
+    const { gateway } = setup({ env: { FAKE_AGENT_LEGACY_MODELS: '1' } });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const model = gateway.get(s.id).capabilities.configOptions.find(o => o.category === 'model');
+    assert.deepEqual(model.options.map(o => o.value), ['m-a', 'm-b', 'm-c']);
+    assert.equal(model.currentValue, 'm-a');
+    await gateway.setConfigOption(s.id, model.id, 'm-c');
+    assert.equal(gateway.get(s.id).capabilities.configOptions.find(o => o.category === 'model').currentValue, 'm-c');
+    await gateway.shutdown();
+});
+
+test('modelos: os de fora (OmniRoute) entram no seletor e escolher um troca a rota da conversa', async () => {
+    const store = new AgentStore(':memory:');
+    const seen = [];
+    const gateway = new AgentGateway({
+        store,
+        agents: { fake: { label: 'Fake', command: process.execPath, args: [FAKE], install: 'n/a' } },
+        env: { ...process.env },
+        routeEnv: async ({ route, routeModel }) => { seen.push([route, routeModel]); return {}; },
+        extraModels: async () => [{ value: 'omniroute:codex/gpt-5', name: 'GPT-5', model: 'codex/gpt-5', route: 'omniroute', group: 'OmniRoute · Codex' }],
+        log: () => {},
+    });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const findModel = () => gateway.get(s.id).capabilities.configOptions.find(o => o.category === 'model');
+    for (let i = 0; i < 50 && !findModel()?.options.some(o => o.extra); i++) await new Promise(r => setTimeout(r, 20));
+    const model = findModel();
+    assert.ok(model.options.some(o => o.value === 'omniroute:codex/gpt-5' && o.group === 'OmniRoute · Codex'));
+    await gateway.setConfigOption(s.id, model.id, 'omniroute:codex/gpt-5');
+    const row = store.getSession(s.id);
+    assert.equal(row.route, 'omniroute');
+    assert.equal(row.route_model, 'codex/gpt-5');
+    for (let i = 0; i < 50 && findModel()?.currentValue !== 'omniroute:codex/gpt-5'; i++) await new Promise(r => setTimeout(r, 20));
+    assert.equal(findModel().currentValue, 'omniroute:codex/gpt-5');
+    await gateway.shutdown();
+});
+
+test('conta: setAccount grava a conta, passa para o ambiente e retoma a mesma conversa', async () => {
+    const calls = [];
+    const { store, gateway } = setupRoutes(async ({ route, account }) => { calls.push([route, account]); return account ? { FAKE_ACCOUNT: account } : {}; });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const acp = gateway.get(s.id).acpSessionId;
+    await gateway.setAccount(s.id, 'trabalho');
+    assert.equal(store.getSession(s.id).account, 'trabalho');
+    assert.equal(gateway.get(s.id).account, 'trabalho');
+    assert.equal(gateway.get(s.id).acpSessionId, acp);
+    assert.deepEqual(calls.at(-1), [null, 'trabalho']);
+    // trocar a rota mantém a conta
+    await gateway.setRoute(s.id, 'economia');
+    assert.deepEqual(calls.at(-1), ['economia', 'trabalho']);
+    await gateway.shutdown();
+});

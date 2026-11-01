@@ -219,7 +219,7 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
         </section>
         <section class="settings-section" data-page="interface">
             <h3 class="section-label">Interface</h3>
-            <label class="setting" data-iphone-visual>
+            <label class="setting setting-stack" data-iphone-visual>
                 <span class="setting-text">Visual do celular
                     <span class="setting-help">Vidro flutuante, como no iPhone, em qualquer celular (iPhone e
                     Android). “Clássico” mantém a interface normal.</span></span>

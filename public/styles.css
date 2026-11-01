@@ -3721,15 +3721,14 @@ audio.fm-media { width: min(520px, 90%); }
     flex: 1; min-width: 0; margin: 0; font-size: 28px; font-weight: 700; line-height: 1.1;
     letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.cv-circle, .cv-avatar, .conv-btn {
+.cv-circle, .conv-btn {
     width: 46px; height: 46px; flex-shrink: 0; border-radius: 50%; display: inline-grid; place-items: center; color: var(--text);
     background-color: var(--glass-bg); background-image: var(--glass-sheen-img);
     -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
     border: 0.5px solid var(--glass-border); box-shadow: var(--glass-edge), var(--glass-shadow);
     transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.cv-circle:active, .cv-avatar:active, .conv-btn:active { transform: scale(1.07); transition-duration: 120ms; }
-.cv-avatar { font-size: 16px; font-weight: 600; letter-spacing: 0.02em; }
+.cv-circle:active, .conv-btn:active { transform: scale(1.07); transition-duration: 120ms; }
 .cv-search { padding: 4px 16px 6px; }
 .cv-search[hidden] { display: none; }
 .cv-search input {
@@ -3767,7 +3766,7 @@ audio.fm-media { width: min(520px, 90%); }
 }
 @media (prefers-reduced-motion: reduce) {
     .cv-drawer { transform: none; }
-    .cv-circle, .cv-avatar, .conv-btn { transition: none; }
+    .cv-circle, .conv-btn { transition: none; }
 }
 
 /* ---------- Anotações no celular, como o Notas do iPhone ----------
@@ -3923,3 +3922,80 @@ audio.fm-media { width: min(520px, 90%); }
 }
 /* títulos dentro da tela de um complemento: menores que os da página */
 .ad-panel .section-label, .st-page .ad-panel .section-label { font-size: 15px; font-weight: 600; letter-spacing: 0; margin: 20px 0 8px; color: var(--text-2); }
+
+/* ---------- Folha em modo página (ui/sheet.js page: true): Configurações no celular ----------
+   Tela inteira com o fundo do app, entrando pela direita como a navegação do iOS. */
+.sheet-page { align-items: stretch; }
+.sheet-page.open { background: transparent; }
+.sheet-page .ag-sheet,
+.settings-sheet.sheet-page .ag-sheet {
+    width: 100%; height: 100dvh; max-height: none; margin: 0; border: 0; border-radius: 0;
+    padding: calc(4px + var(--safe-top)) calc(16px + var(--safe-right)) calc(28px + var(--safe-bottom)) calc(16px + var(--safe-left));
+    background: var(--bg); box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    transform: translateX(100%); transition: transform var(--spring-smooth-dur, 450ms) var(--spring-smooth, cubic-bezier(0.2, 0.9, 0.25, 1));
+}
+.sheet-page.open .ag-sheet { transform: none; }
+.sheet-page .ag-sheet-grabber { display: none; }
+.sheet-page .ag-sheet-head {
+    position: sticky; top: calc(-4px - var(--safe-top)); z-index: 2; margin: 0 -16px 8px; padding: calc(4px + var(--safe-top)) 16px 6px;
+    min-height: 52px; background: var(--bg);
+}
+@media (prefers-reduced-motion: reduce) {
+    .sheet-page .ag-sheet { transition: opacity 180ms ease; transform: none; opacity: 0; }
+    .sheet-page.open .ag-sheet { opacity: 1; }
+}
+
+/* ---------- Painel completo de um complemento (Configurações → Complementos → app) ----------
+   O componente das abas de navegador, embutido num quadro: sem endereço, portas nem "ao vivo". */
+.ad-full { margin: 6px 0 14px; }
+.ad-full-toggle { width: 100%; justify-content: center; height: 46px; }
+.ad-full-view {
+    position: relative; height: min(76dvh, 820px); margin-top: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg);
+}
+.ad-full-view[hidden] { display: none; }
+.ad-full-view .browser-embedded { position: absolute; inset: 0; }
+.browser-embedded .browser-address input,
+.browser-embedded [data-act="ports"],
+.browser-embedded [data-act="live"],
+.browser-embedded [data-act="more"] { display: none !important; }
+.browser-embedded .browser-host { display: inline !important; }
+/* lista lateral: bolinha discreta de conversa aberta e círculo girando quando o agente trabalha */
+.cv-row-icon { display: inline-grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; color: var(--text-2); }
+.cv-online { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--success, #22c55e); opacity: 0.85; }
+.cv-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-top-color: var(--accent); animation: cv-spin 0.8s linear infinite; }
+@keyframes cv-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cv-spin { animation-duration: 2.4s; } }
+.cv-foot { justify-content: flex-end; }
+/* "Abrindo…": aparece ao tocar num app; segura toques repetidos até a aba abrir */
+.mt-loading { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center;
+    background: color-mix(in srgb, var(--bg, #000) 35%, transparent); opacity: 0; pointer-events: auto;
+    transition: opacity 0.18s ease 0.12s; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.mt-loading.is-on { opacity: 1; }
+.mt-loading[hidden] { display: none; }
+.mt-loading-card { position: relative; display: grid; justify-items: center; gap: 6px; padding: 26px 30px 22px;
+    min-width: 220px; border-radius: 22px; background: var(--surface-1, #1c1c1e); color: var(--text, #fff);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.35); border: 1px solid color-mix(in srgb, var(--text, #fff) 8%, transparent); }
+.mt-loading-icon { position: absolute; top: 34px; color: var(--accent); }
+.mt-loading-spin { width: 58px; height: 58px; border-radius: 50%; margin-bottom: 8px;
+    border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent); border-top-color: var(--accent);
+    animation: cv-spin 0.85s linear infinite; }
+.mt-loading-text { margin: 0; font-weight: 600; font-size: 16px; }
+.mt-loading-sub { margin: 0; font-size: 13px; color: var(--text-2, #aaa); }
+@media (prefers-reduced-motion: reduce) { .mt-loading-spin { animation-duration: 2.4s; } .mt-loading { transition: none; } }
+/* A lista lateral é só do layout de celular: no computador o app não tem fundo próprio e ela vazava */
+:root:not([data-iphone]) .cv-drawer { display: none; }
+/* Contas do Claude Code e ordem da troca automática (Configurações → Complementos) */
+.cc-title { margin: 14px 0 6px; font-weight: 600; }
+.cc-list { list-style: none; margin: 0; padding: 0; border-radius: 14px; overflow: hidden; background: var(--surface-1, rgba(255,255,255,0.04)); }
+.cc-row { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 10px 6px 12px; }
+.cc-row + .cc-row { border-top: 1px solid var(--border); }
+.cc-ic, .cc-n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+    background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-size: 13px; font-weight: 600; }
+.cc-txt { flex: 1; min-width: 0; display: grid; }
+.cc-txt b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-txt small { color: var(--text-2); font-size: 12px; display: flex; align-items: center; gap: 5px; }
+.cc-row .icon-btn { min-width: 36px; min-height: 36px; }
+.cc-add { margin: 8px 0 4px; }

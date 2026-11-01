@@ -297,6 +297,9 @@ export default class Conversation {
             case 'plan.update':
                 this.renderPlan(d.steps);
                 break;
+            case 'notice':
+                this.note(d.text, 'info');
+                break;
             case 'error':
                 this.endStreams();
                 this.add(`${icon('x', 14)} ${esc(d.message)}${d.detail ? `<pre>${esc(d.detail)}</pre>` : ''}`, 'ag-note error');

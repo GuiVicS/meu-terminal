@@ -30,6 +30,8 @@ const STATUS = {
     closed: { label: 'Encerrado', tone: 'bad' },
 };
 
+const ROUTE_LABELS = { direto: 'Direto', economia: 'Economia de tokens', omniroute: 'Outros modelos' };
+
 async function api(method, route, body) {
     const response = await fetch(`${basePath()}/api/${route}`, {
         method,
@@ -112,6 +114,7 @@ export default class AgentSession {
                 <span class="ag-status" role="status"></span>
                 <button type="button" class="btn btn-ghost btn-sm ag-publish" data-act="vibe-publish" aria-label="Publicar no Vercel" title="Publicar no Vercel" hidden>${icon('cloudUpload', 16)} <span class="ag-publish-label">Publicar</span></button>
                 <button type="button" class="icon-btn" data-act="vibe-agent" aria-label="Trocar agente" title="Trocar agente (vibecoding)" hidden>${icon('swap', 18)}</button>
+                <button type="button" class="btn btn-ghost btn-sm ag-route" data-act="route" aria-haspopup="menu" title="Rota do Claude Code" hidden></button>
                 <button type="button" class="icon-btn" data-act="history" aria-label="Conversas">${icon('history', 18)}</button>
                 <button type="button" class="icon-btn" data-act="terminal" aria-label="Abrir terminal nesta pasta">${icon('terminal', 18)}</button>
                 <button type="button" class="icon-btn" data-act="files" aria-label="Abrir os arquivos da pasta">${icon('folder', 18)}</button>
@@ -175,6 +178,7 @@ export default class AgentSession {
             else if (btn.dataset.act === 'terminal') this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id });
             else if (btn.dataset.act === 'files') this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id });
             else if (btn.dataset.act === 'history') this.openHistory(btn);
+            else if (btn.dataset.act === 'route') this.openRouteMenu(btn);
             else if (btn.dataset.act === 'vibe-agent') this.openVibeAgentMenu(btn);
             else if (btn.dataset.act === 'vibe-publish') this.publishVibeProject();
         });
@@ -296,7 +300,10 @@ export default class AgentSession {
      */
     menuActions(anchor) {
         const vibe = !this.el.vibeBtn.hidden;
+        const route = this.session?.agent === 'claude'
+            ? [{ label: `Rota: ${ROUTE_LABELS[this.session.route || 'direto'] || this.session.route}`, icon: 'swap', run: () => this.openRouteMenu(anchor) }] : [];
         return [
+            ...route,
             { label: 'Abrir terminal na pasta', icon: 'terminal', run: () => this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id }) },
             { label: 'Abrir arquivos da pasta', icon: 'folder',
                 run: () => this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id }) },
@@ -501,6 +508,11 @@ export default class AgentSession {
         this.el.agent.textContent = (s && s.agentLabel) || this.name;
         this.el.cwd.textContent = this.cwd || '';
         this.el.cwd.title = this.cwd || '';
+        const route = this.panel.querySelector('.ag-route');
+        if (route) {
+            route.hidden = !(s && s.agent === 'claude');
+            route.innerHTML = `${icon('swap', 14)} ${ROUTE_LABELS[(s && s.route) || 'direto'] || s.route}`;
+        }
         const st = STATUS[this.status] || { label: this.status, tone: '' };
         this.el.status.textContent = st.label;
         this.el.status.dataset.tone = st.tone;
@@ -661,6 +673,45 @@ export default class AgentSession {
         }
     }
 
+    /** Rota da conversa do Claude Code: troca e retoma a mesma conversa (POST .../route). */
+    async openRouteMenu(anchor) {
+        let routes = [];
+        let accounts = [];
+        try {
+            [routes, accounts] = await Promise.all([
+                api('GET', 'agents').then(r => r.claudeRoutes || []),
+                api('GET', 'claude-accounts').then(r => r.accounts || []).catch(() => []),
+            ]);
+        } catch (e) {
+            return toast(e.message, { tone: 'error' });
+        }
+        const current = this.session?.route || 'direto';
+        const switchTo = (path, body, label) => async () => {
+            toast(`Trocando para ${label}…`);
+            try {
+                this.session = await api('POST', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/${path}`, body);
+                this.renderHead();
+            } catch (e) {
+                toast(e.message, { tone: 'error', duration: 6000 });
+            }
+        };
+        const items = routes.map(r => ({
+            label: r.label, icon: r.id === current ? 'check' : 'swap', disabled: r.id === current,
+            run: switchTo('route', { route: r.id }, r.label),
+        }));
+        // Várias contas do Claude Code: trocar a conta da conversa (pela rota direta)
+        if (accounts.length > 1) {
+            const cur = this.session?.account || '';
+            items.push(...accounts.map(a => ({
+                label: `Conta: ${a.email || a.name}`, icon: a.id === cur && current === 'direto' ? 'check' : 'user',
+                hint: a.loggedIn ? (a.limitedUntil ? 'no limite' : '') : 'sem login',
+                disabled: !a.loggedIn || (a.id === cur && current === 'direto'),
+                run: switchTo('account', { account: a.id }, `a conta ${a.email || a.name}`),
+            })));
+        }
+        showMenu(items, { anchor, label: 'Rota e conta do Claude Code' });
+    }
+
     /** Whether this agent can list its past conversations (ACP session/list). */
     get hasHistory() {
         return !!(this.session && this.session.capabilities && this.session.capabilities.history);
@@ -685,7 +736,8 @@ export default class AgentSession {
         if (!this.session) return Promise.resolve();
         // Loading a long conversation from the terminal takes a few seconds
         if (body.resumeAcpSessionId) toast(`Abrindo "${body.title || 'conversa'}"…`);
-        return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
+        // Na mesma aba (uma aba por agente; a anterior segue na lista lateral)
+        return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, intoTab: this.id, ...body })
             .then(data => this.hooks.showTab?.(data.tab.id))
             .catch(e => toast(e.message, { tone: 'error' }));
     }
