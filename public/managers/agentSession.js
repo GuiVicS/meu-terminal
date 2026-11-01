@@ -720,7 +720,8 @@ export default class AgentSession {
         if (!this.session) return Promise.resolve();
         // Loading a long conversation from the terminal takes a few seconds
         if (body.resumeAcpSessionId) toast(`Abrindo "${body.title || 'conversa'}"…`);
-        return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, ...body })
+        // Na mesma aba (uma aba por agente; a anterior segue na lista lateral)
+        return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, intoTab: this.id, ...body })
             .then(data => this.hooks.showTab?.(data.tab.id))
             .catch(e => toast(e.message, { tone: 'error' }));
     }

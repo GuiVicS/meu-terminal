@@ -42,6 +42,7 @@ const { AgentLauncher } = require('./scripts/agents/launch');
 const { writeShims, writeRcFile } = require('./scripts/agents/shims');
 const { execFile } = require('child_process');
 const { Addons, SERVICES } = require('./scripts/addons');
+const { deleteConversation, canDelete: canDeleteConversation } = require('./scripts/agents/history-files');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
@@ -1173,7 +1174,7 @@ app.get(BASE_PATH + '/api/agent-media/:session/:file', (req, res) => {
 });
 // New agent conversation in its own tab ("Nova conversa"), or an old one resumed ("Conversas")
 app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
-    const { agent, cwd, resumeAcpSessionId, title, afterId, route } = req.body || {};
+    const { agent, cwd, resumeAcpSessionId, title, afterId, route, intoTab } = req.body || {};
     if (typeof cwd !== 'string' || !cwd.trim()) return res.status(400).json({ error: 'Pasta inválida.' });
     const folder = path.resolve(HOME_DIR, cwd.replace(/^~(?=$|[\\/])/, HOME_DIR));
     if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return res.status(400).json({ error: 'Pasta não encontrada.' });
@@ -1187,8 +1188,38 @@ app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
             : (String(agent) === 'claude' && terminalRoute() !== DEFAULT_ROUTE ? terminalRoute() : null),
     });
     const def = agentGateway.agents[session.agent];
-    const tab = sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName, afterId: typeof afterId === 'string' ? afterId : undefined });
+    // Lista lateral: a conversa nova abre na aba do mesmo agente, em vez de uma aba a mais
+    const host = typeof intoTab === 'string' ? sessionStore.get(intoTab) : null;
+    const hostSession = host && host.kind === 'agent' && host.status === 'open' ? agentGateway.get(host.url) : null;
+    const tab = hostSession && hostSession.agent === session.agent
+        ? sessions.update(host.id, { agentSession: session.id })
+        : sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName, afterId: typeof afterId === 'string' ? afterId : undefined });
     res.status(201).json({ tab, session });
+}));
+
+// Conversas abertas de um agente (lista lateral): estado de cada uma (online / trabalhando)
+app.get(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
+    const agent = String(req.query.agent || '');
+    res.json({
+        sessions: agentGateway.list().filter(s => !agent || s.agent === agent).map(s => ({
+            id: s.id, agent: s.agent, title: s.title, cwd: s.cwd, status: s.status, route: s.route || null,
+            acpSessionId: s.acpSessionId || null, updatedAt: s.updatedAt,
+        })),
+        canDelete: canDeleteConversation(agent),
+    });
+}));
+
+// Apagar uma conversa do histórico do agente (vai para a lixeira); fecha se estiver aberta
+app.delete(BASE_PATH + '/api/agent-history/:agent/:acpId', agentRoute(async (req, res) => {
+    const { agent, acpId } = req.params;
+    for (const s of agentGateway.list().filter(x => x.agent === agent && x.acpSessionId === acpId)) {
+        await agentGateway.closeSession(s.id).catch(() => {});
+    }
+    try {
+        res.json(deleteConversation(agent, acpId, HOME_DIR));
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
 }));
 
 app.get(BASE_PATH + '/api/agent-sessions/:id', agentRoute(async (req, res) => {
@@ -1291,7 +1322,17 @@ app.put(BASE_PATH + '/api/sessions/order', (req, res) => {
 });
 
 app.patch(BASE_PATH + '/api/sessions/:id', (req, res) => {
-    const updated = sessions.update(req.params.id, req.body || {});
+    const body = req.body || {};
+    if (body.agentSession !== undefined) {
+        // Só outra conversa do MESMO agente, e que exista
+        const tab = sessionStore.get(req.params.id);
+        const from = tab && tab.kind === 'agent' ? agentGateway.get(tab.url) : null;
+        const to = agentGateway.get(String(body.agentSession));
+        if (!tab || tab.kind !== 'agent' || !to || to.status === 'closed' || (from && from.agent !== to.agent)) {
+            return res.status(400).json({ error: 'Conversa inválida para esta aba.' });
+        }
+    }
+    const updated = sessions.update(req.params.id, body);
     if (!updated) return res.status(404).json({ error: 'Session not found' });
     res.json(updated);
 });

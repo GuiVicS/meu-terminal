@@ -173,6 +173,34 @@ export default class TerminalManager {
     }
 
     /**
+     * Aba de agente que passou a mostrar outra conversa do mesmo agente: recria só o componente da
+     * conversa no mesmo lugar (sem estado sobrando da anterior); a conversa anterior segue rodando
+     * no servidor e continua na lista lateral.
+     */
+    replaceAgentView(row) {
+        const old = this.sessions.get(row.id);
+        const wasActive = this.activeId === row.id;
+        old.dispose();
+        const fresh = new AgentSession({ row, settings: this.settings, hooks: this.hooks });
+        this.sessions.set(row.id, fresh);
+        fresh.mount(this.workspaceEl.querySelector('.terminal-panels'));
+        fresh.shown = false;
+        fresh.setActive(false);
+        this.tabBar.update(fresh);
+        if (wasActive) {
+            this.activeId = null;
+            this.activate(row.id, { focus: !isCoarse() });
+        }
+        this.onSessionChanged(fresh);
+    }
+
+    /** Lista lateral: mostra outra conversa (aberta) do mesmo agente nesta aba. */
+    async switchAgentTab(tabId, agentSessionId) {
+        await api('PATCH', `sessions/${encodeURIComponent(tabId)}`, { agentSession: agentSessionId });
+        await this.reconcile();
+    }
+
+    /**
      * Creates a new session on the server and opens its tab.
      * @param {{name?: string, cwd?: string, color?: string, afterId?: string, reopenId?: string}} opts
      */
@@ -426,7 +454,9 @@ export default class TerminalManager {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ agent, cwd, route, afterId: this.activeId || undefined }),
+                // Uma aba por agente: se já há uma deste agente, a conversa nova abre nela
+                body: JSON.stringify({ agent, cwd, route, afterId: this.activeId || undefined,
+                    intoTab: [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agent)?.id }),
             });
             const data = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(data.error || `Erro ${r.status}`);
@@ -1002,7 +1032,9 @@ export default class TerminalManager {
         this.order.filter(id => !ids.has(id)).forEach(id => this.removeLocal(id));
         rows.forEach(row => {
             const existing = this.sessions.get(row.id);
-            if (existing) {
+            if (existing && existing.kind === 'agent' && row.url && row.url !== existing.agentSessionId) {
+                this.replaceAgentView(row); // a aba passou a mostrar outra conversa (lista lateral)
+            } else if (existing) {
                 existing.applyRow(row);
                 this.onSessionChanged(existing);
             } else {

@@ -131,7 +131,7 @@ class SessionManager {
         return this.toPublic(row);
     }
 
-    update(id, { name, pinned, color, location } = {}) {
+    update(id, { name, pinned, color, location, agentSession } = {}) {
         const row = this.store.get(id);
         if (!row || row.status !== 'open') return null;
         const fields = {};
@@ -143,6 +143,9 @@ class SessionManager {
             fields.cwd = location.path;
             if (typeof location.source === 'string' && location.source.length <= 200) fields.url = location.source;
         }
+        // Aba de agente: passa a mostrar outra conversa do mesmo agente (lista lateral do Modo UI);
+        // quem chama já conferiu que a sessão existe e é do mesmo agente
+        if (row.kind === 'agent' && typeof agentSession === 'string' && /^[\w-]{1,80}$/.test(agentSession)) fields.url = agentSession;
         const updated = this.store.update(id, fields);
         this.changed();
         return this.toPublic(updated);
