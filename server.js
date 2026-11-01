@@ -40,6 +40,7 @@ const AgentStore = require('./scripts/agents/agent-store');
 const { AgentGateway, GatewayError } = require('./scripts/agents/gateway');
 const { AgentLauncher } = require('./scripts/agents/launch');
 const { writeShims, writeRcFile } = require('./scripts/agents/shims');
+const { Addons } = require('./scripts/addons');
 
 const app = express();
 const server = http.createServer(app);
@@ -863,6 +864,17 @@ function commandExists(command) {
         }
     });
 }
+
+// Complementos (plugins do Claude Code que já vêm instalados): scripts/addons.js
+const addons = new Addons({
+    stateFile: path.join(path.dirname(DB_PATH), 'addons.json'),
+    home: HOME_DIR,
+    env: childEnv(),
+    log: (...a) => console.log(...a),
+});
+app.get(BASE_PATH + '/api/addons', async (req, res) => {
+    res.json({ enabled: !DEMO_MODE, addons: await addons.status() });
+});
 
 let agentRcFile = null; // bash --rcfile for MeuTerminal shells (scripts/agents/shims.js)
 // The agent UI runs code on this server: it needs a login (AUTH_EMAIL/AUTH_PASSWORD or PIN)
@@ -2090,4 +2102,6 @@ server.listen(PORT, () => {
         cacheName: CACHE_NAME
     });
     console.log(`Server running on: ${BASE_URL}`);
+    // Em segundo plano: a primeira instalação baixa os plugins e não deve atrasar o app
+    if (!DEMO_MODE) addons.bootstrap().catch(e => console.error('Complementos:', e.message));
 });
