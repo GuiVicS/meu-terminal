@@ -96,7 +96,7 @@ test('addons: when "claude plugin list" fails nothing is installed or marked', a
 });
 
 test('addons: MT_ADDONS selects all, none or a list', () => {
-    assert.strictEqual(selectedAddons('').length, 3);
+    assert.strictEqual(selectedAddons('').length, 5);
     assert.strictEqual(selectedAddons('off').length, 0);
     assert.deepStrictEqual(selectedAddons('claude-mem, cartographer').map(a => a.id), ['cartographer', 'claude-mem']);
 });
@@ -107,4 +107,14 @@ test('addons: mergeDefaults only adds missing keys', () => {
     fs.writeFileSync(file, JSON.stringify({ A: 'mine' }));
     assert.deepStrictEqual(mergeDefaults(file, { A: '1', B: '2' }), ['B']);
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { A: 'mine', B: '2' });
+});
+
+test('addons: the Modo UI "/" menu keeps only the useful claude-mem commands', () => {
+    const { visibleCommand } = require('../scripts/addons');
+    assert.ok(visibleCommand('claude-mem:mem-search'));
+    assert.ok(visibleCommand('claude-mem:learn-codebase'));
+    assert.ok(!visibleCommand('claude-mem:wowerpoint'));
+    assert.ok(!visibleCommand('claude-mem:cloud-sync'));
+    assert.ok(visibleCommand('cartographer:cartographer'));
+    assert.ok(visibleCommand('compact'));
 });

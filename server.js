@@ -40,7 +40,8 @@ const AgentStore = require('./scripts/agents/agent-store');
 const { AgentGateway, GatewayError } = require('./scripts/agents/gateway');
 const { AgentLauncher } = require('./scripts/agents/launch');
 const { writeShims, writeRcFile } = require('./scripts/agents/shims');
-const { Addons } = require('./scripts/addons');
+const { Addons, SERVICES } = require('./scripts/addons');
+const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 
 const app = express();
 const server = http.createServer(app);
@@ -781,6 +782,42 @@ const MCP_URL = `http://127.0.0.1:${PORT}${BASE_PATH}/mcp`;
 // Agent UI gateway and vibecoding both need MCP_URL/MCP_TOKEN above, and the MCP handler just
 // below needs vibe - all three have to sit in this exact order.
 const AGENT_MEDIA_DIR = path.join(path.dirname(DB_PATH), 'agent-media');
+// Complementos: plugins do Claude Code que já vêm instalados (scripts/addons.js) e os serviços
+// Headroom/OmniRoute com as rotas do Claude Code (scripts/addon-services.js)
+const addons = new Addons({
+    stateFile: path.join(path.dirname(DB_PATH), 'addons.json'),
+    home: HOME_DIR,
+    env: childEnv(),
+    log: (...a) => console.log(...a),
+});
+const addonServices = new ServiceManager({ defs: SERVICES, home: HOME_DIR, env: childEnv(), secrets: id => addons.serviceSecrets(id), log: (...a) => console.log(...a) });
+
+/** Env da rota para um agente; liga o serviço se precisar. Só o Claude Code fala o protocolo da Anthropic. */
+async function agentRouteEnv({ agent, route }) {
+    route = normalizeRoute(route);
+    if (agent !== 'claude' || route === DEFAULT_ROUTE) return {};
+    const prefs = addons.prefs();
+    const service = ROUTES[route].service;
+    if (!prefs.services[service]?.enabled) {
+        throw new RouteError(`Ligue o ${SERVICES[service].label} em Configurações → Complementos para usar "${ROUTES[route].label}".`);
+    }
+    const env = routeEnv(route, prefs, SERVICES); // valida a chave antes de ligar o serviço
+    await addonServices.ensure(service);
+    return env;
+}
+
+/** Rota padrão do terminal, valendo só se o serviço dela estiver ligado. */
+function terminalRoute() {
+    const prefs = addons.prefs();
+    const route = normalizeRoute(prefs.terminalRoute);
+    return route !== DEFAULT_ROUTE && prefs.services[ROUTES[route].service]?.enabled ? route : DEFAULT_ROUTE;
+}
+
+/** Env da rota padrão do terminal (síncrono: os serviços ligados já estão rodando). */
+function terminalRouteEnv() {
+    try { return routeEnv(terminalRoute(), addons.prefs(), SERVICES); } catch { return {}; }
+}
+
 const agentGateway = new AgentGateway({
     store: new AgentStore(DB_PATH),
     // Images/files produced by agents (or attached to prompts), next to the database (same volume)
@@ -790,6 +827,7 @@ const agentGateway = new AgentGateway({
     env: childEnv({ MT_NO_INTERCEPT: '1', MEUTERMINAL_MCP_URL: MCP_URL, MEUTERMINAL_MCP_TOKEN: MCP_TOKEN }),
     // Agents in the UI can use MeuTerminal's own tools (open_url, screenshot, notify...)
     mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
+    routeEnv: agentRouteEnv,
     log: debugLog,
 });
 const agentLauncher = new AgentLauncher({
@@ -797,6 +835,8 @@ const agentLauncher = new AgentLauncher({
     sessions,
     prefs: { get: key => sessionStore.getMeta(key), set: (key, value) => sessionStore.setMeta(key, value) },
     commandExists,
+    // Conversa aberta pelo terminal: a mesma rota do terminal
+    defaultRoute: agent => (agent === 'claude' && terminalRoute() !== DEFAULT_ROUTE ? terminalRoute() : null),
     log: debugLog,
 });
 // Vibecoding: project form -> agent UI tab | live preview (split) + files tab, always the agent
@@ -865,17 +905,6 @@ function commandExists(command) {
     });
 }
 
-// Complementos (plugins do Claude Code que já vêm instalados): scripts/addons.js
-const addons = new Addons({
-    stateFile: path.join(path.dirname(DB_PATH), 'addons.json'),
-    home: HOME_DIR,
-    env: childEnv(),
-    log: (...a) => console.log(...a),
-});
-app.get(BASE_PATH + '/api/addons', async (req, res) => {
-    res.json({ enabled: !DEMO_MODE, addons: await addons.status() });
-});
-
 let agentRcFile = null; // bash --rcfile for MeuTerminal shells (scripts/agents/shims.js)
 // The agent UI runs code on this server: it needs a login (AUTH_EMAIL/AUTH_PASSWORD or PIN)
 if (AGENT_UI_ENABLED && isAuthRequired) {
@@ -931,6 +960,29 @@ app.post(BASE_PATH + '/api/agent-launch/answer', (req, res) => {
 app.get(BASE_PATH + '/api/agent-prefs', (req, res) => res.json(agentLauncher.getPrefs()));
 app.put(BASE_PATH + '/api/agent-prefs', (req, res) => res.json(agentLauncher.setPrefs(req.body || {})));
 
+// Complementos: status, ligar/desligar serviços, chave/modelo do OmniRoute e rota do terminal
+app.get(BASE_PATH + '/api/addons', async (req, res) => {
+    const prefs = addons.prefs();
+    res.json({
+        enabled: !DEMO_MODE,
+        routes: Object.entries(ROUTES).map(([id, r]) => ({ id, label: r.label, service: r.service })),
+        terminalRoute: normalizeRoute(prefs.terminalRoute),
+        addons: await addons.status({ services: addonServices }),
+    });
+});
+app.put(BASE_PATH + '/api/addons', async (req, res) => {
+    if (DEMO_MODE) return res.status(403).json({ error: 'Indisponível no modo demo.' });
+    const body = req.body || {};
+    if (body.terminalRoute !== undefined && !ROUTES[body.terminalRoute]) return res.status(400).json({ error: 'Rota desconhecida.' });
+    const prefs = addons.setPrefs(body);
+    try {
+        await addonServices.apply(prefs);
+    } catch (e) {
+        return res.status(e.status || 500).json({ error: e.message });
+    }
+    res.json({ terminalRoute: normalizeRoute(prefs.terminalRoute), addons: await addons.status({ services: addonServices }) });
+});
+
 app.get(BASE_PATH + '/api/agents', (req, res) => {
     res.json({
         enabled: AGENT_UI_ENABLED && isAuthRequired,
@@ -939,6 +991,10 @@ app.get(BASE_PATH + '/api/agents', (req, res) => {
             ...a,
             installed: !a.terminalOnly && commandExists(agentGateway.agents[a.id].requires || agentGateway.agents[a.id].command),
         })),
+        // Rotas extras do Claude Code: só as dos complementos ligados (Configurações → Complementos)
+        claudeRoutes: Object.entries(ROUTES)
+            .filter(([id, r]) => id !== DEFAULT_ROUTE && addons.prefs().services[r.service]?.enabled)
+            .map(([id, r]) => ({ id, label: r.label })),
     });
 });
 
@@ -956,7 +1012,7 @@ app.get(BASE_PATH + '/api/agent-media/:session/:file', (req, res) => {
 });
 // New agent conversation in its own tab ("Nova conversa"), or an old one resumed ("Conversas")
 app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
-    const { agent, cwd, resumeAcpSessionId, title, afterId } = req.body || {};
+    const { agent, cwd, resumeAcpSessionId, title, afterId, route } = req.body || {};
     if (typeof cwd !== 'string' || !cwd.trim()) return res.status(400).json({ error: 'Pasta inválida.' });
     const folder = path.resolve(HOME_DIR, cwd.replace(/^~(?=$|[\\/])/, HOME_DIR));
     if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return res.status(400).json({ error: 'Pasta não encontrada.' });
@@ -965,9 +1021,11 @@ app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
         cwd: folder,
         title: typeof title === 'string' ? title.slice(0, 120) : null,
         resumeAcpSessionId: typeof resumeAcpSessionId === 'string' ? resumeAcpSessionId : null,
+        route: ROUTES[route] && route !== DEFAULT_ROUTE ? route : null,
     });
     const def = agentGateway.agents[session.agent];
-    const tab = sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName, afterId: typeof afterId === 'string' ? afterId : undefined });
+    const routeName = session.route && ROUTES[session.route] ? ` · ${ROUTES[session.route].label.split(' (')[0]}` : '';
+    const tab = sessions.create({ kind: 'agent', url: session.id, cwd: folder, name: def.uiName + routeName, afterId: typeof afterId === 'string' ? afterId : undefined });
     res.status(201).json({ tab, session });
 }));
 
@@ -1207,9 +1265,8 @@ app.get(BASE_PATH + '/api/vibe/projects', (req, res) => {
 // Is this tab part of a vibecoding project, and which agents have a section there already?
 // Backs the agent switcher - specific to vibecoding, not shown for a plain agent conversation.
 app.get(BASE_PATH + '/api/vibe/tab/:tabId', (req, res) => {
-    const project = vibe.projectForTab(req.params.tabId);
-    if (!project) return res.status(404).json({ error: 'Esta aba não faz parte de um projeto vibecoding.' });
-    res.json(project);
+    // null = aba de agente comum (não é projeto): 200, para não sujar o console a cada aba
+    res.json(vibe.projectForTab(req.params.tabId) || null);
 });
 
 // Started from the app menu: a new terminal runs the agent chosen in the form
@@ -1882,6 +1939,8 @@ function spawnShell({ id, cwd, cols = 80, rows = 24 }) {
             STDBUF: 'L',
             // Ensure proper handling of alternate buffer in applications
             TERM_PROGRAM: 'xterm-256color',
+            // Rota padrão do terminal (Configurações → Complementos): Headroom ou OmniRoute
+            ...terminalRouteEnv(),
             // Agents in this shell can call MeuTerminal's MCP (open_url, screenshot...)
             MEUTERMINAL_MCP_URL: MCP_URL,
             MEUTERMINAL_MCP_TOKEN: MCP_TOKEN,
@@ -2008,6 +2067,7 @@ function shutdown() {
     }
     browsers.shutdown();
     live.shutdown();
+    addonServices.shutdown();
     wss.close();
     // Give agent processes a moment to exit cleanly (they are resumable after the restart)
     Promise.race([agentGateway.shutdown(), new Promise(resolve => setTimeout(resolve, 2000))])
@@ -2103,5 +2163,8 @@ server.listen(PORT, () => {
     });
     console.log(`Server running on: ${BASE_URL}`);
     // Em segundo plano: a primeira instalação baixa os plugins e não deve atrasar o app
-    if (!DEMO_MODE) addons.bootstrap().catch(e => console.error('Complementos:', e.message));
+    if (!DEMO_MODE) {
+        addons.bootstrap().catch(e => console.error('Complementos:', e.message));
+        addonServices.apply(addons.prefs()).catch(e => console.error('Complementos:', e.message));
+    }
 });

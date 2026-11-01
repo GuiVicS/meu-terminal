@@ -206,6 +206,7 @@ export default class AgentSession {
     async checkVibeProject() {
         try {
             this.vibeProject = await api('GET', `vibe/tab/${encodeURIComponent(this.id)}`);
+            if (!this.vibeProject) return;
             this.el.vibeBtn.hidden = false;
             this.el.publishBtn.hidden = !this.vibeProject.can_publish;
         } catch {

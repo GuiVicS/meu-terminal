@@ -8,7 +8,7 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 const SESSION_COLUMNS = ['title', 'status', 'mode', 'model', 'acp_session_id', 'capabilities',
-    'updated_at', 'closed_at', 'last_seq'];
+    'updated_at', 'closed_at', 'last_seq', 'route'];
 
 function parseJson(text, fallback) {
     if (text == null) return fallback;
@@ -58,14 +58,17 @@ class AgentStore {
             );
             CREATE INDEX IF NOT EXISTS agent_permissions_pending ON agent_permissions(session_id, status);
         `);
+        // route: por onde o agente fala com o modelo (scripts/addon-services.js ROUTES); null = direto
+        const columns = new Set(this.db.prepare('PRAGMA table_info(agent_sessions)').all().map(c => c.name));
+        if (!columns.has('route')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN route TEXT');
     }
 
     // ---------- sessions ----------
 
-    insertSession({ id, agent, cwd, title = null, status = 'starting', mode = null, model = null }) {
+    insertSession({ id, agent, cwd, title = null, status = 'starting', mode = null, model = null, route = null }) {
         const now = Date.now();
-        this.db.prepare(`INSERT INTO agent_sessions (id, agent, cwd, title, status, mode, model, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, agent, cwd, title, status, mode, model, now, now);
+        this.db.prepare(`INSERT INTO agent_sessions (id, agent, cwd, title, status, mode, model, route, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, agent, cwd, title, status, mode, model, route, now, now);
         return this.getSession(id);
     }
 

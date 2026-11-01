@@ -1,3 +1,4 @@
+const { visibleCommand } = require('../addons');
 /**
  * acp-mapping.js
  * Translates ACP `session/update` notifications and permission requests into the
@@ -214,7 +215,7 @@ class AcpMapper {
                 return [{
                     type: 'commands.update',
                     data: {
-                        commands: (update.availableCommands || []).map(c => ({
+                        commands: (update.availableCommands || []).filter(c => visibleCommand(c.name)).map(c => ({
                             name: c.name, description: c.description || '', hint: (c.input && c.input.hint) || null,
                         })),
                     },

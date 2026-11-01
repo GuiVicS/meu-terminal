@@ -11,6 +11,7 @@
  *   no próximo início.
  * - MT_ADDONS=off desliga tudo; MT_ADDONS=claude-mem,cartographer escolhe quais.
  */
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -19,6 +20,7 @@ const { execFile } = require('child_process');
 const ADDONS = [
     {
         id: 'claude-code-setup',
+        kind: 'plugin',
         label: 'Claude Code Setup',
         plugin: 'claude-code-setup',
         marketplace: 'claude-plugins-official',
@@ -26,6 +28,7 @@ const ADDONS = [
     },
     {
         id: 'cartographer',
+        kind: 'plugin',
         label: 'Cartographer',
         plugin: 'cartographer',
         marketplace: 'cartographer-marketplace',
@@ -33,6 +36,7 @@ const ADDONS = [
     },
     {
         id: 'claude-mem',
+        kind: 'plugin',
         label: 'Claude Mem',
         plugin: 'claude-mem',
         marketplace: 'thedotmack',
@@ -52,10 +56,59 @@ const ADDONS = [
         // Os hooks chamam o comando "claude-mem", que o plugin só cria no início da primeira
         // sessão (e os outros hooks dessa sessão já precisam dele): cria agora.
         postInstall: ['scripts/ensure-launcher.cjs'],
+        panel: 'http://localhost:37700',
+        // O plugin traz ~30 comandos; no menu "/" do Modo UI ficam só os que servem aqui
+        // (cloud-sync some: a nuvem fica desligada)
+        commandPrefix: 'claude-mem:',
+        keepCommands: ['mem-search', 'learn-codebase', 'smart-explore', 'make-plan', 'do', 'handoff',
+            'how-it-works', 'timeline-report', 'standup'],
+    },
+    // Serviços (scripts/addon-services.js): instalados na imagem, desligados por padrão,
+    // ligados nas Configurações. Só 127.0.0.1.
+    {
+        id: 'headroom',
+        kind: 'service',
+        label: 'Headroom',
+        command: 'headroom',
+        // Sem memória (é do Claude Mem), sem code graph (é do Cartographer), sem aprendizado,
+        // sem Kompress (precisaria do PyTorch), sem consulta de cota e sem telemetria.
+        args: ['proxy', '--host', '127.0.0.1', '--port', '8787', '--no-telemetry', '--no-learn',
+            '--disable-kompress', '--no-subscription-tracking'],
+        env: { HEADROOM_BEACON: 'off', HEADROOM_TELEMETRY: 'off', DO_NOT_TRACK: '1' },
+        port: 8787,
+        health: '/health',
+    },
+    {
+        id: 'omniroute',
+        kind: 'service',
+        label: 'OmniRoute',
+        command: 'omniroute',
+        args: ['serve', '--no-open', '--no-tray', '--port', '20128'],
+        // OMNIROUTE_SERVER_HOST: sem ele escuta em 0.0.0.0. REQUIRE_API_KEY: as abas de navegador
+        // rodam neste servidor, então um site aberto nelas alcançaria o localhost sem chave.
+        // A memória dele já vem desligada (a memória é do Claude Mem).
+        env: home => ({ DATA_DIR: `${home}/.omniroute`, OMNIROUTE_SERVER_HOST: '127.0.0.1', REQUIRE_API_KEY: 'true', OMNIROUTE_MEMORY_MB: '768' }),
+        port: 20128,
+        health: '/api/health',
+        panel: 'http://localhost:20128',
+        // Gerados uma vez e guardados (addons.json, 0600): a senha padrão do painel seria
+        // "CHANGEME", e trocar os segredos depois invalidaria as chaves já salvas no OmniRoute.
+        secrets: {
+            INITIAL_PASSWORD: () => crypto.randomBytes(12).toString('base64url'),
+            JWT_SECRET: () => crypto.randomBytes(48).toString('base64'),
+            API_KEY_SECRET: () => crypto.randomBytes(32).toString('hex'),
+        },
     },
 ];
 
 const pluginId = a => `${a.plugin}@${a.marketplace}`;
+
+/** Whether a slash command of an add-on shows in the Modo UI "/" menu. */
+function visibleCommand(name) {
+    const a = ADDONS.find(x => x.commandPrefix && String(name).startsWith(x.commandPrefix));
+    return !a || a.keepCommands.includes(String(name).slice(a.commandPrefix.length));
+}
+const SERVICES = Object.fromEntries(ADDONS.filter(a => a.kind === 'service').map(a => [a.id, a]));
 
 /** Which add-ons MT_ADDONS selects (default: all). */
 function selectedAddons(value = process.env.MT_ADDONS) {
@@ -73,7 +126,7 @@ function readJson(file, fallback) {
 function writeJson(file, data) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 }); // guarda a chave do OmniRoute
     fs.renameSync(tmp, file);
 }
 
@@ -162,7 +215,7 @@ class Addons {
         const state = this.state();
         state.seeded = state.seeded || {};
         const results = [];
-        const pending = this.addons.filter(a => !state.seeded[a.id]);
+        const pending = this.addons.filter(a => a.kind === 'plugin' && !state.seeded[a.id]);
         if (!pending.length) return results;
 
         const installed = await this.installedPlugins();
@@ -207,19 +260,71 @@ class Addons {
         return results;
     }
 
+    /** Preferências dos serviços e rota padrão do terminal (mesmo arquivo do estado). */
+    prefs() {
+        const st = this.state();
+        return { services: st.services || {}, terminalRoute: st.terminalRoute || 'direto' };
+    }
+
+    /**
+     * @param {{ services?: object, terminalRoute?: string }} patch - services: { id: { enabled, apiKey, model } }
+     * apiKey: '' apaga; undefined mantém.
+     */
+    setPrefs(patch = {}) {
+        const st = this.state();
+        st.services = st.services || {};
+        for (const [id, p] of Object.entries(patch.services || {})) {
+            if (!SERVICES[id] || !p || typeof p !== 'object') continue;
+            const cur = st.services[id] || {};
+            if (typeof p.enabled === 'boolean') cur.enabled = p.enabled;
+            if (id === 'omniroute') {
+                if (typeof p.apiKey === 'string') cur.apiKey = p.apiKey.trim().slice(0, 300) || undefined;
+                if (typeof p.model === 'string') cur.model = p.model.trim().slice(0, 200) || undefined;
+            }
+            st.services[id] = cur;
+        }
+        if (typeof patch.terminalRoute === 'string') st.terminalRoute = patch.terminalRoute;
+        writeJson(this.stateFile, st);
+        return this.prefs();
+    }
+
+    /** Secret env of a service, generated on first use and kept (see SERVICES[id].secrets). */
+    serviceSecrets(id) {
+        const def = SERVICES[id];
+        if (!def?.secrets) return {};
+        const st = this.state();
+        st.services = st.services || {};
+        const cur = st.services[id] || {};
+        cur.secrets = cur.secrets || {};
+        let changed = false;
+        for (const [key, make] of Object.entries(def.secrets)) {
+            if (!cur.secrets[key]) { cur.secrets[key] = make(); changed = true; }
+        }
+        if (changed) { st.services[id] = cur; writeJson(this.stateFile, st); }
+        return { ...cur.secrets };
+    }
+
     /** For the settings page: each add-on, whether it was seeded and whether it's installed now. */
-    async status() {
-        const seeded = this.state().seeded || {};
+    async status({ services = null } = {}) {
+        const st = this.state();
+        const seeded = st.seeded || {};
         const installed = await this.installedPlugins();
-        return ADDONS.map(a => ({
-            id: a.id,
-            label: a.label,
-            plugin: pluginId(a),
-            selected: this.addons.includes(a),
-            seeded: !!seeded[a.id],
-            installed: installed ? installed.includes(pluginId(a)) : null,
-        }));
+        const out = [];
+        for (const a of ADDONS) {
+            if (a.kind === 'plugin') {
+                out.push({ id: a.id, kind: a.kind, label: a.label, plugin: pluginId(a), panel: a.panel || null, selected: this.addons.includes(a),
+                    seeded: !!seeded[a.id], installed: installed ? installed.includes(pluginId(a)) : null });
+            } else {
+                const p = st.services?.[a.id] || {};
+                out.push({ id: a.id, kind: a.kind, label: a.label, port: a.port, panel: a.panel || null,
+                    enabled: !!p.enabled, hasApiKey: !!p.apiKey, model: p.model || null,
+                    // Mostrada só na tela de Complementos (atrás do login do MeuTerminal)
+                    panelPassword: p.secrets?.INITIAL_PASSWORD || null,
+                    ...(services ? await services.status(a.id) : {}) });
+            }
+        }
+        return out;
     }
 }
 
-module.exports = { Addons, ADDONS, selectedAddons, mergeDefaults, runClaude, runNode };
+module.exports = { Addons, ADDONS, SERVICES, visibleCommand, selectedAddons, mergeDefaults, runClaude, runNode };

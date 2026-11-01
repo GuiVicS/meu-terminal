@@ -101,16 +101,19 @@ class AgentGateway extends EventEmitter {
      * @param {number} [deps.maxText] - max chars per tool output / diff side
      * @param {boolean} [deps.validate] - check every event against events.js (dev/tests)
      * @param {object[]} [deps.mcpServers] - ACP MCP servers given to every session (e.g. MeuTerminal's own)
+     * @param {Function} [deps.routeEnv] - async ({ agent, route }) => extra env for that route
      * @param {Function} [deps.log]
      *
      * Emits 'event' with every normalized event envelope ({ sessionId, seq, type, at, data }).
      */
     constructor({ store, agents = loadAgents(), env = process.env, maxSessions = 4, startTimeoutMs = 60000,
-        maxText, validate = false, mcpServers = [], mediaDir = null, log = () => {} }) {
+        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, log = () => {} }) {
         super();
         this.store = store;
         this.agents = agents;
         this.env = env;
+        // async ({ agent, route }) => extra env (scripts/addon-services.js); may start a service or throw
+        this.routeEnv = routeEnv;
         this.maxSessions = maxSessions;
         this.startTimeoutMs = startTimeoutMs;
         this.maxText = maxText;
@@ -148,6 +151,7 @@ class AgentGateway extends EventEmitter {
             agentLabel: agent.label || row.agent,
             cwd: row.cwd,
             title: row.title,
+            route: row.route || null,
             status: row.status,
             running: this.runtimes.has(row.id),
             mode: row.mode,
@@ -186,14 +190,16 @@ class AgentGateway extends EventEmitter {
      * resumeAcpSessionId continues a conversation the agent already has (listHistory), e.g. one
      * started in the terminal; if the agent cannot resume it, a new conversation starts.
      */
-    async startSession({ agent, cwd, title = null, resumeAcpSessionId = null }) {
+    async startSession({ agent, cwd, title = null, resumeAcpSessionId = null, route = null }) {
         const def = this.agents[agent];
         if (!def) throw new GatewayError(`Agente desconhecido: ${agent}`);
         if (def.terminalOnly) throw new GatewayError(`${def.label} só funciona no terminal.`);
         if (typeof cwd !== 'string' || !cwd) throw new GatewayError('Pasta inválida.');
         this.checkCapacity();
+        // Before saving anything: a route whose service can't start fails here, without a dead tab
+        await this.envFor({ agent, route });
         const id = crypto.randomUUID();
-        this.store.insertSession({ id, agent, cwd, title });
+        this.store.insertSession({ id, agent, cwd, title, route });
         if (resumeAcpSessionId) this.store.updateSession(id, { acp_session_id: String(resumeAcpSessionId) });
         // A conversation from the terminal (or another app): its history is not in our log yet
         await this.spawnAgent(id, { resume: !!resumeAcpSessionId, importHistory: !!resumeAcpSessionId });
@@ -214,6 +220,16 @@ class AgentGateway extends EventEmitter {
      * Past conversations the agent itself knows for a folder (ACP session/list), including ones
      * started in the terminal. Starts a short-lived agent process just to ask.
      */
+    /** Environment for an agent process: the gateway's own plus the session's route. */
+    async envFor({ agent, route }) {
+        if (!this.routeEnv) return this.env;
+        try {
+            return { ...this.env, ...(await this.routeEnv({ agent, route })) };
+        } catch (e) {
+            throw new GatewayError(e.message, e.status || 400);
+        }
+    }
+
     async listHistory({ agent, cwd, maxPages = 5 }) {
         const def = this.agents[agent];
         if (!def || def.terminalOnly) throw new GatewayError(`Agente sem histórico: ${agent}`);
@@ -263,11 +279,19 @@ class AgentGateway extends EventEmitter {
         this.runtimes.set(sessionId, runtime);
         this.setState(sessionId, 'starting');
 
+        let env;
+        try {
+            env = await this.envFor(row);
+        } catch (e) {
+            this.runtimes.delete(sessionId);
+            this.setState(sessionId, 'stopped');
+            throw e;
+        }
         const client = new AcpClient({
             command: def.command,
             args: def.args,
             cwd: row.cwd,
-            env: this.env,
+            env,
             log: this.log,
             onRequest: (method, params) => this.onAgentRequest(sessionId, method, params),
         });
