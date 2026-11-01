@@ -13,7 +13,7 @@ const path = require('path');
 const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
 // Não são vidro: véus atrás de algo e o cabeçalho fixo dos blocos de código (efeito de borda de rolagem)
-const NOT_GLASS = ['.ui-select-menu.sheet::backdrop', '.ag-lightbox', '.md-code-head'];
+const NOT_GLASS = ['.ui-select-menu.sheet::backdrop', '.ag-lightbox', '.md-code-head', '.mt-loading'];
 
 /** Each declaration block with its own declarations (nested blocks removed) and its selector. */
 function blocks(text) {
