@@ -1037,7 +1037,7 @@ app.put(BASE_PATH + '/api/addons', async (req, res) => {
 // Telas dos complementos dentro das Configurações (scripts/addon-bridges.js): o servidor fala com
 // cada serviço em 127.0.0.1; o usuário não abre painel no navegador nem faz outro login.
 const bridges = {
-    omniroute: new OmniRouteBridge({ port: SERVICES.omniroute.port, password: () => addons.serviceSecrets('omniroute').INITIAL_PASSWORD }),
+    omniroute: new OmniRouteBridge({ port: SERVICES.omniroute.port, password: () => addons.serviceSecrets('omniroute').INITIAL_PASSWORD, home: HOME_DIR }),
     'claude-mem': new ClaudeMemBridge(),
     headroom: new HeadroomBridge({ port: SERVICES.headroom.port }),
 };

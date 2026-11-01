@@ -49,8 +49,9 @@ class OmniRouteBridge {
      * @param {() => string} opts.password - senha do painel gerada pelo MeuTerminal
      * @param {string} [opts.packageDir] - onde o pacote omniroute está instalado (catálogo de provedores)
      */
-    constructor({ port = 20128, password, packageDir = '/usr/local/lib/node_modules/omniroute', fetchImpl = fetch, cacheDir = path.join(os.tmpdir(), 'mt-omniroute-catalog') }) {
+    constructor({ port = 20128, password, packageDir = '/usr/local/lib/node_modules/omniroute', fetchImpl = fetch, cacheDir = path.join(os.tmpdir(), 'mt-omniroute-catalog'), home = null }) {
         this.base = `http://127.0.0.1:${port}`;
+        this.home = home; // para ler os modelos que a conta do Codex libera
         this.password = password;
         this.packageDir = packageDir;
         this.fetch = fetchImpl;
@@ -153,7 +154,8 @@ class OmniRouteBridge {
     /** Modelos de uma conexão, já no formato que o Claude Code usa (provedor/modelo). */
     async models(id) {
         const r = await this.api('GET', `/api/providers/${encodeURIComponent(id)}/models`);
-        return (r.models || []).map(m => ({ id: `${r.provider}/${m.id}`, name: m.name || m.id }));
+        const list = (r.models || []).map(m => ({ id: `${r.provider}/${m.id}`, name: m.name || m.id }));
+        return this.filterFor({ provider: r.provider }, list);
     }
 
     /**
@@ -176,6 +178,31 @@ class OmniRouteBridge {
     /** Se existe um login do Codex no servidor (para mostrar o botão). */
     static hasCodexLogin(home) {
         return fs.existsSync(path.join(home, '.codex', 'auth.json'));
+    }
+
+    /**
+     * Modelos que a conta do Codex logada no servidor realmente pode usar: o próprio Codex guarda a
+     * lista em ~/.codex/models_cache.json. O catálogo do OmniRoute traz modelos que a conta ChatGPT
+     * recusa ("not supported when using Codex with a ChatGPT account"), e o OmniRoute então põe a
+     * conta de castigo ("all credentials cooling down"). null = sem a lista (não filtra).
+     */
+    static codexAllowed(home) {
+        if (!home) return null;
+        try {
+            const j = JSON.parse(fs.readFileSync(path.join(home, '.codex', 'models_cache.json'), 'utf8'));
+            const list = (j.models || []).filter(m => m && m.slug && m.visibility !== 'hide').map(m => m.slug);
+            return list.length ? new Set(list) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /** Conexão do Codex (ChatGPT): só os modelos que a conta libera. */
+    filterFor(connection, models) {
+        const isCodex = /codex/i.test(`${connection.provider || ''} ${connection.name || ''}`);
+        const allowed = isCodex ? OmniRouteBridge.codexAllowed(this.home) : null;
+        if (!allowed) return models;
+        return models.filter(m => allowed.has(String(m.id).split('/').pop()));
     }
 
     /** Modelos de todas as conexões ativas (para escolher o da troca automática). */
