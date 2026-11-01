@@ -229,7 +229,7 @@ function claudeMem(el, { load, call, toast }) {
         searching = el.querySelector('[data-q]').value.trim();
         const box = el.querySelector('.ad-results');
         if (!searching) { box.innerHTML = ''; return; }
-        box.innerHTML = '<p class="setting-help">Buscando…</p>';
+        box.innerHTML = '<p class="setting-help">Buscando… (a primeira busca prepara o índice e pode levar alguns minutos)</p>';
         try {
             const r = await call('search', { query: searching });
             box.innerHTML = `<pre class="rm-output">${esc(r.text || 'Nada encontrado.')}</pre>`;

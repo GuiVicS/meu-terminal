@@ -188,10 +188,23 @@ class ClaudeMemBridge {
         this.fetch = fetchImpl;
     }
 
-    async get(route) {
-        const r = await getJson(this.fetch, `${this.base}${route}`);
+    async get(route, timeoutMs) {
+        const r = await getJson(this.fetch, `${this.base}${route}`, { timeoutMs });
         if (!r.ok) throw new BridgeError(errorText(r.data), 502);
         return r.data;
+    }
+
+    /** Espera o trabalhador responder (o "claude-mem start" volta antes de ele estar pronto). */
+    async waitReady(timeoutMs = 60000) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            try {
+                const r = await getJson(this.fetch, `${this.base}/api/health`, { timeoutMs: 3000 });
+                if (r.ok) return true;
+            } catch { /* ainda subindo */ }
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        return false;
     }
 
     async panel() {
@@ -220,7 +233,8 @@ class ClaudeMemBridge {
     async search(query) {
         const q = String(query || '').trim().slice(0, 200);
         if (!q) return { text: '' };
-        const r = await this.get(`/api/search?${new URLSearchParams({ query: q, limit: '20' })}`);
+        // a primeira busca prepara o índice semântico (Chroma, baixado pelo uv): pode levar minutos
+        const r = await this.get(`/api/search?${new URLSearchParams({ query: q, limit: '20' })}`, 180000);
         return { text: (r.content || []).map(c => c.text || '').join('\n').trim() };
     }
 

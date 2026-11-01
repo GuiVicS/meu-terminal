@@ -34,6 +34,7 @@ const REMOTE_PUBLIC_PATHS = [
     '/oauth/revoke',
     '/mcp/remote',
     '/dl/',
+    '/up/', // upload_link: a página e o envio usam o token do link, não o login
 ];
 /** Called by claude.ai's servers (or the MCP Inspector in a browser): no cookies, own credentials. */
 const REMOTE_CROSS_ORIGIN_PATHS = ['/oauth/token', '/oauth/register', '/oauth/revoke', '/mcp/remote'];
@@ -46,13 +47,47 @@ const MCP_INSTRUCTIONS = workdir => [
     'Comece com server_info se precisar saber o que há instalado.',
     'Resultados de pesquisa e resumos: salve com save_note (aparece no app de Anotações do celular) ou write_file.',
     'Tarefas longas: start_job + job_status/job_output, com notify=true para avisar o usuário no fim.',
-    'Para ver um site rodando aqui: open_url + screenshot. Para entregar um arquivo grande: share_link.',
+    'Para ver um site rodando aqui: open_url + screenshot.',
+    'Arquivos: nunca passe arquivo grande pela conversa. Pastas de troca: troca/entrada e troca/saida. O usuário manda arquivos de qualquer tamanho por upload_link (confira com upload_received); entregue resultados com share_link; confira toda transferência com file_info (tamanho e sha256); para ver vídeo ou imagem grande use media_preview (quadros), não o arquivo.',
     'Comandos arriscados pedem aprovação no celular do usuário: se a resposta for "aguardando aprovação", avise-o e repita a chamada com o approval_id.',
     'Prefira um script num comando só a muitas chamadas pequenas; saídas longas: redirecione para arquivo e leia com read_file.',
 ].join('\n');
 
 function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** Página do upload_link: escolher arquivos e mandar, com progresso e o sha256 de cada um. */
+function uploadPage({ maxBytes, expiresAt }) {
+    const gb = Math.round(maxBytes / 1073741824 * 10) / 10;
+    const until = new Date(expiresAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Enviar arquivos · MeuTerminal</title>
+<style>
+:root{color-scheme:dark}body{margin:0;font:16px/1.5 system-ui,-apple-system,sans-serif;background:#121212;color:#F2F0E3;display:flex;justify-content:center}
+main{width:100%;max-width:520px;padding:28px 18px}h1{font-size:26px;margin:0 0 6px;letter-spacing:-.02em}p{color:#9a9a9a;margin:0 0 18px}
+label{display:flex;align-items:center;justify-content:center;gap:10px;height:120px;border:2px dashed #A855F7;border-radius:20px;color:#C084FC;font-weight:600;cursor:pointer}
+input{display:none}ul{list-style:none;padding:0;margin:18px 0 0;display:grid;gap:10px}
+li{padding:12px 14px;border-radius:14px;background:#1F1F1F;font-size:14px;word-break:break-all}
+.bar{height:6px;border-radius:3px;background:#333;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:#A855F7}
+.ok{color:#5CEB91}.err{color:#F87171}small{display:block;color:#8a8a8a;margin-top:4px;font-family:ui-monospace,monospace;font-size:11.5px}
+</style></head><body><main>
+<h1>Enviar arquivos</h1>
+<p>Vão direto para o servidor. Até ${esc(gb)} GB por arquivo; o link vale até ${esc(until)}.</p>
+<label>+ Escolher arquivos<input type="file" multiple></label>
+<ul></ul>
+<script>
+const input=document.querySelector('input'),list=document.querySelector('ul');
+const fmt=n=>n<1048576?(n/1024).toFixed(0)+' KB':n<1073741824?(n/1048576).toFixed(1)+' MB':(n/1073741824).toFixed(2)+' GB';
+input.addEventListener('change',async()=>{for(const f of input.files){await send(f)}input.value=''});
+function send(f){return new Promise(done=>{const li=document.createElement('li');li.innerHTML='<b></b> · '+fmt(f.size)+'<div class="bar"><i></i></div><small></small>';
+li.querySelector('b').textContent=f.name;list.prepend(li);const bar=li.querySelector('i'),note=li.querySelector('small');
+const x=new XMLHttpRequest();x.open('PUT',location.pathname+'?name='+encodeURIComponent(f.name));
+x.setRequestHeader('Content-Type','application/octet-stream');x.upload.onprogress=e=>{if(e.lengthComputable)bar.style.width=(e.loaded/e.total*100)+'%'};
+x.onload=()=>{let r={};try{r=JSON.parse(x.responseText)}catch{}if(x.status<300){bar.style.width='100%';note.className='ok';note.textContent='Enviado como '+r.name+' · sha256 '+r.sha256}else{note.className='err';note.textContent=r.error||('Erro '+x.status)}done()};
+x.onerror=()=>{note.className='err';note.textContent='Falha na conexão.';done()};x.send(f)})}
+</script></main></body></html>`;
 }
 
 /**
@@ -371,13 +406,82 @@ function registerRemote(app, ctx) {
 
     app.get(`${BP}/dl/:token`, async (req, res) => {
         const link = getSwitch() ? shares.get(req.params.token) : null;
-        if (!link) return res.status(404).type('text').send('Link inválido ou expirado.');
+        if (!link || link.kind === 'upload') return res.status(404).type('text').send('Link inválido ou expirado.');
         res.set('Referrer-Policy', 'no-referrer');
         try {
             await files.send(req, res, link.source, link.path, { download: true });
         } catch (e) {
             if (!res.headersSent) res.status(e.status || 500).type('text').send(e.message);
         }
+    });
+
+    // ---------- Temporary upload links (upload_link) ----------
+    // Página simples para o usuário mandar arquivos de qualquer tamanho direto para uma pasta do
+    // servidor; cada arquivo vai num PUT em fluxo (sem passar pela memória nem pela conversa).
+
+    const uploadLink = token => {
+        const link = getSwitch() ? shares.get(token) : null;
+        return link && link.kind === 'upload' ? link : null;
+    };
+
+    app.get(`${BP}/up/:token`, (req, res) => {
+        const link = uploadLink(req.params.token);
+        if (!link) return res.status(404).type('text').send('Link inválido ou expirado.');
+        res.set({ 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY' });
+        res.type('html').send(uploadPage({ maxBytes: link.maxBytes, expiresAt: link.expiresAt }));
+    });
+
+    app.put(`${BP}/up/:token`, async (req, res) => {
+        const link = uploadLink(req.params.token);
+        if (!link) return res.status(404).json({ error: 'Link inválido ou expirado.' });
+        const declared = Number(req.headers['content-length'] || 0);
+        if (declared > link.maxBytes) return res.status(413).json({ error: `Grande demais (máximo ${Math.round(link.maxBytes / 1073741824 * 10) / 10} GB).` });
+        // espaço livre: nunca encher o disco (mínimo 2 GB sobrando)
+        try {
+            const st = await fs.promises.statfs(link.dir);
+            if (st.bavail * st.bsize - declared < 2 * 1073741824) return res.status(507).json({ error: 'Pouco espaço livre no servidor.' });
+        } catch { /* sem statfs: segue */ }
+        const raw = String(req.query.name || 'arquivo').normalize('NFC');
+        const safe = path.basename(raw).replace(/[\u0000-\u001f\\/:*?"<>|]/g, '_').replace(/^\.+/, '_').slice(0, 200) || 'arquivo';
+        await fs.promises.mkdir(link.dir, { recursive: true });
+        // nunca sobrescreve: "nome (2).ext"
+        let name = safe;
+        for (let i = 2; fs.existsSync(path.join(link.dir, name)); i++) {
+            const ext = path.extname(safe);
+            name = `${path.basename(safe, ext)} (${i})${ext}`;
+        }
+        const dest = path.join(link.dir, name);
+        const partial = `${dest}.parcial`;
+        const hash = crypto.createHash('sha256');
+        let size = 0;
+        let tooBig = false;
+        const out = fs.createWriteStream(partial, { flags: 'wx' });
+        req.on('data', chunk => {
+            size += chunk.length;
+            if (size > link.maxBytes && !tooBig) { tooBig = true; req.unpipe(out); out.destroy(); req.destroy(); return; }
+            hash.update(chunk);
+        });
+        req.pipe(out);
+        const done = await new Promise(resolve => {
+            out.on('finish', () => resolve(true));
+            out.on('error', () => resolve(false));
+            out.on('close', () => resolve(!tooBig && out.writableFinished));
+            req.on('aborted', () => resolve(false));
+        });
+        if (!done || tooBig) {
+            await fs.promises.rm(partial, { force: true });
+            if (!res.headersSent) res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'Grande demais.' : 'O envio foi interrompido.' });
+            return;
+        }
+        await fs.promises.rename(partial, dest);
+        if (!exec.sameUser) { try { await fs.promises.chown(dest, exec.user.uid, exec.user.gid); } catch { /* ignore */ } }
+        const entry = { name, path: dest, size, sha256: hash.digest('hex'), at: new Date().toISOString() };
+        link.received.push(entry);
+        try {
+            await fs.promises.appendFile(path.join(link.dir, 'manifest.txt'), `${entry.at}\t${entry.size}\t${entry.sha256}\t${entry.name}\n`);
+        } catch { /* manifest é extra */ }
+        ctx.log?.(`Ponte: recebido por upload_link ${dest} (${size} bytes)`);
+        res.json({ name, size, sha256: entry.sha256 });
     });
 
     // ---------- /admin API (behind the normal login) ----------

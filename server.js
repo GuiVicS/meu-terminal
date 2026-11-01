@@ -1031,6 +1031,7 @@ async function withMem(fn) {
     } catch (e) {
         if (e.status !== 503) throw e;
         await startClaudeMem();
+        if (!await bridges['claude-mem'].waitReady(60000)) throw new BridgeError('O Claude Mem não respondeu depois de iniciar. Tente de novo em instantes.', 503);
         return fn();
     }
 }
