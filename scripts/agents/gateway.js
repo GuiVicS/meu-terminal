@@ -55,6 +55,23 @@ function currentModel(configOptions) {
     return option ? option.currentValue : null;
 }
 
+/** Id of the model option built from the older ACP `models` field (OpenCode, Gemini, codex-acp...). */
+const LEGACY_MODEL_ID = '__model';
+
+/**
+ * Agents that report models as `models: { availableModels, currentModelId }` instead of a config
+ * option get the same model selector (changed with session/set_model). Every model is listed.
+ */
+function legacyModelOption(session) {
+    const m = session && session.models;
+    if (!m || !Array.isArray(m.availableModels) || !m.availableModels.length) return null;
+    return {
+        id: LEGACY_MODEL_ID, name: 'Modelo', description: '', category: 'model', type: 'select',
+        currentValue: m.currentModelId || m.availableModels[0].modelId,
+        options: m.availableModels.map(x => ({ value: x.modelId, name: x.name || x.modelId, description: x.description || '', group: null })),
+    };
+}
+
 /** Initialize + session/new results -> the capability flags the UI uses (events.js CAPABILITIES). */
 function deriveCapabilities(init, session) {
     const agentCaps = (init && init.agentCapabilities) || {};
@@ -62,6 +79,8 @@ function deriveCapabilities(init, session) {
     const prompt = agentCaps.promptCapabilities || {};
     const mcp = agentCaps.mcpCapabilities || {};
     const configOptions = normalizeConfigOptions(session && session.configOptions);
+    const legacy = configOptions.some(o => o.category === 'model') ? null : legacyModelOption(session);
+    if (legacy) configOptions.push(legacy);
     const modes = deriveModes(session, configOptions);
     return {
         modes: modes.modeList.length > 0,
@@ -121,7 +140,7 @@ class AgentGateway extends EventEmitter {
      * Emits 'event' with every normalized event envelope ({ sessionId, seq, type, at, data }).
      */
     constructor({ store, agents = loadAgents(), env = process.env, maxSessions = 4, startTimeoutMs = 60000,
-        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, onUsageLimit = null, log = () => {} }) {
+        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, onUsageLimit = null, extraModels = null, log = () => {} }) {
         super();
         this.store = store;
         this.agents = agents;
@@ -130,6 +149,9 @@ class AgentGateway extends EventEmitter {
         this.routeEnv = routeEnv;
         // async ({ sessionId, row, text, images }) => chamado quando uma resposta é o aviso de limite
         this.onUsageLimit = onUsageLimit;
+        // async ({ agent, route }) => [{ value, name, group, route }]: modelos de fora do agente (OmniRoute)
+        // que entram no seletor; escolher um troca a rota da conversa (setRoute) para aquele modelo
+        this.extraModels = extraModels;
         this.maxSessions = maxSessions;
         this.startTimeoutMs = startTimeoutMs;
         this.maxText = maxText;
@@ -290,7 +312,7 @@ class AgentGateway extends EventEmitter {
         const mapper = new AcpMapper({ maxText: this.maxText });
         const runtime = {
             client: null, mapper, ready: false, closing: false, loading: false,
-            acpSessionId: null, prompting: false, mode: row.mode, capabilities: row.capabilities || {},
+            sessionId, acpSessionId: null, prompting: false, mode: row.mode, capabilities: row.capabilities || {},
             permissions: new Map(), // permissionId -> resolve(outcome)
         };
         this.runtimes.set(sessionId, runtime);
@@ -342,6 +364,7 @@ class AgentGateway extends EventEmitter {
                 agent: row.agent, cwd: row.cwd, capabilities: runtime.capabilities, mode: runtime.mode, model, resumed: session.resumed,
             });
             this.setState(sessionId, 'idle');
+            this.loadExtraModels(sessionId, runtime);
         } catch (error) {
             const stderr = client.stderr.slice(-5).join('\n');
             const missing = /Could not start/.test(error.message);
@@ -596,11 +619,68 @@ class AgentGateway extends EventEmitter {
         this.applyMode(sessionId, runtime, modeId);
     }
 
+    /** A config.update from an agent with the older `models` field must not drop that selector. */
+    keepLegacyModel(runtime, options) {
+        const legacy = (runtime.capabilities?.configOptions || []).find(o => o.id === LEGACY_MODEL_ID);
+        if (!legacy || options.some(o => o.category === 'model')) return options;
+        return [...options, legacy];
+    }
+
+    /** Junta ao seletor de modelo os modelos de fora do agente (sem repetir), num grupo próprio. */
+    withExtras(runtime, options) {
+        const extras = runtime.extras || [];
+        const clean = options.map(o => (o.category === 'model' ? { ...o, options: o.options.filter(x => !x.extra) } : o));
+        if (!extras.length) return clean;
+        let model = clean.find(o => o.category === 'model' && o.type === 'select');
+        if (!model) {
+            model = { id: LEGACY_MODEL_ID, name: 'Modelo', description: '', category: 'model', type: 'select', currentValue: null, options: [] };
+            clean.push(model);
+        }
+        const have = new Set(model.options.map(o => o.value));
+        const row = this.store.getSession(runtime.sessionId) || {};
+        const add = extras.filter(x => !have.has(x.value))
+            .map(x => ({ value: x.value, name: x.name, description: x.description || '', group: x.group || 'Outros modelos', extra: true }));
+        model.options = [...model.options, ...add];
+        // Na rota de outro modelo, o atual é o escolhido nela
+        const cur = row.route && row.route_model ? extras.find(x => x.route === row.route && x.model === row.route_model) : null;
+        if (cur) model.currentValue = cur.value;
+        return clean;
+    }
+
+    /** Busca os modelos de fora do agente (depois que a sessão abriu, sem atrasar a abertura). */
+    async loadExtraModels(sessionId, runtime) {
+        if (!this.extraModels) return;
+        const row = this.store.getSession(sessionId);
+        if (!row) return;
+        let extras = [];
+        try {
+            extras = (await this.extraModels({ agent: row.agent, route: row.route || null })) || [];
+        } catch (error) {
+            this.log(`extraModels ${row.agent}: ${error.message}`);
+            return;
+        }
+        if (this.runtimes.get(sessionId) !== runtime || !extras.length) return;
+        runtime.extras = extras;
+        this.applyConfigOptions(sessionId, runtime, runtime.capabilities.configOptions || []);
+    }
+
     /** Changes a session config option (model, reasoning effort, mode...). */
     async setConfigOption(sessionId, configId, value) {
         const runtime = this.requireRuntime(sessionId);
         const option = (runtime.capabilities.configOptions || []).find(o => o.id === configId);
         if (!option) throw new GatewayError(`Opção desconhecida: ${configId}`);
+        // Modelo de fora do agente (OmniRoute): a conversa passa para aquela rota, com esse modelo
+        const extra = option.category === 'model' && (runtime.extras || []).find(x => x.value === value);
+        if (extra) {
+            await this.setRoute(sessionId, extra.route, extra.model);
+            return;
+        }
+        if (configId === LEGACY_MODEL_ID) {
+            if (!option.options.some(o => o.value === value)) throw new GatewayError('Modelo inválido.');
+            await runtime.client.request('session/set_model', { sessionId: runtime.acpSessionId, modelId: value });
+            this.applyConfigOptions(sessionId, runtime, runtime.capabilities.configOptions.map(o => (o.id === configId ? { ...o, currentValue: value } : o)));
+            return;
+        }
         const params = { sessionId: runtime.acpSessionId, configId };
         if (option.type === 'boolean') {
             if (typeof value !== 'boolean') throw new GatewayError(`${option.name}: valor inválido.`);
@@ -619,6 +699,7 @@ class AgentGateway extends EventEmitter {
 
     /** New config options from the agent: persist, notify, and keep mode/model in sync. */
     applyConfigOptions(sessionId, runtime, options) {
+        options = this.withExtras(runtime, this.keepLegacyModel(runtime, options));
         runtime.capabilities = { ...runtime.capabilities, configOptions: options, config: options.length > 0 };
         this.store.updateSession(sessionId, { capabilities: runtime.capabilities, model: currentModel(options) });
         this.emitEvent(sessionId, 'config.update', { options });

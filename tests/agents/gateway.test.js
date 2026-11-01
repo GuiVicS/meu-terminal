@@ -317,3 +317,39 @@ test('rota: setRoute grava a rota, reinicia com o ambiente novo e retoma a mesma
     assert.equal(store.getSession(s.id).route, null);
     await gateway.shutdown();
 });
+
+test('modelos: agente com o campo antigo "models" ganha o seletor com todos os modelos e troca por session/set_model', async () => {
+    const { gateway } = setup({ env: { FAKE_AGENT_LEGACY_MODELS: '1' } });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const model = gateway.get(s.id).capabilities.configOptions.find(o => o.category === 'model');
+    assert.deepEqual(model.options.map(o => o.value), ['m-a', 'm-b', 'm-c']);
+    assert.equal(model.currentValue, 'm-a');
+    await gateway.setConfigOption(s.id, model.id, 'm-c');
+    assert.equal(gateway.get(s.id).capabilities.configOptions.find(o => o.category === 'model').currentValue, 'm-c');
+    await gateway.shutdown();
+});
+
+test('modelos: os de fora (OmniRoute) entram no seletor e escolher um troca a rota da conversa', async () => {
+    const store = new AgentStore(':memory:');
+    const seen = [];
+    const gateway = new AgentGateway({
+        store,
+        agents: { fake: { label: 'Fake', command: process.execPath, args: [FAKE], install: 'n/a' } },
+        env: { ...process.env },
+        routeEnv: async ({ route, routeModel }) => { seen.push([route, routeModel]); return {}; },
+        extraModels: async () => [{ value: 'omniroute:codex/gpt-5', name: 'GPT-5', model: 'codex/gpt-5', route: 'omniroute', group: 'OmniRoute · Codex' }],
+        log: () => {},
+    });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const findModel = () => gateway.get(s.id).capabilities.configOptions.find(o => o.category === 'model');
+    for (let i = 0; i < 50 && !findModel()?.options.some(o => o.extra); i++) await new Promise(r => setTimeout(r, 20));
+    const model = findModel();
+    assert.ok(model.options.some(o => o.value === 'omniroute:codex/gpt-5' && o.group === 'OmniRoute · Codex'));
+    await gateway.setConfigOption(s.id, model.id, 'omniroute:codex/gpt-5');
+    const row = store.getSession(s.id);
+    assert.equal(row.route, 'omniroute');
+    assert.equal(row.route_model, 'codex/gpt-5');
+    for (let i = 0; i < 50 && findModel()?.currentValue !== 'omniroute:codex/gpt-5'; i++) await new Promise(r => setTimeout(r, 20));
+    assert.equal(findModel().currentValue, 'omniroute:codex/gpt-5');
+    await gateway.shutdown();
+});

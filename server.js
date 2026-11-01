@@ -830,6 +830,24 @@ function terminalRouteEnv() {
  * (Configurações → Complementos), a conversa passa para o OmniRoute com o modelo escolhido, é
  * retomada e a mensagem que falhou é reenviada. A assinatura do Claude nunca passa pelo OmniRoute.
  */
+/**
+ * Modelos do OmniRoute no seletor do Claude Code no Modo UI (Codex, GPT, Gemini... conectados lá):
+ * escolher um passa a conversa para a rota "Outros modelos" com aquele modelo. Cache curto, para
+ * não consultar o OmniRoute a cada conversa aberta.
+ */
+let omniModelsCache = { at: 0, list: [] };
+async function extraAgentModels({ agent }) {
+    if (agent !== 'claude' || !addons.prefs().services.omniroute?.enabled) return [];
+    if (Date.now() - omniModelsCache.at > 60000) {
+        const models = await bridges.omniroute.allModels();
+        omniModelsCache = { at: Date.now(), list: models };
+    }
+    return omniModelsCache.list.map(m => ({
+        value: `omniroute:${m.id}`, name: m.name || m.id, model: m.id, route: 'omniroute',
+        group: `OmniRoute${m.provider ? ` · ${m.provider}` : ''}`,
+    }));
+}
+
 async function usageLimitFallback({ sessionId, row, text, images }) {
     const prefs = addons.prefs();
     if (!prefs.fallback.enabled || row.agent !== 'claude' || normalizeRoute(row.route) === 'omniroute') return;
@@ -858,6 +876,7 @@ const agentGateway = new AgentGateway({
     mcpServers: [{ type: 'http', name: 'meuterminal', url: MCP_URL, headers: [{ name: 'Authorization', value: `Bearer ${MCP_TOKEN}` }] }],
     routeEnv: agentRouteEnv,
     onUsageLimit: usageLimitFallback,
+    extraModels: extraAgentModels,
     log: debugLog,
 });
 const agentLauncher = new AgentLauncher({
