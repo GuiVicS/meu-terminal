@@ -42,6 +42,7 @@ export function openSettingsSheet({ settings, getSession, commands, section, sou
         title: 'Configurações',
         className: 'settings-sheet',
         source,
+        page: true, // uma página inteira, não um popup (pedido do usuário)
         onClose: () => {
             sections?.stopPair();
             if (current?.sheet === sheet.sheet) current = null;

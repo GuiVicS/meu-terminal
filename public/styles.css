@@ -3923,3 +3923,26 @@ audio.fm-media { width: min(520px, 90%); }
 }
 /* títulos dentro da tela de um complemento: menores que os da página */
 .ad-panel .section-label, .st-page .ad-panel .section-label { font-size: 15px; font-weight: 600; letter-spacing: 0; margin: 20px 0 8px; color: var(--text-2); }
+
+/* ---------- Folha em modo página (ui/sheet.js page: true): Configurações no celular ----------
+   Tela inteira com o fundo do app, entrando pela direita como a navegação do iOS. */
+.sheet-page { align-items: stretch; }
+.sheet-page.open { background: transparent; }
+.sheet-page .ag-sheet,
+.settings-sheet.sheet-page .ag-sheet {
+    width: 100%; height: 100dvh; max-height: none; margin: 0; border: 0; border-radius: 0;
+    padding: calc(4px + var(--safe-top)) calc(16px + var(--safe-right)) calc(28px + var(--safe-bottom)) calc(16px + var(--safe-left));
+    background: var(--bg); box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    transform: translateX(100%); transition: transform var(--spring-smooth-dur, 450ms) var(--spring-smooth, cubic-bezier(0.2, 0.9, 0.25, 1));
+}
+.sheet-page.open .ag-sheet { transform: none; }
+.sheet-page .ag-sheet-grabber { display: none; }
+.sheet-page .ag-sheet-head {
+    position: sticky; top: calc(-4px - var(--safe-top)); z-index: 2; margin: 0 -16px 8px; padding: calc(4px + var(--safe-top)) 16px 6px;
+    min-height: 52px; background: var(--bg);
+}
+@media (prefers-reduced-motion: reduce) {
+    .sheet-page .ag-sheet { transition: opacity 180ms ease; transform: none; opacity: 0; }
+    .sheet-page.open .ag-sheet { opacity: 1; }
+}
