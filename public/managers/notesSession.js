@@ -31,6 +31,36 @@ function formatDate(ms) {
     return date.toDateString() === new Date().toDateString() ? timeFormat.format(date) : dayFormat.format(date);
 }
 
+const fullDateFormat = new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+const monthFormat = new Intl.DateTimeFormat('pt-BR', { month: 'long' });
+const monthYearFormat = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
+const DAY = 24 * 60 * 60 * 1000;
+
+/** Grupo da lista, como no Notas do iPhone: Fixadas, Hoje, Ontem, 7/30 dias anteriores, mês. */
+function groupLabel(note, trash) {
+    if (note.pinned && !trash) return 'Fixadas';
+    const when = trash ? note.deletedAt : note.updatedAt;
+    const startOfToday = new Date().setHours(0, 0, 0, 0);
+    if (when >= startOfToday) return 'Hoje';
+    if (when >= startOfToday - DAY) return 'Ontem';
+    if (when >= startOfToday - 7 * DAY) return '7 dias anteriores';
+    if (when >= startOfToday - 30 * DAY) return '30 dias anteriores';
+    const d = new Date(when);
+    const label = d.getFullYear() === new Date().getFullYear() ? monthFormat.format(d) : monthYearFormat.format(d);
+    return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** "1 de novembro de 2026 às 10:42" (topo do editor no celular). */
+function fullDate(ms) {
+    const d = new Date(ms);
+    return `${fullDateFormat.format(d)} às ${timeFormat.format(d)}`;
+}
+
+// Ícone de nova nota do iPhone (quadrado com lápis)
+const COMPOSE_ICON = `<svg class="icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L12 14.8l-3.9 1 1-3.9Z"/></svg>`;
+
 function formatSize(bytes) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -230,6 +260,7 @@ export default class NotesSession {
         this.panel.innerHTML = `
             <div class="nt" data-pane="list">
                 <aside class="nt-side" aria-label="Lista de anotações">
+                    <h2 class="nt-largetitle">Notas</h2>
                     <div class="nt-toolbar">
                         <form class="nt-search" role="search">
                             ${icon('search', 16)}
@@ -245,6 +276,10 @@ export default class NotesSession {
                         <button type="button" class="btn btn-ghost btn-sm" data-act="empty-trash">Esvaziar</button>
                     </div>
                     <ul class="nt-list" role="listbox" aria-label="Anotações"></ul>
+                    <div class="nt-countbar">
+                        <span class="nt-count" role="status"></span>
+                        <button type="button" class="nt-compose" data-act="new" aria-label="Nova anotação">${COMPOSE_ICON}</button>
+                    </div>
                 </aside>
                 <section class="nt-main" aria-label="Editor">
                     <div class="nt-empty">
@@ -254,7 +289,7 @@ export default class NotesSession {
                     </div>
                     <div class="nt-editor" hidden>
                         <div class="nt-ehead">
-                            <button type="button" class="icon-btn nt-back" data-act="back" aria-label="Voltar para a lista">${icon('arrowLeft', 18)}</button>
+                            <button type="button" class="icon-btn nt-back" data-act="back" aria-label="Voltar para a lista">${icon('arrowLeft', 18)}<span class="nt-back-label">Notas</span></button>
                             <span class="nt-status" role="status" aria-live="polite"></span>
                             <button type="button" class="btn btn-ghost btn-sm" data-act="restore" hidden>Restaurar</button>
                             <button type="button" class="icon-btn nt-fs" data-act="fullscreen" aria-label="Tela cheia" aria-pressed="false" title="Tela cheia">${icon('maximize', 18)}</button>
@@ -266,6 +301,7 @@ export default class NotesSession {
                             <button type="button" class="btn btn-ghost btn-sm" data-act="take-theirs">Usar a outra versão</button>
                             <button type="button" class="btn btn-ghost btn-sm" data-act="keep-mine">Manter a minha</button>
                         </div>
+                        <div class="nt-edate" aria-hidden="true"></div>
                         <input class="nt-title" type="text" maxlength="200" placeholder="Título" aria-label="Título da anotação" autocomplete="off">
                         <div class="nt-tagsline">
                             ${icon('tag', 14)}
@@ -298,6 +334,7 @@ export default class NotesSession {
             docWrap: q('.nt-doc-wrap'), docEl: q('.nt-doc'), dragHandle: q('.nt-draghandle'), trashBtn: q('[data-act="trash"]'),
             restoreBtn: q('[data-act="restore"]'), fsBtn: q('[data-act="fullscreen"]'), pinBtn: q('[data-act="pin"]'),
             fbar: q('.nt-fbar'), tbar: q('.nt-tbar'), slashEl: q('.nt-slash'),
+            largeTitle: q('.nt-largetitle'), count: q('.nt-count'), edate: q('.nt-edate'),
         };
         this.createEditor();
         this.bind();
@@ -486,6 +523,8 @@ export default class NotesSession {
         el.trashBtn.setAttribute('aria-pressed', String(this.trashView));
         el.trashBtn.classList.toggle('on', this.trashView);
         el.trashbar.hidden = !this.trashView || !this.list.length;
+        el.largeTitle.textContent = this.trashView ? 'Lixeira' : 'Notas';
+        el.count.textContent = this.listLoaded ? `${this.list.length} ${this.list.length === 1 ? 'nota' : 'notas'}` : '';
         el.tags.hidden = this.trashView || !this.tags.length;
         el.tags.innerHTML = this.tags.map(t => {
             const on = t.tag.toLowerCase() === this.tag.toLowerCase();
@@ -505,14 +544,19 @@ export default class NotesSession {
         const leftAct = this.trashView
             ? { act: 'purge', icon: 'trash', label: 'Excluir para sempre' }
             : { act: 'trash', icon: 'trash', label: 'Mover para a lixeira' };
+        let lastGroup = null;
         el.listEl.innerHTML = this.list.map(n => {
+            // Cabeçalho de grupo (só aparece no layout de celular, como no Notas do iPhone)
+            const group = groupLabel(n, this.trashView);
+            const header = group !== lastGroup ? `<li class="nt-group" role="presentation">${esc(group)}</li>` : '';
+            lastGroup = group;
             const selected = n.id === this.current?.id;
-            const preview = n.preview.replace(/```[a-z]*|[#*_`>~|\/-]/gi, '').replace(/\s+/g, ' ').trim(); // Markdown marks are noise in a one-line preview
+            const preview = n.preview.replace(/\[[ xX]\]\s*/g, '').replace(/```[a-z]*|[#*_`>~|\/-]/gi, '').replace(/\s+/g, ' ').trim(); // Markdown marks (and checklist boxes) are noise in a one-line preview
             const progress = n.tasks ? `<span class="nt-item-progress"><span class="nt-item-bar"><span style="width:${Math.round(n.tasks.done / n.tasks.total * 100)}%"></span></span><small>${n.tasks.done}/${n.tasks.total}</small></span>` : '';
             const right = this.trashView ? rightAct : { ...rightAct, label: n.pinned ? 'Desafixar no topo' : rightAct.label };
             // Show at most 2 tags plus a count, instead of letting a long joined list get cut mid-word by the ellipsis
             const tagList = n.tags.length > 2 ? `${n.tags.slice(0, 2).join(', ')} +${n.tags.length - 2}` : n.tags.join(', ');
-            return `<li class="nt-row${selected ? ' selected' : ''}">
+            return `${header}<li class="nt-row${selected ? ' selected' : ''}">
                 <span class="nt-swipe-actions nt-swipe-right" aria-hidden="true"><button type="button" tabindex="-1" class="nt-swipe-btn nt-swipe-${right.act}" data-swipe-act="${right.act}" data-id="${esc(n.id)}" aria-label="${esc(right.label)}">${icon(right.icon, 18)}</button></span>
                 <div class="nt-row-fg">
                     <button type="button" class="nt-item" role="option" aria-selected="${selected}" data-id="${esc(n.id)}">
@@ -658,6 +702,7 @@ export default class NotesSession {
         el.empty.hidden = true;
         el.editor.hidden = false;
         el.title.value = note.title;
+        el.edate.textContent = fullDate(note.updatedAt || note.createdAt || Date.now());
         el.tagsInput.value = note.tags.join(', ');
         // emitUpdate: false - this is a programmatic load, not a user edit (must not mark the note dirty)
         this.editor.commands.setContent(note.body, { emitUpdate: false });

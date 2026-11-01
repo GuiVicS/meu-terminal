@@ -372,7 +372,10 @@ app.get(BASE_PATH + '/config.js', (req, res) => {
         webhooksAvailable: WEBHOOKS_ENABLED, // /admin/webhooks
         hljsVersion: HLJS_VERSION, // syntax highlighting in the agent chat (vendor/hljs/<version>/)
         version: APP_VERSION,
-        cacheName: CACHE_NAME
+        cacheName: CACHE_NAME,
+        // Bolinha do rodapé da lista de conversas: só para quem já entrou
+        userInitials: AUTH_EMAIL && (req.session?.authenticated || hasValidAuthCookie(req.cookies))
+            ? AUTH_EMAIL.split('@')[0].replace(/[^a-z]/g, '').slice(0, 2).toUpperCase() : null,
     }
 
     // Never cached by proxies/CDNs (Cloudflare): it says which version and features are on
@@ -981,6 +984,18 @@ app.put(BASE_PATH + '/api/addons', async (req, res) => {
         return res.status(e.status || 500).json({ error: e.message });
     }
     res.json({ terminalRoute: normalizeRoute(prefs.terminalRoute), addons: await addons.status({ services: addonServices }) });
+});
+
+// Conversas fixadas na lista lateral do Modo UI (ids de sessão do agente), iguais em todo aparelho
+const MAX_PINS = 50;
+const readPins = () => { try { const v = JSON.parse(sessionStore.getMeta('agent-pins') || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+app.get(BASE_PATH + '/api/agent-pins', (req, res) => res.json({ pins: readPins() }));
+app.put(BASE_PATH + '/api/agent-pins', (req, res) => {
+    const pins = Array.isArray(req.body?.pins) ? req.body.pins : null;
+    if (!pins) return res.status(400).json({ error: 'pins deve ser uma lista.' });
+    const clean = [...new Set(pins.filter(p => typeof p === 'string' && /^[\w.:-]{1,120}$/.test(p)))].slice(0, MAX_PINS);
+    sessionStore.setMeta('agent-pins', JSON.stringify(clean));
+    res.json({ pins: clean });
 });
 
 app.get(BASE_PATH + '/api/agents', (req, res) => {

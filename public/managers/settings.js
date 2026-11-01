@@ -9,7 +9,7 @@ export const DEFAULT_SETTINGS = {
     // Interface
     theme: 'dark',            // 'dark' | 'light' | 'system'
     motion: 'system',         // 'system' | 'reduced'
-    // 'glass' (iPhone only) | 'glass-any' (any phone) | 'classic' (no iPhone layout)
+    // 'glass' (any phone: iPhone and Android) | 'classic' (no phone layout); 'glass-any' (valor antigo) = 'glass'
     iphoneVisual: 'glass',
     // Terminal
     fontSize: 15,
@@ -88,14 +88,14 @@ export default class SettingsManager {
     }
 
     /**
-     * iPhone-only layout (Liquid Glass). index.html sets data-iphone before the first paint, so this
-     * mostly keeps the attribute in sync when the preference is changed; it also lets anyone put
-     * the same visual on another phone (Android) from Settings → Interface.
+     * Phone layout (Liquid Glass) on any phone, iPhone and Android. index.html sets data-iphone
+     * before the first paint (same rule), so this keeps the attribute in sync when the preference
+     * is changed in Settings → Interface.
      */
     applyIphoneVisual() {
         const mode = this.values.iphoneVisual;
         const isPhone = /iPhone|iPod/.test(navigator.userAgent)
-            || (mode === 'glass-any' && window.matchMedia('(pointer: coarse)').matches
+            || (window.matchMedia('(pointer: coarse)').matches
                 && Math.min(window.screen.width, window.screen.height) < 720);
         document.documentElement.toggleAttribute('data-iphone', mode !== 'classic' && isPhone);
     }

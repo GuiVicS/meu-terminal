@@ -788,6 +788,7 @@ export default class TerminalManager {
     openSessionList(anchor) {
         if (document.documentElement.hasAttribute('data-iphone')) {
             const sheet = openSessionSheet({
+                source: anchor, // the sheet grows out of the session pill (ui/morph.js)
                 getItems: () => this.order.map(id => {
                     const s = this.sessions.get(id);
                     return { id, name: s.name, sub: s.displayCwd(), icon: sessionIcon(s), color: s.color, state: s.state, active: id === this.activeId };

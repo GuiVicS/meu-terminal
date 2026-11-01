@@ -9,6 +9,7 @@
 import { icon } from './icons.js';
 import { esc } from '../agent/markdown.js';
 import { relativeTime } from './newSession.js';
+import { present, dismiss } from './morph.js';
 
 const LONG_PRESS_MS = 500;
 let current = null;
@@ -21,11 +22,10 @@ export function sessionIcon(session) {
 
 export function closeSessionSheet() {
     if (!current) return;
-    const { backdrop, onKey } = current;
+    const { backdrop, onKey, source } = current;
     current = null;
     document.removeEventListener('keydown', onKey);
-    backdrop.classList.remove('open');
-    setTimeout(() => backdrop.remove(), 300);
+    dismiss(backdrop, source, () => backdrop.remove());
 }
 
 /**
@@ -38,9 +38,10 @@ export function closeSessionSheet() {
  * @param {() => Array<{id: string, name: string, sub: string, icon: string, color: string, closedAt: number}>} [opts.getRecents]
  * @param {(id: string) => void} [opts.onReopen]
  * @param {(id: string) => Promise<any>} [opts.onForget]
+ * @param {HTMLElement} [opts.source] - the control that opened it (the sheet grows out of it)
  * @returns {{ refresh: () => void }} - call refresh() when the lists change (e.g. recents arrive)
  */
-export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu, getRecents = () => [], onReopen, onForget }) {
+export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu, getRecents = () => [], onReopen, onForget, source }) {
     closeSessionSheet();
     const backdrop = document.createElement('div');
     backdrop.className = 'ag-sheet-backdrop sessions-sheet';
@@ -178,7 +179,7 @@ export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu, get
         if (dragged > 80) closeSessionSheet();
     });
 
-    current = { backdrop, onKey };
-    requestAnimationFrame(() => requestAnimationFrame(() => backdrop.classList.add('open')));
+    current = { backdrop, onKey, source };
+    present(backdrop, source);
     return { refresh: () => { if (current && current.backdrop === backdrop) render(); } };
 }

@@ -18,11 +18,12 @@ import { createSettingsDialog, createShortcutsDialog } from './ui/dialogs.js';
 import { showMenu } from './ui/contextMenu.js';
 import { icon } from './ui/icons.js';
 import { sessionIcon } from './ui/sessionSheet.js';
-import { bindAppEdgeSwipe } from './ui/edgeSwipe.js';
+import ConversationDrawer, { MENU_ICON } from './ui/conversationDrawer.js';
 import VibeForm from './ui/vibeForm.js';
 import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
 import { isHandset, isIphonePortrait } from './ui/device.js';
+import { openSettingsSheet } from './ui/settingsSheet.js';
 import { toast } from './ui/toast.js';
 
 const STATE_LABELS = {
@@ -191,6 +192,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     // iPhone session pill (top of the screen): icon, name and color of the current session
     const sessionPill = document.getElementById('sessionPill');
+    // ☰ da lista de conversas (só em aba de agente no celular); ligado mais abaixo, junto da lista
+    const convBtn = document.getElementById('convBtn');
+    let syncConvBtn = () => {};
     sessionPill.querySelector('.session-pill-chevron').innerHTML = icon('chevronDown', 18);
     // Swiping the pill left/right goes to the next/previous open session (iPhone, 4.6).
     // The click that the browser fires after the drag must not open the session sheet.
@@ -237,6 +241,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const renderActive = session => {
         renderPill(session);
+        syncConvBtn();
         statusBar.render(session);
         if (typeof updateShortcutBar === 'function') updateShortcutBar();
         brandConn.dataset.state = session.state;
@@ -295,9 +300,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ---------- dialogs ----------
     settingsDialog = createSettingsDialog(settings, () => workspace?.active, commands);
-    /** Configurações: the /admin page (the iPhone opens a sheet instead, inside the app). */
-    function openSettings() {
-        window.location.href = joinPath('admin');
+    /**
+     * Configurações. Phones (glass layout, portrait): a sheet inside the app (ui/settingsSheet.js),
+     * optionally straight at a section - going to /admin would reload every tab. Desktop: /admin.
+     */
+    function openSettings(section, source = menuBtn) {
+        if (isIphonePortrait()) {
+            openSettingsSheet({ settings, getSession: () => workspace?.active, commands, section, source });
+            return;
+        }
+        window.location.href = joinPath(section ? `admin#${section}` : 'admin');
     }
     const vibeForm = new VibeForm();
     const agentLaunch = new AgentLaunch();
@@ -374,13 +386,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('newTabBtn').innerHTML = icon('plus', 18);
     document.getElementById('newTabBtn').addEventListener('click', () => workspace.openNewSessionPage());
-    // iPhone: drag from the left edge to open the apps page, drag left to close it (ui/edgeSwipe.js)
-    bindAppEdgeSwipe({
-        isOpen: () => workspace.newSessionPage.isOpen,
-        canClose: () => workspace.sessions.size > 0,
-        onOpen: () => workspace.openNewSessionPage(),
-        onClose: () => workspace.closeNewSessionPage(),
+    // Celular, aba de agente: lista lateral de conversas (arrastar da esquerda ou o ☰ no topo).
+    // App novo: só pelo "+" da folha de sessões (sem gesto para a página de apps).
+    const drawer = new ConversationDrawer({
+        app: document.getElementById('app'),
+        getAgent: () => (workspace.active?.kind === 'agent' ? workspace.active : null),
+        getOpenAgents: () => [...workspace.sessions.values()].filter(s => s.kind === 'agent'),
+        activate: id => workspace.activate(id, { focus: true }),
+        openSettings: source => openSettings(undefined, source),
     });
+    convBtn.innerHTML = MENU_ICON;
+    convBtn.addEventListener('click', () => drawer.toggle());
+    syncConvBtn = () => {
+        convBtn.hidden = !drawer.available();
+        drawer.sync();
+    };
+    syncConvBtn();
 
     // ---------- overflow menu ----------
     const logout = () => {

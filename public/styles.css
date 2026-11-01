@@ -2599,11 +2599,27 @@ audio.fm-media { width: min(520px, 90%); }
     background-size: 24px 100%, 24px 100%;
 }
 .nt-doc .ProseMirror img { max-width: 100%; border-radius: var(--radius-md); display: block; }
+.nt { --nt-accent: var(--accent); } /* cor das Anotações: o roxo do app */
 .nt-doc .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 2px; }
 .nt-doc .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
 .nt-doc .ProseMirror ul[data-type="taskList"] li > label { margin-top: 3px; flex-shrink: 0; }
 .nt-doc .ProseMirror ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
-.nt-doc .ProseMirror ul[data-type="taskList"] input[type="checkbox"] { width: 16px; height: 16px; border-radius: 5px; accent-color: var(--accent); cursor: pointer; }
+/* Checklist em bolinha, como no Notas do iPhone: círculo vazio; marcado = roxo do app com ✓ e texto apagado */
+.nt-doc .ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+    -webkit-appearance: none; appearance: none; display: grid; place-items: center;
+    width: 22px; height: 22px; margin: 0; border-radius: 50%; cursor: pointer;
+    border: 1.5px solid var(--text-3); background: transparent;
+    transition: background-color 160ms ease, border-color 160ms ease, transform 120ms ease;
+}
+.nt-doc .ProseMirror ul[data-type="taskList"] input[type="checkbox"]:active { transform: scale(0.9); }
+.nt-doc .ProseMirror ul[data-type="taskList"] input[type="checkbox"]:checked { background: var(--nt-accent); border-color: var(--nt-accent); }
+.nt-doc .ProseMirror ul[data-type="taskList"] input[type="checkbox"]:checked::after {
+    content: ""; width: 11px; height: 11px; background: #FFFFFF;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.nt-doc .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--text-3); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-3) 60%, transparent); }
+.nt-doc .ProseMirror ul[data-type="taskList"] li > label { margin-top: 1px; }
 .nt-doc .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--text-3);
 }
@@ -2820,42 +2836,86 @@ audio.fm-media { width: min(520px, 90%); }
    - content scrolling under floating controls fades out (scroll edge effect);
    - sheets are inset from the screen edges, with large radii and taller list rows;
    - "reduce transparency" and "increase contrast" switch to solid, higher-contrast surfaces.
-   Only on iPhones (data-iphone is set before first paint in index.html), only in portrait.
+   Layout on every phone in portrait (data-iphone); the glass material itself only with data-glass
+   (the iPhone by default) - both set before the first paint by device-mode.js. Phones without
+   data-glass get the same pieces on solid surfaces (tokens below).
    ========================================================= */
+/* Motion tokens (phone layout): iOS moves everything on springs - "snappy" for controls and
+   menus (a small bounce), "smooth" for sheets and pages (no bounce), "bouncy" for accents.
+   Real damped-spring curves (SwiftUI-style response/damping) sampled into linear(), which
+   Safari supports since 17.2; older browsers fall back to the default easing. */
+:root {
+    /* snappy: response 0.3s, damping 0.78 - 2% overshoot */
+    --spring-snappy: linear(0, 0.0177, 0.0636, 0.1288, 0.206, 0.2893, 0.3744, 0.4579, 0.5374, 0.6113, 0.6787, 0.7389, 0.792, 0.8379, 0.8771, 0.9099, 0.9371, 0.9592, 0.9768, 0.9905, 1.0008, 1.0084, 1.0137, 1.0172, 1.0191, 1.0199, 1.0198, 1.019, 1.0179, 1.0164, 1.0148, 1.0131, 1.0114, 1.0098, 1.0083, 1.0069, 1.0056, 1.0045, 1.0035, 1.0027, 1);
+    --spring-snappy-dur: 380ms;
+    /* smooth: response 0.45s, damping 0.92 - settles without bouncing */
+    --spring-smooth: linear(0, 0.0113, 0.0411, 0.084, 0.1359, 0.1933, 0.2537, 0.3149, 0.3755, 0.4343, 0.4905, 0.5435, 0.5929, 0.6387, 0.6808, 0.7191, 0.7539, 0.7851, 0.8132, 0.8382, 0.8604, 0.88, 0.8972, 0.9124, 0.9256, 0.937, 0.947, 0.9556, 0.963, 0.9693, 0.9747, 0.9792, 0.9831, 0.9864, 0.9891, 0.9914, 0.9933, 0.9948, 0.9961, 0.9971, 1);
+    --spring-smooth-dur: 450ms;
+    /* bouncy: response 0.5s, damping 0.68 - 5% overshoot */
+    --spring-bouncy: linear(0, 0.0257, 0.0918, 0.1839, 0.2901, 0.4015, 0.511, 0.614, 0.7071, 0.7887, 0.8578, 0.9147, 0.9599, 0.9945, 1.0197, 1.037, 1.0476, 1.053, 1.0543, 1.0525, 1.0487, 1.0436, 1.0378, 1.0317, 1.0258, 1.0203, 1.0153, 1.011, 1.0073, 1.0043, 1.0019, 1.0001, 0.9988, 0.9979, 0.9974, 0.9971, 0.9971, 0.9972, 0.9974, 0.9977, 1);
+    --spring-bouncy-dur: 760ms;
+}
+
+/* Material tokens. --glass-edge is the Liquid Glass rim: a bright specular line where light
+   "hits" the top-left edge, a softer one bottom-right, a hairline all around and a faint inner
+   glow (the thickness of the glass catching light). --glass-sheen-img is the diagonal reflection
+   across the surface. iOS 26 glass is mostly clear: a light tint, strong saturation, so the colors
+   underneath come through - legibility comes from the blur, not from an opaque fill. */
 :root,
 [data-theme="dark"] {
     --glass-bg: var(--surface);
-    --glass-bg-dense: var(--surface);              /* containers holding text input */
+    --glass-bg-dense: var(--surface);              /* containers holding text input / long text */
     --glass-fill: rgba(255, 255, 255, 0.10);       /* plain fill for controls inside glass */
     --glass-fill-pressed: rgba(255, 255, 255, 0.20);
-    --glass-border: rgba(255, 255, 255, 0.12);
-    --glass-rim: rgba(255, 255, 255, 0.28);        /* specular highlight on the top edge */
-    --glass-rim-low: rgba(255, 255, 255, 0.06);    /* light caught on the bottom edge */
+    --glass-border: rgba(255, 255, 255, 0.10);
+    --glass-rim: rgba(255, 255, 255, 0.30);        /* used by small inner highlights */
+    --glass-rim-low: rgba(255, 255, 255, 0.06);
     --glass-sheen: rgba(255, 255, 255, 0.08);
-    --glass-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
-    --glass-blur: blur(20px) saturate(180%);
+    --glass-sheen-img: linear-gradient(140deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0) 38%,
+        rgba(255, 255, 255, 0) 70%, rgba(255, 255, 255, 0.06) 100%);
+    --glass-edge:
+        inset 1.5px 1.5px 0.5px -1px rgba(255, 255, 255, 0.62),
+        inset -1px -1px 0.5px -0.5px rgba(255, 255, 255, 0.22),
+        inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+        inset 0 0 14px rgba(255, 255, 255, 0.05);
+    --glass-shadow: 0 10px 28px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.22);
+    --glass-blur: blur(14px) saturate(200%) brightness(1.06);
 }
 [data-theme="light"] {
     --glass-bg: var(--surface);
     --glass-bg-dense: #FFFFFF;
     --glass-fill: rgba(0, 0, 0, 0.06);
     --glass-fill-pressed: rgba(0, 0, 0, 0.12);
-    --glass-border: rgba(0, 0, 0, 0.08);
+    --glass-border: rgba(0, 0, 0, 0.06);
     --glass-rim: rgba(255, 255, 255, 0.95);
     --glass-rim-low: rgba(255, 255, 255, 0.45);
     --glass-sheen: rgba(255, 255, 255, 0.50);
-    --glass-shadow: 0 8px 22px rgba(40, 32, 10, 0.14), 0 1px 3px rgba(40, 32, 10, 0.10);
-    --glass-blur: blur(20px) saturate(160%);
+    --glass-sheen-img: linear-gradient(140deg, rgba(255, 255, 255, 0.60) 0%, rgba(255, 255, 255, 0) 40%,
+        rgba(255, 255, 255, 0) 70%, rgba(255, 255, 255, 0.28) 100%);
+    --glass-edge:
+        inset 1.5px 1.5px 0.5px -1px rgba(255, 255, 255, 1),
+        inset -1px -1px 0.5px -0.5px rgba(255, 255, 255, 0.75),
+        inset 0 0 0 0.5px rgba(0, 0, 0, 0.07),
+        inset 0 0 16px rgba(255, 255, 255, 0.40);
+    --glass-shadow: 0 10px 26px rgba(30, 30, 60, 0.14), 0 1px 4px rgba(30, 30, 60, 0.10);
+    --glass-blur: blur(14px) saturate(190%) brightness(1.04);
 }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     :root,
-    [data-theme="dark"] { --glass-bg: rgba(40, 40, 40, 0.55); --glass-bg-dense: rgba(30, 30, 30, 0.78); }
-    [data-theme="light"] { --glass-bg: rgba(255, 255, 255, 0.55); --glass-bg-dense: rgba(255, 255, 255, 0.80); }
+    [data-theme="dark"] { --glass-bg: rgba(36, 36, 40, 0.36); --glass-bg-dense: rgba(28, 28, 32, 0.68); }
+    [data-theme="light"] { --glass-bg: rgba(255, 255, 255, 0.34); --glass-bg-dense: rgba(255, 255, 255, 0.74); }
 }
+/* "Reduce transparency" / "Increase contrast": solid, outlined, no blur */
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-    :root,
-    [data-theme="dark"] { --glass-bg: var(--surface); --glass-bg-dense: var(--surface); --glass-border: var(--border-strong); }
-    [data-theme="light"] { --glass-bg: #FFFFFF; --glass-bg-dense: #FFFFFF; --glass-border: var(--border-strong); }
+    :root[data-iphone],
+    [data-iphone][data-theme="dark"] {
+        --glass-bg: var(--surface); --glass-bg-dense: var(--surface); --glass-blur: none;
+        --glass-sheen-img: none; --glass-edge: inset 0 0 0 1px var(--border-strong);
+    }
+    [data-iphone][data-theme="light"] {
+        --glass-bg: #FFFFFF; --glass-bg-dense: #FFFFFF; --glass-blur: none;
+        --glass-sheen-img: none; --glass-edge: inset 0 0 0 1px var(--border-strong);
+    }
 }
 
 /* Pieces that only exist in the iPhone layout (created by agent/composer.js) */
@@ -2875,14 +2935,11 @@ audio.fm-media { width: min(520px, 90%); }
         .ag-composer,
         .ag-jump {
             background-color: var(--glass-bg);
-            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            background-image: var(--glass-sheen-img);
             -webkit-backdrop-filter: var(--glass-blur);
             backdrop-filter: var(--glass-blur);
             border: 0.5px solid var(--glass-border);
-            box-shadow:
-                inset 0 1px 0 var(--glass-rim),
-                inset 0 -1px 1px var(--glass-rim-low),
-                var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
 
         /* ---------- terminal page ---------- */
@@ -2897,11 +2954,14 @@ audio.fm-media { width: min(520px, 90%); }
             background: transparent;
             border-bottom: none;
             padding: 4px 12px 6px;
-            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-columns: auto minmax(0, 1fr) auto;
             grid-template-rows: 48px;
-            grid-template-areas: "pill actions";
+            grid-template-areas: "conv pill actions";
             column-gap: 8px;
         }
+        /* ☰ da lista de conversas (só em aba de agente); sem ele, a pílula ocupa a coluna */
+        .conv-btn { grid-area: conv; }
+        .topbar:has(.conv-btn[hidden]) { grid-template-areas: "pill pill actions"; }
         .brand,
         .tabstrip,
         #fullscreenBtn,
@@ -2951,6 +3011,8 @@ audio.fm-media { width: min(520px, 90%); }
 
         /* Bottom: the status line is information, not a control - plain text, no glass */
         .statusbar { background: transparent; border-top: none; padding: 0 6px 0 18px; }
+        /* The session pill at the top already opens the session list (ANALISE-UX R7) */
+        .status-sessions { display: none; }
 
         /* Shortcut keys in two capsules: text keys, then tool icons (never mixed) */
         .shortcut-bar { background: transparent; border-top: none; padding: 2px 0 8px; }
@@ -3042,10 +3104,10 @@ audio.fm-media { width: min(520px, 90%); }
     max-height: 78dvh; overflow-y: auto; overscroll-behavior: contain;
     padding: 6px 16px 18px; border-radius: 34px;
     background-color: var(--glass-bg-dense);
-    background-image: linear-gradient(180deg, var(--glass-sheen), transparent 40%);
+    background-image: var(--glass-sheen-img);
     -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
     border: 0.5px solid var(--glass-border);
-    box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+    box-shadow: var(--glass-edge), var(--glass-shadow);
     transform: translateY(110%); transition: transform 280ms cubic-bezier(0.2, 0.9, 0.25, 1);
 }
 .ag-sheet-backdrop.open .ag-sheet { transform: none; }
@@ -3135,11 +3197,11 @@ audio.fm-media { width: min(520px, 90%); }
         .browser-more,
         .browser-pill {
             background-color: var(--glass-bg);
-            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            background-image: var(--glass-sheen-img);
             -webkit-backdrop-filter: var(--glass-blur);
             backdrop-filter: var(--glass-blur);
             border: 0.5px solid var(--glass-border);
-            box-shadow: inset 0 1px 0 var(--glass-rim), inset 0 -1px 1px var(--glass-rim-low), var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .browser-toolbar [data-act="back"],
         .browser-more { display: inline-grid; width: 48px; height: 48px; border-radius: 50%; color: var(--text); }
@@ -3201,7 +3263,7 @@ audio.fm-media { width: min(520px, 90%); }
             border: 0.5px solid var(--glass-border); border-radius: 22px; padding: 6px;
             background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .menu-item { height: 44px; border-radius: 16px; font-size: 15px; }
     }
@@ -3233,10 +3295,10 @@ audio.fm-media { width: min(520px, 90%); }
         .ns-settings {
             top: calc(10px + var(--safe-top)); width: 44px; height: 44px; border-radius: 50%; color: var(--text);
             background-color: var(--glass-bg);
-            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            background-image: var(--glass-sheen-img);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
             border: 0.5px solid var(--glass-border);
-            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .ns-close { right: calc(14px + var(--safe-right)); }
         .ns-settings { right: calc(14px + 52px + var(--safe-right)); }
@@ -3305,19 +3367,6 @@ audio.fm-media { width: min(520px, 90%); }
     }
 }
 
-/* Edge swipe hint (ui/edgeSwipe.js): a round glass button with the apps icon that follows the
-   finger while dragging from the left edge; turns accent when letting go will open the page. */
-.edge-swipe-hint {
-    position: fixed; top: 50%; left: 0; z-index: 950; width: 52px; height: 52px; margin-top: -26px;
-    display: grid; place-items: center; border-radius: 50%; pointer-events: none; color: var(--text);
-    background-color: var(--glass-bg-dense);
-    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-    border: 0.5px solid var(--glass-border);
-    box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
-    transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-.edge-swipe-hint.from-right { left: auto; right: 0; }
-.edge-swipe-hint.ready { background-color: var(--accent); color: var(--accent-fg); }
 
 /* ---------- No zoom on focus (touch screens, any orientation) ----------
    iOS Safari zooms into any focused field whose text is under 16px, and the user has to pinch back
@@ -3343,10 +3392,10 @@ audio.fm-media { width: min(520px, 90%); }
         .fm-toolbar {
             flex-shrink: 0; margin: 8px 10px 0; padding: 2px 4px; min-height: 48px;
             background-color: var(--glass-bg);
-            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            background-image: var(--glass-sheen-img);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
             border: 0.5px solid var(--glass-border); border-radius: 24px;
-            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .fm-toolbar .icon-btn { width: 44px; height: 44px; border-radius: 50%; color: var(--text); }
         .fm-crumbs { padding-left: 4px; margin: 0 2px; }
@@ -3354,7 +3403,7 @@ audio.fm-media { width: min(520px, 90%); }
         .fm-crumb:hover { background: var(--glass-fill); }
         .fm-list {
             margin: 8px 10px 0; padding: 4px 4px calc(92px + var(--safe-bottom));
-            background: var(--surface); border: 0.5px solid var(--border); border-radius: 20px;
+            background: var(--surface); border: 0.5px solid var(--glass-border); border-radius: 20px;
         }
         .fm-row { min-height: 56px; border-radius: 14px; }
         .fm-row:hover { background: transparent; }
@@ -3364,7 +3413,7 @@ audio.fm-media { width: min(520px, 90%); }
             background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
             border: 0.5px solid var(--glass-border); border-radius: 22px;
-            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .fm-selbar .icon-btn { width: 44px; height: 44px; }
         .fm-fab { bottom: calc(18px + var(--safe-bottom)); right: 18px; border: none; box-shadow: var(--glass-shadow); }
@@ -3375,13 +3424,13 @@ audio.fm-media { width: min(520px, 90%); }
             max-height: 72dvh; z-index: 40; padding: 14px 12px 22px; border: 0.5px solid var(--glass-border);
             border-radius: 34px; background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-            box-shadow: var(--glass-shadow); transform: translateY(calc(100% + 16px));
+            box-shadow: var(--glass-edge), var(--glass-shadow); transform: translateY(calc(100% + 16px));
         }
         .fm.side-open .fm-side { transform: none; animation: iphone-sheet-down 220ms var(--ease); }
         .fm-side-close { width: 44px; height: 44px; border-radius: 50%; }
         .fm-side-item { min-height: 52px; border-radius: 14px; }
         .fm-scrim:not([hidden]) { position: fixed; inset: 0; z-index: 35; background: var(--backdrop); }
-        .fm-viewer-bar { min-height: 56px; padding: 6px 8px; background: var(--glass-bg-dense); border-bottom: 0.5px solid var(--border); }
+        .fm-viewer-bar { min-height: 56px; padding: 6px 8px; background: var(--glass-bg-dense); border-bottom: 0.5px solid var(--glass-border); }
         .fm-viewer { padding-top: var(--safe-top); }
         .fm-viewer-bar .icon-btn { width: 44px; height: 44px; border-radius: 50%; }
         .fm-editor { font-size: 16px; }
@@ -3390,9 +3439,9 @@ audio.fm-media { width: min(520px, 90%); }
         .nt-toolbar {
             flex-shrink: 0; margin: 8px 10px 0; padding: 2px 4px; min-height: 48px; border: 0.5px solid var(--glass-border);
             border-radius: 24px; background-color: var(--glass-bg);
-            background-image: linear-gradient(180deg, var(--glass-sheen), transparent 55%);
+            background-image: var(--glass-sheen-img);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .nt-toolbar .icon-btn { width: 44px; height: 44px; border-radius: 50%; color: var(--text); }
         .nt-search { padding-left: 4px; }
@@ -3409,9 +3458,10 @@ audio.fm-media { width: min(520px, 90%); }
         .nt-more { width: 44px; height: 44px; border-radius: 50%; }
         .nt-fab { right: 18px; bottom: calc(18px + var(--safe-bottom)); border: none; box-shadow: var(--glass-shadow); }
         .nt-ehead {
-            min-height: 56px; padding: 4px 8px; border-bottom: 0.5px solid var(--divider);
+            min-height: 56px; padding: 4px 8px;
             background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-edge); /* o mesmo material das outras peças, sem divisória dura */
         }
         .nt-ehead .icon-btn { width: 44px; height: 44px; border-radius: 50%; }
         .nt-title { padding: 14px 18px 6px; }
@@ -3422,7 +3472,7 @@ audio.fm-media { width: min(520px, 90%); }
             border: 0.5px solid var(--glass-border); border-radius: 22px;
             background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .nt-fbtn { width: 44px; height: 44px; border-radius: 12px; }
         /* standalone /notas has no app topbar: the toolbar takes the safe area itself */
@@ -3434,7 +3484,7 @@ audio.fm-media { width: min(520px, 90%); }
             border: 0.5px solid var(--glass-border); border-radius: 34px;
             background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-            box-shadow: var(--glass-shadow); padding-bottom: 0;
+            box-shadow: var(--glass-edge), var(--glass-shadow); padding-bottom: 0;
         }
         .dialog[open] { animation: iphone-sheet-up 220ms var(--ease); }
         .dialog-header { min-height: 60px; padding: 8px 10px 8px 22px; border-bottom: 0.5px solid var(--divider); }
@@ -3453,7 +3503,7 @@ audio.fm-media { width: min(520px, 90%); }
             padding: 12px 12px 12px 18px; border: 0.5px solid var(--glass-border); border-radius: 22px;
             background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow); font-size: 14.5px;
+            box-shadow: var(--glass-edge), var(--glass-shadow); font-size: 14.5px;
         }
         .toast-action { height: 36px; border-radius: 18px; font-size: 14px; }
 
@@ -3463,7 +3513,7 @@ audio.fm-media { width: min(520px, 90%); }
             border: 0.5px solid var(--glass-border); border-radius: 24px;
             background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-            box-shadow: inset 0 1px 0 var(--glass-rim), var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .search-bar .icon-btn { width: 40px; height: 40px; }
         .search-bar input { font-size: 16px; }
@@ -3475,7 +3525,7 @@ audio.fm-media { width: min(520px, 90%); }
             border: 0.5px solid var(--glass-border); border-left: 0.5px solid var(--glass-border); border-radius: 34px;
             background-color: var(--glass-bg-dense);
             -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
-            box-shadow: var(--glass-shadow);
+            box-shadow: var(--glass-edge), var(--glass-shadow);
         }
         .ag-body.side-open .ag-side { animation: iphone-sheet-down 220ms var(--ease); }
         .ag-side h3 { text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 600; color: var(--text-2); }
@@ -3490,7 +3540,6 @@ audio.fm-media { width: min(520px, 90%); }
         .page-admin .admin-page { padding: 20px 16px calc(80px + var(--safe-bottom)); }
     }
 }
-=======
 /* ---------- Claude bridge consent page (oauth-authorize.html) ---------- */
 .oauth-card .login-subtitle strong { color: var(--text); }
 .oauth-scope { margin: 18px 0 10px; padding-left: 18px; text-align: left; font-size: 13.5px; color: var(--text-2); display: grid; gap: 6px; }
@@ -3510,6 +3559,7 @@ audio.fm-media { width: min(520px, 90%); }
 .rm-row.rm-failed { border-left: 3px solid var(--danger); }
 /* /admin → Complementos (admin/addons.js): reaproveita as linhas da Ponte */
 .ad-row { flex-direction: column; align-items: stretch; }
+.ad-row .rm-name { flex: 0 0 auto; } /* em coluna, o flex-basis de 220px da Ponte virava altura */
 .ad-row .setting-help { display: block; margin-top: 4px; }
 .ad-switch { padding: 0; border: 0; background: none; }
 .ad-omni { display: grid; gap: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
@@ -3526,4 +3576,280 @@ audio.fm-media { width: min(520px, 90%); }
 .rm-empty { font-size: 13px; color: var(--text-3); }
 .agent-ui-section.is-off { display: none; }
 
-/* ==================================================
+
+/* ---------- Phone sheets with pages (ui/sheet.js) and Configurações (ui/settingsSheet.js) ----------
+   Same material as the other sheets (.ag-sheet). The settings index is an inset grouped list with
+   colored square icons, like iOS Settings; a section opens in place with "‹ Configurações". */
+.ag-sheet-head { gap: 8px; }
+.ag-sheet-head h3 { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet-back {
+    display: inline-flex; align-items: center; gap: 2px; height: 44px; padding: 0 10px 0 2px; margin-left: -6px;
+    border-radius: 22px; color: var(--accent); font-size: 16px; font-weight: 500; flex-shrink: 0;
+}
+.sheet-back[hidden] { display: none; }
+.sheet-back:active { background: var(--glass-fill-pressed); }
+.sheet-back + h3 { text-align: center; padding-right: 44px; }
+.settings-sheet .ag-sheet { max-height: 88dvh; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+.st-index[hidden], .st-page[hidden] { display: none; }
+.st-list {
+    list-style: none; margin: 0 0 18px; padding: 0; overflow: hidden;
+    border-radius: 22px; background: var(--glass-fill);
+}
+.st-list li + li .st-row { border-top: 0.5px solid var(--glass-border); }
+.st-row {
+    --c: var(--c-blue);
+    display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 0 14px 0 14px;
+    color: var(--text); font-size: 16.5px; text-align: left; text-decoration: none;
+}
+.st-row:active { background: var(--glass-fill-pressed); }
+.st-icon {
+    width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center; border-radius: 8px; color: #FFFFFF;
+    background: linear-gradient(160deg, color-mix(in srgb, var(--c) 88%, #FFFFFF), color-mix(in srgb, var(--c) 72%, #000000));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.st-label { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.st-label small { font-size: 13px; color: var(--text-3); }
+.st-chevron { display: inline-grid; color: var(--text-3); flex-shrink: 0; }
+/* Inside a section: the sheet title already names it (Agentes keeps its second heading, MCP) */
+.st-page .settings-section { margin-top: 0; }
+.st-page .settings-section:not(.mcp-section) > .section-label:first-child { display: none; }
+.st-page .mcp-section { margin-top: 22px; }
+.agent-ui-section.is-off { display: none; }
+
+/* ---------- Liquid Glass: how controls react to a touch (data-iphone only) ----------
+   iOS 26 glass controls don't sink when pressed: they swell a little and light up, then settle
+   with a soft spring. The glow is a box-shadow, not a filter (Safari drops backdrop-filter on an
+   element that also has a filter). */
+@media (orientation: portrait) {
+    [data-iphone] {
+        .session-pill,
+        .topbar-actions .icon-btn,
+        .browser-toolbar [data-act="back"],
+        .browser-more,
+        .ns-close,
+        .ns-settings,
+        .ag-jump {
+            transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 200ms ease;
+        }
+        .session-pill:active,
+        .topbar-actions .icon-btn:active,
+        .browser-toolbar [data-act="back"]:active,
+        .browser-more:active,
+        .ns-close:active,
+        .ns-settings:active,
+        .ag-jump:active {
+            transform: scale(1.07);
+            transition-duration: 120ms;
+            box-shadow: var(--glass-edge), 0 0 0 0.5px var(--glass-rim), 0 0 22px color-mix(in srgb, var(--glass-rim) 55%, transparent), var(--glass-shadow);
+        }
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    [data-iphone] :is(.session-pill, .topbar-actions .icon-btn, .browser-toolbar [data-act="back"], .browser-more, .ns-close, .ns-settings, .ag-jump) {
+        transition: none;
+    }
+    [data-iphone] :is(.session-pill, .topbar-actions .icon-btn, .browser-toolbar [data-act="back"], .browser-more, .ns-close, .ns-settings, .ag-jump):active {
+        transform: none;
+    }
+}
+[data-reduced-motion][data-iphone] :is(.session-pill, .topbar-actions .icon-btn, .browser-toolbar [data-act="back"], .browser-more, .ns-close, .ns-settings, .ag-jump) {
+    transition: none;
+}
+
+/* Phones: the app's hard offset button shadow (neo-brutalist, desktop) clashes with the soft
+   phone layout - buttons there are flat capsules that just scale a little when pressed. */
+@media (orientation: portrait) {
+    [data-iphone] {
+        .btn-primary, .btn-danger { box-shadow: none; border-color: transparent; }
+        .btn-primary:active, .btn-danger:active { transform: scale(0.97); }
+        .btn-ghost { border-color: transparent; background: var(--glass-fill); }
+    }
+}
+
+/* ---------- Motion (phone layout): iOS 26 springs ----------
+   Sheets grow out of the button that opened them (ui/morph.js plays that with the Web Animations
+   API; .morph turns off the plain slide-up so the sheet sits in its final place). Menus come out
+   of their button (contextMenu.js sets transform-origin there) and shrink back into it. */
+.ag-sheet-backdrop.morph .ag-sheet { transform: none; transition: none; }
+@media (orientation: portrait) {
+    [data-iphone] {
+        .menu { animation: menu-grow var(--spring-snappy-dur) var(--spring-snappy); }
+        .menu .menu-item, .menu .menu-separator { animation: menu-content 220ms 70ms ease-out backwards; }
+        .menu.menu-out { animation: menu-shrink 170ms cubic-bezier(0.4, 0, 1, 1) forwards; pointer-events: none; }
+        .ag-sheet { transition: transform var(--spring-smooth-dur) var(--spring-smooth); }
+        .ag-sheet-backdrop { transition: background-color 260ms ease; }
+        .toast { animation: toast-spring var(--spring-snappy-dur) var(--spring-snappy); }
+    }
+}
+@keyframes menu-grow { from { opacity: 0; transform: scale(0.3); } 40% { opacity: 1; } }
+@keyframes menu-content { from { opacity: 0; } }
+@keyframes menu-shrink { to { opacity: 0; transform: scale(0.4); } }
+@keyframes toast-spring { from { opacity: 0; transform: translateY(24px) scale(0.9); } }
+@media (prefers-reduced-motion: reduce) {
+    [data-iphone] :is(.menu, .menu .menu-item, .menu .menu-separator, .menu.menu-out, .toast) { animation: none; }
+}
+[data-reduced-motion][data-iphone] :is(.menu, .menu .menu-item, .menu .menu-separator, .menu.menu-out, .toast) { animation: none; }
+
+/* ---------- Modo UI no celular: lista lateral de conversas (ui/conversationDrawer.js) ----------
+   Como no app do Claude: a lista fica por baixo, com fundo sólido; o app inteiro é empurrado para
+   a direita e vira um cartão escurecido de canto arredondado. Vidro só nos botões redondos. */
+.conv-btn { display: none; }
+.conv-btn[hidden] { display: none !important; }
+.cv-drawer {
+    /* altura da tela visível: só top/bottom não limita (o body muda o bloco de referência) */
+    position: fixed; z-index: 0; top: 0; left: 0; height: 100dvh; width: min(78vw, 360px); box-sizing: border-box;
+    display: flex; flex-direction: column;
+    padding: calc(10px + var(--safe-top)) 0 calc(14px + var(--safe-bottom)) var(--safe-left);
+    background: var(--bg); color: var(--text);
+    opacity: calc(0.4 + 0.6 * var(--cv-p, 0));
+    transform: translateX(calc((var(--cv-p, 0) - 1) * 18%)); /* entra um pouco atrás do dedo (paralaxe) */
+}
+.cv-drawer.cv-fade { transition: opacity 180ms ease; transform: none; }
+[data-iphone] .app { position: relative; z-index: 1; background: var(--bg); }
+.app.cv-pushed {
+    border-radius: calc(var(--cv-p, 0) * 34px); overflow: hidden;
+    box-shadow: -1px 0 0 var(--border), -18px 0 40px rgba(0, 0, 0, calc(var(--cv-p, 0) * 0.35));
+    will-change: transform;
+}
+.cv-dim {
+    position: absolute; inset: 0; z-index: 60; background: #000;
+    opacity: calc(var(--cv-p, 0) * 0.32); touch-action: pan-y;
+}
+.cv-dim[hidden] { display: none; }
+.cv-head { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 14px 0 22px; }
+.cv-title {
+    flex: 1; min-width: 0; margin: 0; font-size: 28px; font-weight: 700; line-height: 1.1;
+    letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cv-circle, .cv-avatar, .conv-btn {
+    width: 46px; height: 46px; flex-shrink: 0; border-radius: 50%; display: inline-grid; place-items: center; color: var(--text);
+    background-color: var(--glass-bg); background-image: var(--glass-sheen-img);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border: 0.5px solid var(--glass-border); box-shadow: var(--glass-edge), var(--glass-shadow);
+    transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cv-circle:active, .cv-avatar:active, .conv-btn:active { transform: scale(1.07); transition-duration: 120ms; }
+.cv-avatar { font-size: 16px; font-weight: 600; letter-spacing: 0.02em; }
+.cv-search { padding: 4px 16px 6px; }
+.cv-search[hidden] { display: none; }
+.cv-search input {
+    width: 100%; height: 42px; padding: 0 14px; border-radius: 21px; border: 0.5px solid var(--glass-border);
+    background: var(--surface); color: var(--text); font-size: 16px;
+}
+.cv-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 10px 12px; touch-action: pan-y; }
+.cv-section { margin: 18px 12px 6px; font-size: 15px; font-weight: 500; color: var(--text-3); text-transform: none; letter-spacing: 0; }
+.cv-ul { list-style: none; margin: 0; padding: 0; }
+.cv-row {
+    display: flex; align-items: center; gap: 16px; width: 100%; min-height: 52px; padding: 0 12px;
+    border-radius: 14px; color: var(--text); font-size: 17px; text-align: left;
+    -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
+}
+.cv-row .icon { flex-shrink: 0; color: var(--text-2); }
+.cv-row-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-row:active { background: var(--surface-2); }
+.cv-row.is-current { background: var(--surface); }
+.cv-more { display: inline-flex; align-items: center; gap: 4px; height: 44px; margin: 4px 12px 0; color: var(--text-2); font-size: 16px; }
+.cv-note { margin: 8px 12px; font-size: 14px; color: var(--text-3); }
+.cv-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 0 18px; }
+.cv-new {
+    display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 24px 0 20px; border-radius: 26px;
+    background: #FFFFFF; color: #111111; font-size: 17px; font-weight: 500;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+[data-theme="light"] .cv-new { background: #111111; color: #FFFFFF; }
+.cv-new:active { transform: scale(0.97); }
+@media (orientation: portrait) {
+    [data-iphone] {
+        .conv-btn:not([hidden]) { display: inline-grid; }
+        /* o chat aceita o arraste horizontal da lista; blocos de código rolam por conta própria */
+        .agent-panel .ag-main { touch-action: pan-y; }
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .cv-drawer { transform: none; }
+    .cv-circle, .cv-avatar, .conv-btn { transition: none; }
+}
+
+/* ---------- Anotações no celular, como o Notas do iPhone ----------
+   Título grande, busca arredondada, notas em grupos por data (Fixadas, Hoje, Ontem, 7/30 dias,
+   meses) dentro de cartões com linhas finas; rodapé com "N notas" e o ícone de nova nota.
+   Cor de destaque: o roxo do app (--accent). Editor: "‹ Notas", data no topo, título grande.
+   No desktop esses elementos não aparecem. */
+.nt-largetitle, .nt-countbar, .nt-group, .nt-edate, .nt-back-label { display: none; }
+@media (orientation: portrait) {
+    [data-iphone] {
+        .nt { caret-color: var(--nt-accent); }
+        .nt-side { display: flex; flex-direction: column; background: var(--bg); } /* fundo mais escuro que os cartões */
+        .nt-largetitle {
+            display: block; margin: 6px 20px 2px; font-size: 34px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em;
+        }
+        .page-terminal:not(:has(.topbar)) .nt-largetitle { margin-top: calc(10px + var(--safe-top)); }
+        /* a barra de busca deixa de ser uma cápsula de vidro: campo cinza com lupa e, ao lado, a lixeira */
+        .nt-toolbar { margin: 6px 12px 4px; padding: 0; min-height: 40px; border: 0; background: none; box-shadow: none;
+            -webkit-backdrop-filter: none; backdrop-filter: none; }
+        .page-terminal:not(:has(.topbar)) .nt-toolbar { margin-top: 6px; }
+        .nt-toolbar [data-act="new"] { display: none; }
+        .nt-toolbar .icon-btn { color: var(--nt-accent); }
+        .nt-search { padding-left: 0; }
+        .nt-search { position: relative; }
+        .nt-search > .icon { position: absolute; left: 10px; z-index: 1; pointer-events: none; color: var(--text-3); }
+        .nt-toolbar .nt-search input { height: 38px; border-radius: 11px; background: var(--surface-2); padding-left: 34px; }
+        .nt-list { padding: 0 16px calc(84px + var(--safe-bottom)); }
+        .nt-group {
+            display: block; margin: 20px 4px 8px; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--text);
+        }
+        .nt-group:first-child { margin-top: 10px; }
+        /* cartões por grupo: cantos só na primeira e na última nota, linha fina entre as notas */
+        .nt-row { border-radius: 0; }
+        .nt-row-fg { border-radius: 0; background: var(--surface); }
+        .nt-group + .nt-row, .nt-group + .nt-row .nt-row-fg { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+        .nt-row:has(+ .nt-group), .nt-row:has(+ .nt-group) .nt-row-fg,
+        .nt-row:last-child, .nt-row:last-child .nt-row-fg { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+        .nt-row + .nt-row .nt-row-fg::before {
+            content: ""; position: absolute; top: 0; left: 16px; right: 0; height: 0.5px; background: var(--divider); z-index: 2;
+        }
+        .nt-row.selected .nt-row-fg { background: var(--surface-2); }
+        /* as ações de deslizar só aparecem durante o gesto (senão vazam pelos cantos arredondados) */
+        .nt-row:not(:has(.nt-row-fg.swiped, .nt-row-fg.dragging)) .nt-swipe-actions { visibility: hidden; }
+        .nt-item {
+            display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "title title" "meta preview" "prog prog";
+            column-gap: 8px; row-gap: 3px; min-height: 64px; padding: 11px 6px 11px 16px; align-content: center;
+        }
+        .nt-item-title { grid-area: title; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+        .nt-item-meta { grid-area: meta; font-size: 15px; color: var(--text-2); }
+        .nt-item-preview { grid-area: preview; font-size: 15px; color: var(--text-3); }
+        .nt-item-progress { grid-area: prog; }
+        .nt-item-bar span { background: var(--nt-accent); }
+        .nt-pin { color: var(--nt-accent); }
+        .nt-more { color: var(--text-3); }
+        .nt[data-pane] .nt-fab { display: none; } /* o ícone de nova nota fica no rodapé */
+        .nt-countbar {
+            position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+            display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+            min-height: 52px; padding: 4px 14px calc(4px + var(--safe-bottom));
+            background-color: var(--glass-bg-dense); background-image: var(--glass-sheen-img);
+            -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+            box-shadow: var(--glass-edge);
+        }
+        .nt-count { grid-column: 2; font-size: 12px; color: var(--text-2); }
+        .nt-compose {
+            grid-column: 3; justify-self: end; width: 46px; height: 46px; display: inline-grid; place-items: center;
+            border-radius: 50%; color: var(--nt-accent);
+        }
+        .nt-compose:active { background: var(--glass-fill-pressed); transform: scale(0.94); }
+        .nt[data-pane="editor"] .nt-countbar { display: none; }
+
+        /* ---- editor ---- */
+        .nt-ehead .icon-btn { color: var(--nt-accent); }
+        .nt-ehead .nt-back { display: inline-flex; align-items: center; width: auto; padding: 0 12px 0 6px; gap: 2px; border-radius: 22px; }
+        .nt-back-label { display: inline; font-size: 17px; font-weight: 500; }
+        .nt-edate { display: block; padding: 10px 18px 0; text-align: center; font-size: 13px; color: var(--text-3); }
+        /* vence a regra anti-zoom (max(16px, 1em) !important): 28px também não dá zoom */
+        .nt-editor input.nt-title { padding: 10px 18px 4px; font-size: 28px !important; font-weight: 700; letter-spacing: -0.02em; }
+        .nt-doc { font-size: 17px; } /* a regra anti-zoom usa max(16px, 1em): o 1em vem daqui */
+        .nt-doc .ProseMirror { line-height: 1.5; }
+        .nt-doc .ProseMirror a { color: var(--nt-accent); }
+        .nt-fbtn { color: var(--text); }
+        .nt-fbtn.on, .nt-fbtn[aria-pressed="true"] { color: var(--nt-accent); }
+    }
+}

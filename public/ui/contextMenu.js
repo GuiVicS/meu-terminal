@@ -12,7 +12,14 @@ export function closeMenu() {
     const { el, restoreFocus, cleanup } = openMenu;
     openMenu = null;
     cleanup();
-    el.remove();
+    // Phones: the menu shrinks back into its button (styles.css .menu-out); elsewhere it just goes
+    if (document.documentElement.hasAttribute('data-iphone') && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        el.classList.add('menu-out');
+        el.setAttribute('inert', '');
+        setTimeout(() => el.remove(), 180);
+    } else {
+        el.remove();
+    }
     restoreFocus?.focus?.({ preventScroll: true });
 }
 
@@ -23,6 +30,7 @@ export function closeMenu() {
  * @param {{ x?: number, y?: number, anchor?: Element, label?: string, restoreFocus?: Element }} opts
  */
 export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', restoreFocus = null } = {}) {
+    const pointer = { x, y }; // where a touch/right click opened it (x/y are moved to fit the screen)
     closeMenu();
 
     const el = document.createElement('div');
@@ -75,6 +83,12 @@ export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', r
     y = Math.max(8, Math.min(y, vh - rect.height - 8));
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
+    // Grow out of what opened it (iOS 26 menus come out of their button): the anchor's center,
+    // or the touch point, as the transform origin
+    const a = anchor?.getBoundingClientRect();
+    const ox = a ? a.left + a.width / 2 - x : pointer.x - x;
+    const oy = a ? a.top + a.height / 2 - y : pointer.y - y;
+    el.style.transformOrigin = `${Math.round(ox)}px ${Math.round(oy)}px`;
 
     const buttons = () => Array.from(el.querySelectorAll('.menu-item:not(:disabled)'));
     const focusAt = i => {
