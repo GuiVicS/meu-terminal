@@ -69,12 +69,23 @@ test('permission requests keep the agent option ids', () => {
     const m = new AcpMapper();
     const data = m.mapPermission({
         toolCall: { toolCallId: 't1', title: 'Run rm -rf', kind: 'execute', rawInput: { command: 'rm -rf x' } },
-        options: [{ optionId: 'ok', name: 'Allow', kind: 'allow_once' }],
+        options: [
+            { optionId: 'ok', name: 'Allow', kind: 'allow_once' },
+            { optionId: 'sempre', name: 'Always Allow', kind: 'allow_always' },
+            { optionId: 'nao', name: 'Reject', kind: 'reject_once' },
+            { optionId: 'git', name: "Yes, and don't ask again for git", kind: 'allow_always' },
+        ],
     });
     assert.equal(data.kind, 'bash');
     assert.equal(data.title, 'Run rm -rf');
     assert.deepEqual(data.input, { command: 'rm -rf x' });
-    assert.deepEqual(data.options, [{ id: 'ok', name: 'Allow', kind: 'allow_once' }]);
+    // genéricos em inglês viram português pelo tipo; nomes específicos ficam como o agente mandou
+    assert.deepEqual(data.options, [
+        { id: 'ok', name: 'Permitir', kind: 'allow_once' },
+        { id: 'sempre', name: 'Permitir sempre', kind: 'allow_always' },
+        { id: 'nao', name: 'Recusar', kind: 'reject_once' },
+        { id: 'git', name: "Yes, and don't ask again for git", kind: 'allow_always' },
+    ]);
 });
 
 test('media: image, audio, embedded file and file link blocks become media items', () => {

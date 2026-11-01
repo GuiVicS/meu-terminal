@@ -38,3 +38,14 @@ test('detecção: subcomando "acp" só conta quando listado como comando na ajud
     assert.equal(acpModeFrom('see https://x.dev/acp for more', [['acp']]), null);
     assert.deepEqual(acpModeFrom('  --acp  ACP mode', [['--experimental-acp'], ['--acp']]), ['--acp']);
 });
+
+test('detecção: o adaptador padrão continua do agente mesmo com o comando trocado (não vira agente a mais)', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mt-detect2-'));
+    const bin = path.join(home, '.local', 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    exe(bin, 'claude-agent-acp');
+    const known = { claude: { command: '/usr/bin/node', defaultCommand: 'claude-agent-acp' } };
+    const { found } = await detectAgents({ known, env: { PATH: '' }, home, helpImpl: async () => '' });
+    assert.deepEqual(Object.keys(found), []);
+    fs.rmSync(home, { recursive: true, force: true });
+});

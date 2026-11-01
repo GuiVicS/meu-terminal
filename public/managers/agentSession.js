@@ -13,6 +13,9 @@ import Conversation from '../agent/conversation.js';
 import Composer from '../agent/composer.js';
 import SidePanel from '../agent/sidepanel.js';
 import { esc } from '../agent/markdown.js';
+
+/** Eventos que são conversa (tiram a tela vazia); o resto é aviso de sistema. */
+const CONVERSATION_EVENT = /^(message\.|tool\.|thought\.|plan\.|permission\.|subagent\.|media)/;
 import { isIphonePortrait } from '../ui/device.js';
 import { haptic } from '../ui/haptics.js';
 import { keepScreenOn } from '../ui/permissions.js';
@@ -193,6 +196,20 @@ export default class AgentSession {
             if (b) this.answerPermission(b.dataset.perm, b.dataset.option);
             else if (e.target.closest('[data-goto]')) this.el.log.querySelector('.ag-perm:not(.answered)')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         });
+        // Permissão pendente: Enter permite e Esc recusa (com o campo de mensagem vazio)
+        this.panel.addEventListener('keydown', e => {
+            if (!this.pending?.size || e.isComposing || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+            if (e.key !== 'Enter' && e.key !== 'Escape') return;
+            const field = e.target.closest?.('textarea, input');
+            if (field && field.value.trim()) return;
+            const [permissionId, d] = [...this.pending.entries()][0];
+            const want = e.key === 'Enter' ? 'allow_once' : 'reject_once';
+            const opt = (d.options || []).find(o => o.kind === want) || (d.options || []).find(o => o.kind.startsWith(e.key === 'Enter' ? 'allow' : 'reject'));
+            if (!opt) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.answerPermission(permissionId, opt.id);
+        }, true);
         this.el.log.addEventListener('scroll', () => {
             this.el.jump.hidden = this.conversation.nearBottom();
         }, { passive: true });
@@ -407,9 +424,30 @@ export default class AgentSession {
 
     onReady() {
         const empty = this.el.log.querySelector('.ag-empty');
-        if (empty && this.lastSeq > 0) empty.remove();
-        else if (empty) empty.querySelector('p').textContent = 'Escreva uma mensagem para começar.';
+        if (empty && this.hasConversation) empty.remove();
+        else if (empty) this.renderWelcome(empty);
+        this.panel.classList.toggle('ag-is-empty', !!this.el.log.querySelector('.ag-empty'));
         this.el.log.scrollTop = this.el.log.scrollHeight;
+    }
+
+    /** Conversa nova: saudação, a pasta e sugestões (no desktop o campo fica no centro, como no Claude). */
+    renderWelcome(empty) {
+        const h = new Date().getHours();
+        const hello = h < 5 ? 'Boa noite' : h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+        const tips = [
+            ['Me explica este projeto', 'Me explica este projeto: o que ele faz e como está organizado.'],
+            ['Revisar as mudanças', 'Revise as mudanças que ainda não foram salvas no git e aponte problemas.'],
+            ['Rodar os testes', 'Rode os testes do projeto e corrija o que falhar.'],
+        ];
+        empty.classList.add('ag-welcome');
+        empty.innerHTML = `
+            <h2 class="ag-hello">${hello}</h2>
+            <p>Em que vamos trabalhar em <span class="mono">${esc(this.displayCwd?.() || this.cwd || '~')}</span>?</p>
+            <div class="ag-tips">${tips.map(([label, text]) => `<button type="button" class="ag-tip" data-tip="${esc(text)}">${esc(label)}</button>`).join('')}</div>`;
+        empty.addEventListener('click', e => {
+            const tip = e.target.closest('[data-tip]');
+            if (tip) this.composer.insert(tip.dataset.tip);
+        });
     }
 
     showMissing() {
@@ -434,7 +472,13 @@ export default class AgentSession {
     applyEvent(event) {
         if (event.seq <= this.lastSeq) return; // replay overlap after a reconnect
         this.lastSeq = event.seq;
-        this.el.log.querySelector('.ag-empty')?.remove();
+        // A tela vazia (saudação) só sai quando aparece conversa de verdade; avisos de sistema
+        // ("Sessão iniciada em…", comandos, modelo) não contam
+        if (CONVERSATION_EVENT.test(event.type)) {
+            this.hasConversation = true;
+            this.el.log.querySelector('.ag-empty')?.remove();
+            this.panel.classList.remove('ag-is-empty');
+        }
         const d = event.data || {};
         this.conversation.apply(event);
         this.side.apply(event);

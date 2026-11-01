@@ -4015,10 +4015,6 @@ audio.fm-media { width: min(520px, 90%); }
 .ap-txt b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ap-txt small { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ap-list .cv-note { display: flex; align-items: center; gap: 8px; }
-/* Conversas longas: o navegador só calcula estilo/layout dos turnos perto da tela (o tamanho
-   real de cada um fica lembrado depois de aparecer uma vez, então a rolagem não pula) */
-.ag-log .ag-turn { content-visibility: auto; contain-intrinsic-size: auto 240px; }
-.ag-log .ag-turn:last-child { content-visibility: visible; }
 /* Permissões (Configurações → Permissões e a oferta no primeiro uso do app instalado) */
 .pm-all { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; margin: 10px 0 12px;
     border: 0; border-radius: 14px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; font-size: 16px; cursor: pointer; }
@@ -4034,3 +4030,130 @@ audio.fm-media { width: min(520px, 90%); }
 .pm-txt .pm-note { color: var(--text-3); font-style: italic; }
 .pm-state { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .pm-sheet .sheet-body { padding-bottom: 16px; }
+
+/* =====================================================================================
+   Desktop (tela larga + mouse): tema iOS/macOS e chat como o Claude Desktop.
+   Tudo sob [data-desktop] (index.html / index.js); o celular não muda. docs/PLANO-DESKTOP.md
+   Orçamento de desfoque: só a barra lateral e a barra de cima (o vidro pesou no celular).
+   ===================================================================================== */
+:root { --dk-w: 268px; }
+.dk-side, .dk-reopen { display: none; }
+:root[data-desktop] .app { margin-left: var(--dk-w); transition: margin-left 220ms cubic-bezier(.2,.8,.2,1); }
+:root[data-desktop][data-sidebar-collapsed] .app { margin-left: 0; }
+:root[data-desktop] .dk-side {
+    position: fixed; z-index: 30; top: 0; bottom: 0; left: 0; width: var(--dk-w); box-sizing: border-box;
+    display: flex; flex-direction: column; gap: 8px; padding: 10px 10px 8px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border-right: 1px solid var(--border); box-shadow: var(--glass-edge);
+    transition: transform 220ms cubic-bezier(.2,.8,.2,1);
+}
+:root[data-desktop][data-sidebar-collapsed] .dk-side { transform: translateX(-100%); }
+:root[data-desktop][data-sidebar-collapsed] .dk-reopen {
+    display: grid; place-items: center; position: fixed; z-index: 31; top: 8px; left: 8px; width: 34px; height: 34px;
+    border: 0; border-radius: 9px; background: transparent; color: var(--text-2); cursor: pointer;
+}
+:root[data-desktop][data-sidebar-collapsed] .dk-reopen:hover { background: var(--surface-2); color: var(--text); }
+:root[data-desktop][data-sidebar-collapsed] .topbar { padding-left: 46px; }
+
+.dk-side-head { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 2px; }
+.dk-brand { font-weight: 600; font-size: 14px; color: var(--text-2); }
+.dk-icon { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); cursor: pointer; }
+.dk-icon:hover { background: var(--surface-2); color: var(--text); }
+.dk-new { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: 11px;
+    background: var(--bg); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.dk-new:hover { border-color: var(--accent); }
+.dk-new kbd { margin-left: auto; font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; color: var(--text-3); }
+.dk-search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 10px; background: var(--surface-2); color: var(--text-3); }
+.dk-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
+.dk-agents { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--surface-2); }
+.dk-agents[hidden] { display: none; }
+.dk-agent { flex: 1; min-width: 0; height: 26px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2);
+    font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-agent[aria-selected="true"] { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.dk-scroll { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; scrollbar-width: thin; }
+.dk-section { display: flex; align-items: baseline; gap: 6px; margin: 14px 8px 4px; font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: none; letter-spacing: 0; }
+.dk-folder { font: 11px var(--font-mono, monospace); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dk-ul { list-style: none; margin: 0; padding: 0; }
+.dk-row { position: relative; display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 8px; border: 0; border-radius: 9px;
+    background: transparent; color: var(--text); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.dk-row:hover { background: var(--surface-2); }
+.dk-row.is-current { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.dk-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-conv-ic { display: inline-grid; place-items: center; width: 18px; color: var(--text-3); flex-shrink: 0; }
+.dk-conv-ic .cv-spin { width: 13px; height: 13px; border-width: 2px; }
+.dk-when { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
+.dk-more { display: none; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--text-2); flex-shrink: 0; }
+.dk-row:hover .dk-more { display: grid; }
+.dk-row:hover .dk-when, .dk-row:hover .cv-online { display: none; }
+.dk-more:hover { background: var(--surface-3, var(--border)); color: var(--text); }
+.dk-app-ic { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+    background: color-mix(in srgb, var(--tc) 22%, transparent); color: var(--tc); }
+.dk-note { display: flex; align-items: center; gap: 8px; margin: 6px 8px; font-size: 12.5px; color: var(--text-3); }
+.dk-side-foot { border-top: 1px solid var(--border); padding-top: 6px; }
+
+/* ---- barra de cima unificada e abas estilo Safari ---- */
+:root[data-desktop] .topbar {
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--glass-edge);
+}
+:root[data-desktop] .tab-list { gap: 4px; padding: 7px 4px; align-items: center; }
+:root[data-desktop] .tab {
+    flex: 0 1 220px; min-width: 120px; height: 36px; padding: 0 4px 0 12px; border: 1px solid transparent; border-radius: 10px;
+}
+:root[data-desktop] .tab.active { background: var(--bg); border-color: var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.16); }
+:root[data-desktop] .tab.active::after, :root[data-desktop] .tab.active::before { display: none; }
+:root[data-desktop] .tab .tab-close { opacity: 0; }
+:root[data-desktop] .tab:hover .tab-close, :root[data-desktop] .tab.active .tab-close { opacity: 1; }
+:root[data-desktop] .tab-sub { font-size: 11px; }
+
+/* ---- chat como o Claude Desktop ---- */
+:root[data-desktop] .ag-head [data-act="history"] { display: none; } /* a barra lateral substitui */
+:root[data-desktop] .ag-log { padding: 24px 24px 32px; font-size: 15px; line-height: 1.65; }
+:root[data-desktop] .ag-log > * { max-width: 760px; }
+:root[data-desktop] .ag-user { border-radius: 18px; padding: 10px 16px; }
+:root[data-desktop] .ag-pending { display: none !important; } /* um cartão só: o do chat (Enter / Esc) */
+:root[data-desktop] .ag-perm-actions .btn:first-child::after {
+    content: 'Enter'; margin-left: 8px; padding: 1px 5px; border-radius: 4px; font-size: 10.5px; font-weight: 500;
+    background: rgba(255,255,255,.2); opacity: .9; }
+
+/* campo de mensagem: cartão com o texto em cima e os controles embaixo (modelo dentro do campo) */
+:root[data-desktop] .ag-composer {
+    width: min(760px, calc(100% - 48px)); margin: 0 auto 18px; box-sizing: border-box;
+    border: 1px solid var(--border); border-radius: 22px; background: var(--surface);
+    box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 10px 10px 8px 14px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; column-gap: 6px;
+    grid-template-areas: "queue queue queue queue" "suggest suggest suggest suggest" "images images images images" "input input input input" "attach selectors stop send";
+}
+:root[data-desktop] .ag-composer:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+:root[data-desktop] .ag-composer .ag-queue { grid-area: queue; }
+:root[data-desktop] .ag-composer .ag-suggest { grid-area: suggest; }
+:root[data-desktop] .ag-composer .ag-images { grid-area: images; }
+:root[data-desktop] .ag-composer .ag-input-row { display: contents; }
+:root[data-desktop] .ag-composer textarea {
+    grid-area: input; width: 100%; min-height: 52px; max-height: 40vh; border: 0 !important; box-shadow: none !important;
+    background: transparent; padding: 6px 2px; font-size: 15px; resize: none;
+}
+:root[data-desktop] .ag-composer .ag-selectors { grid-area: selectors; margin: 0; justify-content: flex-end; align-self: center; }
+:root[data-desktop] .ag-composer .ag-attach-btn { grid-area: attach; width: 36px; height: 36px; align-self: center; }
+:root[data-desktop] .ag-composer .ag-stop { grid-area: stop; width: 36px; height: 36px; align-self: center; }
+:root[data-desktop] .ag-composer .ag-send { grid-area: send; width: 36px; height: 36px; align-self: center; }
+:root[data-desktop] .ag-composer .ag-settings-btn { display: none; }
+:root[data-desktop] .ag-selectors .ag-select { border-color: transparent; background: transparent; }
+:root[data-desktop] .ag-selectors .ag-select:hover { background: var(--surface-2); }
+
+/* conversa nova: saudação e o campo no centro da tela */
+.ag-welcome .ag-hello { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: -.01em; color: var(--text); }
+.ag-welcome p { margin: 0; color: var(--text-2); }
+.ag-tips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+.ag-tip { height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: 16px; background: transparent; color: var(--text-2); font: inherit; font-size: 13px; cursor: pointer; }
+.ag-tip:hover { color: var(--text); border-color: var(--accent); }
+:root[data-desktop] .ag-is-empty .ag-main { justify-content: center; }
+:root[data-desktop] .ag-is-empty .ag-log { flex: 0 0 auto; overflow: visible; padding-bottom: 18px; }
+:root[data-desktop] .ag-is-empty .ag-welcome { padding-top: 0; }
+:root[data-desktop] .ag-is-empty .ag-log > :not(.ag-empty) { display: none; } /* só a saudação */
+:root:not([data-desktop]) .ag-tips { display: none; }
+
+/* menus e folhas no estilo macOS */
+:root[data-desktop] .menu { border-radius: 10px; padding: 5px; }
+:root[data-desktop] .menu .menu-item { border-radius: 6px; min-height: 30px; font-size: 13.5px; }

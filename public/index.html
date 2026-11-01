@@ -44,6 +44,11 @@
                 || (window.matchMedia('(pointer: coarse)').matches
                     && Math.min(window.screen.width || 0, window.screen.height || 0) < 720);
             if (visual !== 'classic' && isPhone) document.documentElement.setAttribute('data-iphone', '');
+            // Desktop (tela larga, mouse): barra lateral e chat como o Claude Desktop (ui/desktopSidebar.js)
+            if (!isPhone && window.innerWidth >= 900 && !window.matchMedia('(pointer: coarse)').matches) {
+                document.documentElement.setAttribute('data-desktop', '');
+                if (localStorage.getItem('meuterminal-sidebar-recolhida') === '1') document.documentElement.setAttribute('data-sidebar-collapsed', '');
+            }
         })();
     </script>
     <link rel="stylesheet" href="styles.css">
