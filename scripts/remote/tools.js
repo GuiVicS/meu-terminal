@@ -15,12 +15,56 @@ const path = require('path');
 const { assessCommand } = require('./risk');
 const { runProcess } = require('../process-runner');
 const { FileError } = require('../file-manager');
+const { execFile } = require('child_process');
 
 const LOCAL = 'local';
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_WRITE_CHARS = 5 * 1024 * 1024;
 const DEFAULT_TIMEOUT_SEC = 120;
 const MAX_TIMEOUT_SEC = 600;
+const DEFAULT_UPLOAD_GB = 20;     // upload_link: por arquivo (o padrão)
+const MAX_UPLOAD_GB = 100;
+const MAX_PREVIEW_FRAMES = 8;
+
+/** Roda um programa e devolve stdout (rejeita com a mensagem de erro dele). */
+function run(cmd, args, { timeout = 120000, maxBuffer = 16 * 1024 * 1024, encoding = 'utf8' } = {}) {
+    return new Promise((resolve, reject) => {
+        execFile(cmd, args, { timeout, maxBuffer, encoding }, (error, stdout, stderr) => {
+            if (error) {
+                if (error.code === 'ENOENT') return reject(new Error(`${cmd} não está instalado no servidor.`));
+                return reject(new Error(String(stderr || error.message).trim().split('\n').pop().slice(0, 300)));
+            }
+            resolve(stdout);
+        });
+    });
+}
+
+/** sha256 de um arquivo em fluxo (arquivos de qualquer tamanho). */
+function sha256File(file) {
+    return new Promise((resolve, reject) => {
+        const h = crypto.createHash('sha256');
+        fs.createReadStream(file).on('data', c => h.update(c)).on('error', reject).on('end', () => resolve(h.digest('hex')));
+    });
+}
+
+/** Metadados de mídia (ffprobe), ou null se não for mídia / sem ffprobe. */
+async function probe(file) {
+    try {
+        const out = await run('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file], { timeout: 60000 });
+        const j = JSON.parse(out);
+        const v = (j.streams || []).find(x => x.codec_type === 'video');
+        const a = (j.streams || []).find(x => x.codec_type === 'audio');
+        if (!v && !a) return null;
+        return {
+            duration: j.format?.duration ? Number(j.format.duration) : null,
+            format: j.format?.format_name || null,
+            video: v ? { codec: v.codec_name, width: v.width, height: v.height, fps: v.avg_frame_rate } : null,
+            audio: a ? { codec: a.codec_name, channels: a.channels, rate: a.sample_rate } : null,
+        };
+    } catch {
+        return null;
+    }
+}
 const CREDENTIAL_PATH_RE = /(^|\/)(\.env(\.|$)|\.ssh\/|\.aws\/|\.git-credentials|\.netrc|\.config\/rclone\/|id_rsa|id_ed25519)/;
 const TOOLS_PROBE = ['node', 'npm', 'pnpm', 'bun', 'python3', 'pip', 'pip3', 'uv', 'docker', 'git', 'gh', 'rclone', 'ffmpeg',
     'chromium', 'curl', 'wget', 'jq', 'sqlite3', 'go', 'cargo', 'java', 'claude', 'codex', 'vercel', 'yt-dlp'];
@@ -639,6 +683,122 @@ function createRemoteTools(deps) {
         await fsp.writeFile(target, buf);
         await chownIfNeeded(target);
         return text(`Gravado ${target} (${sizeLabel(buf.length)}).`);
+    });
+
+    // ---------------- Troca de arquivos ----------------
+    // Pastas fixas de troca: o que chega (upload_link, Drive, fetch_url) e o que sai (share_link).
+    const TROCA = { entrada: path.join(exec.workdir, 'troca', 'entrada'), saida: path.join(exec.workdir, 'troca', 'saida') };
+    for (const dir of Object.values(TROCA)) {
+        try { fs.mkdirSync(dir, { recursive: true }); } catch { /* sem permissão: as ferramentas avisam */ }
+    }
+
+    add({
+        name: 'upload_link',
+        description: 'Gera um link temporário com uma página para o USUÁRIO enviar arquivos de qualquer tamanho (vídeos, PDFs, zips) '
+            + 'direto para uma pasta do servidor, sem passar pela conversa. Padrão: troca/entrada. '
+            + 'Entregue o link ao usuário; depois confira o que chegou com upload_received (tamanho e sha256).',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                dir: { type: 'string', description: 'Pasta de destino (padrão: troca/entrada).' },
+                minutes: { type: 'number', description: 'Validade (padrão 60, máximo 1440).' },
+                max_gb: { type: 'number', description: `Tamanho máximo por arquivo em GB (padrão ${DEFAULT_UPLOAD_GB}, máximo ${MAX_UPLOAD_GB}).` },
+                ...APPROVAL_PROP,
+            },
+        },
+    }, async (args, ctx) => {
+        const dir = args.dir ? exec.resolvePath(args.dir) : TROCA.entrada;
+        const gb = Math.min(Math.max(Number(args.max_gb) || DEFAULT_UPLOAD_GB, 0.01), MAX_UPLOAD_GB);
+        const blocked = await guard('upload_link', { dir: args.dir || '', max_gb: gb, approval_id: args.approval_id },
+            `receber arquivos em ${dir}`, await writeRisks(dir, LOCAL), 'write', ctx);
+        if (blocked) return blocked;
+        await fsp.mkdir(dir, { recursive: true });
+        const link = shares.createUpload({ dir, minutes: args.minutes, maxBytes: Math.round(gb * 1073741824) });
+        return text([
+            `${publicBase}/up/${link.token}`,
+            `(destino ${dir}; até ${gb} GB por arquivo; expira ${new Date(link.expiresAt).toISOString()})`,
+            `Para conferir: upload_received com token="${link.token}".`,
+        ].join('\n'));
+    });
+
+    add({
+        name: 'upload_received',
+        description: 'Lista o que o usuário já enviou por um upload_link: nome, caminho, tamanho e sha256 de cada arquivo.',
+        inputSchema: { type: 'object', properties: { token: { type: 'string' } }, required: ['token'] },
+    }, async args => {
+        const link = shares.get(String(args.token || ''));
+        if (!link || link.kind !== 'upload') return fail('Link inválido ou expirado (os links somem quando o servidor reinicia).');
+        if (!link.received.length) return text(`Nada recebido ainda. O link expira ${new Date(link.expiresAt).toISOString()}.`);
+        return text(link.received.map(f => `${f.path}\t${sizeLabel(f.size)} (${f.size} bytes)\tsha256 ${f.sha256}\t${f.at}`).join('\n'));
+    });
+
+    add({
+        name: 'file_info',
+        description: 'Confere um arquivo do servidor sem trazê-lo para a conversa: tamanho exato, sha256, tipo e, para vídeo/áudio, '
+            + 'duração, formato e resolução (ffprobe). Use para verificar toda transferência (comparar com a origem).',
+        inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    }, async args => {
+        const target = exec.resolvePath(args.path);
+        const st = await fsp.stat(target).catch(() => null);
+        if (!st) return fail(`Não existe: ${target}`);
+        if (st.isDirectory()) return fail('É uma pasta. Para várias: run_command com "sha256sum pasta/*".');
+        const [sha256, mime, media] = await Promise.all([
+            sha256File(target),
+            run('file', ['--mime-type', '-b', target]).then(s => s.trim()).catch(() => null),
+            probe(target),
+        ]);
+        const lines = [`${target}`, `tamanho: ${sizeLabel(st.size)} (${st.size} bytes)`, `sha256: ${sha256}`];
+        if (mime) lines.push(`tipo: ${mime}`);
+        if (media) {
+            if (media.duration != null) lines.push(`duração: ${media.duration.toFixed(2)} s`);
+            if (media.format) lines.push(`formato: ${media.format}`);
+            if (media.video) lines.push(`vídeo: ${media.video.codec} ${media.video.width}x${media.video.height} @ ${media.video.fps}`);
+            if (media.audio) lines.push(`áudio: ${media.audio.codec}, ${media.audio.channels} canais, ${media.audio.rate} Hz`);
+        }
+        lines.push(`modificado: ${st.mtime.toISOString()}`);
+        return text(lines.join('\n'));
+    });
+
+    add({
+        name: 'media_preview',
+        description: 'Mostra o conteúdo de um vídeo ou imagem grande sem trazer o arquivo: devolve alguns quadros do vídeo '
+            + `(espalhados pela duração, até ${MAX_PREVIEW_FRAMES}) ou a imagem reduzida, como imagens que você vê direto. Precisa do ffmpeg no servidor.`,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                path: { type: 'string' },
+                frames: { type: 'number', description: `Quantos quadros (padrão 4, máximo ${MAX_PREVIEW_FRAMES}).` },
+                width: { type: 'number', description: 'Largura de cada imagem em px (padrão 640, máximo 1280).' },
+                start_seconds: { type: 'number', description: 'Só um trecho: início (padrão 0).' },
+                end_seconds: { type: 'number', description: 'Só um trecho: fim (padrão a duração toda).' },
+            },
+            required: ['path'],
+        },
+    }, async args => {
+        const target = exec.resolvePath(args.path);
+        if (!fs.existsSync(target)) return fail(`Não existe: ${target}`);
+        const width = Math.min(Math.max(Number(args.width) || 640, 64), 1280);
+        const media = await probe(target);
+        const isVideo = !!(media?.video && media.duration && media.duration > 0.5);
+        const n = isVideo ? Math.min(Math.max(Number(args.frames) || 4, 1), MAX_PREVIEW_FRAMES) : 1;
+        const from = isVideo ? Math.max(0, Number(args.start_seconds) || 0) : 0;
+        const to = isVideo ? Math.min(media.duration, Number(args.end_seconds) || media.duration) : 0;
+        const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'mt-preview-'));
+        try {
+            const content = [];
+            for (let i = 0; i < n; i++) {
+                const t = isVideo ? from + (to - from) * (i + 0.5) / n : 0;
+                const out = path.join(tmp, `q${i}.jpg`);
+                await run('ffmpeg', ['-v', 'error', ...(isVideo ? ['-ss', t.toFixed(2)] : []), '-i', target, '-frames:v', '1',
+                    '-vf', `scale='min(${width},iw)':-2`, '-q:v', '5', '-y', out], { timeout: 120000 });
+                content.push({ type: 'text', text: isVideo ? `Quadro ${i + 1}/${n} em ${t.toFixed(1)} s` : 'Imagem reduzida' });
+                content.push({ type: 'image', data: (await fsp.readFile(out)).toString('base64'), mimeType: 'image/jpeg' });
+            }
+            if (media) content.unshift({ type: 'text', text: `${path.basename(target)}${media.duration ? ` · ${media.duration.toFixed(1)} s` : ''}${media.video ? ` · ${media.video.width}x${media.video.height}` : ''}` });
+            return { content };
+        } finally {
+            await fsp.rm(tmp, { recursive: true, force: true });
+        }
     });
 
     return { tools: defs, impl };

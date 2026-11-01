@@ -118,3 +118,24 @@ test('addons: the Modo UI "/" menu keeps only the useful claude-mem commands', (
     assert.ok(visibleCommand('cartographer:cartographer'));
     assert.ok(visibleCommand('compact'));
 });
+
+test('addons: what the user turns on while the plugins install is not lost (no stale write)', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mt-race-'));
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const run = async (args) => {
+        if (args[1] === 'list') return { code: 0, stdout: '[]', stderr: '' };
+        await gate; // a instalação demora
+        return { code: 0, stdout: '{}', stderr: '' };
+    };
+    const a = new Addons({ stateFile: path.join(home, 'addons.json'), home, run, runScript: async () => ({ code: 0 }), addons: ADDONS });
+    const boot = a.bootstrap();
+    await new Promise(r => setTimeout(r, 20));
+    a.setPrefs({ services: { omniroute: { enabled: true } } });
+    const secret = a.serviceSecrets('omniroute').INITIAL_PASSWORD;
+    release();
+    await boot;
+    assert.strictEqual(a.prefs().services.omniroute.enabled, true);
+    assert.strictEqual(a.serviceSecrets('omniroute').INITIAL_PASSWORD, secret);
+    assert.strictEqual(Object.keys(a.state().seeded).length, 3);
+});

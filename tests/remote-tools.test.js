@@ -190,3 +190,39 @@ test('through the protocol: audit row with exit code, approval note and masked a
     assert.equal(row.clientId, 'c1');
     assert.match(row.args, /••••/);
 });
+
+// ---------- troca de arquivos ----------
+
+test('troca: as pastas troca/entrada e troca/saida existem na pasta de trabalho', () => {
+    assert.ok(fs.statSync(path.join(exec.workdir, 'troca', 'entrada')).isDirectory());
+    assert.ok(fs.statSync(path.join(exec.workdir, 'troca', 'saida')).isDirectory());
+});
+
+test('upload_link: gera /up/<token> para troca/entrada; upload_received lista o que chegou', async () => {
+    const r = out(await call('upload_link', { minutes: 5, max_gb: 1 }));
+    const token = r.match(/\/up\/([\w-]+)/)[1];
+    assert.match(r, /troca\/entrada/);
+    const link = shares.get(token);
+    assert.equal(link.kind, 'upload');
+    assert.equal(link.maxBytes, 1073741824);
+    assert.match(out(await call('upload_received', { token })), /Nada recebido ainda/);
+    link.received.push({ name: 'a.mp4', path: '/x/a.mp4', size: 10, sha256: 'ab'.repeat(32), at: 'agora' });
+    assert.match(out(await call('upload_received', { token })), /a\.mp4.*10 bytes.*sha256 abab/);
+    // um link de envio não serve como link de download
+    assert.equal((await call('upload_received', { token: 'nao-existe' })).isError, true);
+});
+
+test('file_info: tamanho exato e sha256 sem trazer o arquivo', async () => {
+    const f = path.join(exec.workdir, 'troca', 'saida', 'oi.txt');
+    fs.writeFileSync(f, 'oi\n');
+    const r = out(await call('file_info', { path: f }));
+    assert.match(r, /3 bytes/);
+    const expected = require('crypto').createHash('sha256').update('oi\n').digest('hex');
+    assert.ok(r.includes(`sha256: ${expected}`), r);
+    assert.equal((await call('file_info', { path: path.join(exec.workdir, 'nao-existe') })).isError, true);
+});
+
+test('tool list: as ferramentas de troca de arquivos estão lá', () => {
+    const names = tools.map(t => t.name);
+    for (const n of ['upload_link', 'upload_received', 'file_info', 'media_preview']) assert.ok(names.includes(n), n);
+});

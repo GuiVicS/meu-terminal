@@ -3853,3 +3853,73 @@ audio.fm-media { width: min(520px, 90%); }
         .nt-fbtn.on, .nt-fbtn[aria-pressed="true"] { color: var(--nt-accent); }
     }
 }
+
+/* ---------- Telas dos complementos dentro de Configurações (admin/addonPanels.js) ---------- */
+.ad-back { display: inline-flex; align-items: center; gap: 2px; height: 40px; padding: 0 10px 0 2px; color: var(--accent); font-size: 15px; font-weight: 500; }
+.ad-panel-title { margin-top: 4px; }
+.ad-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 8px 0 4px; }
+.ad-stat { display: flex; flex-direction: column; gap: 2px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.ad-stat-value { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.ad-stat-label { font-size: 12px; color: var(--text-3); }
+.ad-badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; background: var(--surface-2); color: var(--text-2); vertical-align: middle; }
+.ad-badge.ok { background: color-mix(in srgb, var(--success, #22c55e) 18%, transparent); color: var(--success, #22c55e); }
+.ad-badge.err { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
+.ad-callout { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius); font-size: 13.5px; }
+.ad-callout small { display: block; margin-top: 4px; color: var(--text-3); }
+.ad-search { width: 100%; height: 40px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.ad-searchrow { display: flex; gap: 8px; margin: 10px 0; }
+.ad-pick { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 44px; padding: 0 12px; border-radius: var(--radius); color: var(--text); text-align: left; }
+.ad-pick:hover, .ad-pick:active { background: var(--surface-2); }
+.ad-add { display: grid; gap: 8px; }
+.ad-add input { height: 44px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.ad-models { flex: 1 1 100%; }
+.ad-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ---------- Complementos como apps (admin/addons.js) ---------- */
+.ad-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 18px 10px; margin: 14px 0 6px; }
+.ad-app { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 2px; border-radius: 16px; color: var(--text); text-align: center; }
+.ad-app:active { transform: scale(0.96); }
+.ad-app:hover .ad-app-icon { filter: brightness(1.06); }
+.ad-app-icon {
+    position: relative; width: 64px; height: 64px; flex-shrink: 0; display: grid; place-items: center; border-radius: 18px; color: #FFFFFF;
+    background: linear-gradient(160deg, color-mix(in srgb, var(--tc) 85%, #FFFFFF), color-mix(in srgb, var(--tc) 75%, #000000));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 6px 16px color-mix(in srgb, var(--tc) 30%, transparent);
+}
+.ad-app-name { font-size: 13.5px; font-weight: 600; line-height: 1.2; }
+.ad-app-status { font-size: 11.5px; color: var(--text-3); }
+.ad-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
+.ad-app-icon .ad-dot { position: absolute; right: -2px; top: -2px; width: 14px; height: 14px; border: 2px solid var(--bg); }
+.ad-dot.on { background: var(--success, #22c55e); }
+.ad-dot.err { background: var(--danger); }
+.ad-dot.wait { background: var(--c-yellow); }
+.ad-hero { display: flex; align-items: center; gap: 14px; margin: 8px 0 10px; }
+.ad-hero .ad-app-icon { width: 60px; height: 60px; border-radius: 16px; }
+.ad-hero-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ad-hero-name { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+.ad-hero-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.ad-about { margin: 0 0 8px; }
+.ad-howto { margin: 4px 0 12px; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; color: var(--text-2); }
+.ad-off { margin: 14px 0; padding: 14px; border-radius: var(--radius); background: var(--surface-2); font-size: 14px; color: var(--text-2); text-align: center; }
+.ad-panel { margin-top: 6px; }
+
+/* Celular (folha de Configurações e /admin): toque confortável, números em 2 colunas, campos de 16px */
+@media (max-width: 600px), (pointer: coarse) {
+    .ad-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 8px; }
+    .ad-app-icon { width: 60px; height: 60px; }
+    .ad-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ad-stat-value { font-size: 18px; }
+    .ad-panel .rm-row { padding: 12px; }
+    .ad-panel .rm-actions { width: 100%; margin-left: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+    .ad-panel .rm-actions .btn { height: 44px; }
+    .ad-panel .btn-sm { min-height: 40px; }
+    .ad-callout { flex-direction: column; align-items: stretch; }
+    .ad-callout .btn { height: 46px; }
+    .ad-search, .ad-add input, .ad-panel select { height: 46px; font-size: 16px; }
+    .ad-searchrow { flex-direction: column; }
+    .ad-pick { min-height: 52px; font-size: 15.5px; }
+    .ad-add .push-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .ad-add .push-actions .btn { height: 48px; }
+    .ad-back { height: 44px; }
+}
+/* títulos dentro da tela de um complemento: menores que os da página */
+.ad-panel .section-label, .st-page .ad-panel .section-label { font-size: 15px; font-weight: 600; letter-spacing: 0; margin: 20px 0 8px; color: var(--text-2); }

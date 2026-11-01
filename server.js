@@ -40,8 +40,10 @@ const AgentStore = require('./scripts/agents/agent-store');
 const { AgentGateway, GatewayError } = require('./scripts/agents/gateway');
 const { AgentLauncher } = require('./scripts/agents/launch');
 const { writeShims, writeRcFile } = require('./scripts/agents/shims');
+const { execFile } = require('child_process');
 const { Addons, SERVICES } = require('./scripts/addons');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
+const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
 const app = express();
 const server = http.createServer(app);
@@ -980,10 +982,106 @@ app.put(BASE_PATH + '/api/addons', async (req, res) => {
     const prefs = addons.setPrefs(body);
     try {
         await addonServices.apply(prefs);
+        await ensureOmniKey();
     } catch (e) {
         return res.status(e.status || 500).json({ error: e.message });
     }
-    res.json({ terminalRoute: normalizeRoute(prefs.terminalRoute), addons: await addons.status({ services: addonServices }) });
+    res.json({ terminalRoute: normalizeRoute(addons.prefs().terminalRoute), addons: await addons.status({ services: addonServices }) });
+});
+
+// Telas dos complementos dentro das Configurações (scripts/addon-bridges.js): o servidor fala com
+// cada serviço em 127.0.0.1; o usuário não abre painel no navegador nem faz outro login.
+const bridges = {
+    omniroute: new OmniRouteBridge({ port: SERVICES.omniroute.port, password: () => addons.serviceSecrets('omniroute').INITIAL_PASSWORD }),
+    'claude-mem': new ClaudeMemBridge(),
+    headroom: new HeadroomBridge({ port: SERVICES.headroom.port }),
+};
+
+/** Com o OmniRoute ligado e sem chave salva, cria a chave da rota "Outros modelos". */
+async function ensureOmniKey() {
+    const omni = addons.prefs().services.omniroute || {};
+    if (!omni.enabled || omni.apiKey) return;
+    const key = await bridges.omniroute.createKey();
+    addons.setPrefs({ services: { omniroute: { apiKey: key } } });
+}
+
+/** O trabalhador do Claude Mem sobe com as sessões do Claude; para a tela, sobe agora se precisar. */
+let memStarting = null;
+function startClaudeMem() {
+    memStarting ||= new Promise(resolve => {
+        execFile('claude-mem', ['start'], { cwd: HOME_DIR, env: childEnv({ HOME: HOME_DIR }), timeout: 90000 }, () => resolve());
+    }).finally(() => { memStarting = null; });
+    return memStarting;
+}
+
+async function bridgeFor(id) {
+    const bridge = bridges[id];
+    if (!bridge) throw new BridgeError('Complemento sem tela.', 404);
+    if (SERVICES[id]) {
+        if (!addons.prefs().services[id]?.enabled) throw new BridgeError(`Ligue o ${SERVICES[id].label} para usar a tela dele.`, 409);
+        await addonServices.ensure(id);
+        if (id === 'omniroute') await ensureOmniKey();
+    }
+    return bridge;
+}
+
+async function withMem(fn) {
+    try {
+        return await fn();
+    } catch (e) {
+        if (e.status !== 503) throw e;
+        await startClaudeMem();
+        if (!await bridges['claude-mem'].waitReady(60000)) throw new BridgeError('O Claude Mem não respondeu depois de iniciar. Tente de novo em instantes.', 503);
+        return fn();
+    }
+}
+
+app.get(BASE_PATH + '/api/addons/:id/panel', async (req, res) => {
+    if (DEMO_MODE) return res.status(403).json({ error: 'Indisponível no modo demo.' });
+    try {
+        const bridge = await bridgeFor(req.params.id);
+        const data = req.params.id === 'claude-mem' ? await withMem(() => bridge.panel()) : await bridge.panel();
+        if (req.params.id === 'omniroute') {
+            data.model = addons.prefs().services.omniroute?.model || null;
+            data.codexLogin = OmniRouteBridge.hasCodexLogin(HOME_DIR);
+        }
+        res.json(data);
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
+});
+
+// Só as ações que as telas usam (nada de repassar rotas arbitrárias)
+const BRIDGE_ACTIONS = {
+    omniroute: {
+        catalog: b => b.catalog(),
+        addProvider: (b, a) => b.addProvider(a),
+        removeProvider: (b, a) => b.removeProvider(String(a.id || '')),
+        testProvider: (b, a) => b.testProvider(String(a.id || '')),
+        models: (b, a) => b.models(String(a.id || '')),
+        importCodex: b => b.importCodex(HOME_DIR),
+        setModel: (b, a) => {
+            const model = typeof a.model === 'string' ? a.model : '';
+            addons.setPrefs({ services: { omniroute: { model } } });
+            return { model: addons.prefs().services.omniroute?.model || null };
+        },
+    },
+    'claude-mem': {
+        observations: (b, a) => withMem(() => b.observations(a)),
+        search: (b, a) => withMem(() => b.search(a.query)),
+        deleteObservation: (b, a) => withMem(() => b.deleteObservation(String(a.id || ''))),
+    },
+};
+app.post(BASE_PATH + '/api/addons/:id/call', async (req, res) => {
+    if (DEMO_MODE) return res.status(403).json({ error: 'Indisponível no modo demo.' });
+    const { action, ...args } = req.body || {};
+    const fn = BRIDGE_ACTIONS[req.params.id]?.[action];
+    if (!fn) return res.status(404).json({ error: 'Ação desconhecida.' });
+    try {
+        res.json(await fn(await bridgeFor(req.params.id), args) ?? { ok: true });
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
 });
 
 // Conversas fixadas na lista lateral do Modo UI (ids de sessão do agente), iguais em todo aparelho

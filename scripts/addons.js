@@ -87,7 +87,10 @@ const ADDONS = [
         // OMNIROUTE_SERVER_HOST: sem ele escuta em 0.0.0.0. REQUIRE_API_KEY: as abas de navegador
         // rodam neste servidor, então um site aberto nelas alcançaria o localhost sem chave.
         // A memória dele já vem desligada (a memória é do Claude Mem).
-        env: home => ({ DATA_DIR: `${home}/.omniroute`, OMNIROUTE_SERVER_HOST: '127.0.0.1', REQUIRE_API_KEY: 'true', OMNIROUTE_MEMORY_MB: '768' }),
+        // EXPOSE_CC_DISCOVERY_ALIASES: os modelos de outros provedores (GPT/Codex, GLM, Kimi...)
+        // aparecem no /model do Claude Code, que só lista ids que começam com "claude".
+        env: home => ({ DATA_DIR: `${home}/.omniroute`, OMNIROUTE_SERVER_HOST: '127.0.0.1', REQUIRE_API_KEY: 'true',
+            OMNIROUTE_MEMORY_MB: '768', EXPOSE_CC_DISCOVERY_ALIASES: 'true' }),
         port: 20128,
         health: '/api/health',
         panel: 'http://localhost:20128',
@@ -189,6 +192,18 @@ class Addons {
         return readJson(this.stateFile, { seeded: {} });
     }
 
+    /**
+     * Lê o estado na hora, aplica a mudança e grava. Toda gravação passa por aqui: a instalação
+     * dos plugins leva ~20 s no primeiro boot, e gravar uma cópia lida antes apagava o que o
+     * usuário ligou nesse meio-tempo (inclusive a senha gerada do OmniRoute).
+     */
+    updateState(change) {
+        const st = this.state();
+        change(st);
+        writeJson(this.stateFile, st);
+        return st;
+    }
+
     /** @returns {Promise<object[]|null>} [{ id, installPath, enabled, version }] or null if the CLI failed */
     async pluginList() {
         const r = await this.run(['plugin', 'list', '--json'], { env: this.childEnv() });
@@ -212,10 +227,9 @@ class Addons {
     }
 
     async doBootstrap() {
-        const state = this.state();
-        state.seeded = state.seeded || {};
+        const seeded = this.state().seeded || {};
         const results = [];
-        const pending = this.addons.filter(a => a.kind === 'plugin' && !state.seeded[a.id]);
+        const pending = this.addons.filter(a => a.kind === 'plugin' && !seeded[a.id]);
         if (!pending.length) return results;
 
         const installed = await this.installedPlugins();
@@ -252,8 +266,7 @@ class Addons {
                 const added = mergeDefaults(path.join(this.home, addon.settingsFile), addon.settings);
                 if (added.length) outcome += `; padrões: ${added.join(', ')}`;
             }
-            state.seeded[addon.id] = { plugin: id, at: new Date().toISOString() };
-            writeJson(this.stateFile, state);
+            this.updateState(st => { st.seeded = { ...(st.seeded || {}), [addon.id]: { plugin: id, at: new Date().toISOString() } }; });
             this.log(`Complementos: ${addon.label} ${outcome}`);
             results.push({ id: addon.id, ok: true, outcome });
         }
@@ -271,20 +284,20 @@ class Addons {
      * apiKey: '' apaga; undefined mantém.
      */
     setPrefs(patch = {}) {
-        const st = this.state();
-        st.services = st.services || {};
-        for (const [id, p] of Object.entries(patch.services || {})) {
-            if (!SERVICES[id] || !p || typeof p !== 'object') continue;
-            const cur = st.services[id] || {};
-            if (typeof p.enabled === 'boolean') cur.enabled = p.enabled;
-            if (id === 'omniroute') {
-                if (typeof p.apiKey === 'string') cur.apiKey = p.apiKey.trim().slice(0, 300) || undefined;
-                if (typeof p.model === 'string') cur.model = p.model.trim().slice(0, 200) || undefined;
+        this.updateState(st => {
+            st.services = st.services || {};
+            for (const [id, p] of Object.entries(patch.services || {})) {
+                if (!SERVICES[id] || !p || typeof p !== 'object') continue;
+                const cur = st.services[id] || {};
+                if (typeof p.enabled === 'boolean') cur.enabled = p.enabled;
+                if (id === 'omniroute') {
+                    if (typeof p.apiKey === 'string') cur.apiKey = p.apiKey.trim().slice(0, 300) || undefined;
+                    if (typeof p.model === 'string') cur.model = p.model.trim().slice(0, 200) || undefined;
+                }
+                st.services[id] = cur;
             }
-            st.services[id] = cur;
-        }
-        if (typeof patch.terminalRoute === 'string') st.terminalRoute = patch.terminalRoute;
-        writeJson(this.stateFile, st);
+            if (typeof patch.terminalRoute === 'string') st.terminalRoute = patch.terminalRoute;
+        });
         return this.prefs();
     }
 
@@ -292,16 +305,16 @@ class Addons {
     serviceSecrets(id) {
         const def = SERVICES[id];
         if (!def?.secrets) return {};
-        const st = this.state();
-        st.services = st.services || {};
-        const cur = st.services[id] || {};
-        cur.secrets = cur.secrets || {};
-        let changed = false;
-        for (const [key, make] of Object.entries(def.secrets)) {
-            if (!cur.secrets[key]) { cur.secrets[key] = make(); changed = true; }
-        }
-        if (changed) { st.services[id] = cur; writeJson(this.stateFile, st); }
-        return { ...cur.secrets };
+        const have = this.state().services?.[id]?.secrets || {};
+        if (Object.keys(def.secrets).every(k => have[k])) return { ...have };
+        const st = this.updateState(st => {
+            st.services = st.services || {};
+            const cur = st.services[id] || {};
+            cur.secrets = cur.secrets || {};
+            for (const [key, make] of Object.entries(def.secrets)) if (!cur.secrets[key]) cur.secrets[key] = make();
+            st.services[id] = cur;
+        });
+        return { ...st.services[id].secrets };
     }
 
     /** For the settings page: each add-on, whether it was seeded and whether it's installed now. */
@@ -318,8 +331,6 @@ class Addons {
                 const p = st.services?.[a.id] || {};
                 out.push({ id: a.id, kind: a.kind, label: a.label, port: a.port, panel: a.panel || null,
                     enabled: !!p.enabled, hasApiKey: !!p.apiKey, model: p.model || null,
-                    // Mostrada só na tela de Complementos (atrás do login do MeuTerminal)
-                    panelPassword: p.secrets?.INITIAL_PASSWORD || null,
                     ...(services ? await services.status(a.id) : {}) });
             }
         }

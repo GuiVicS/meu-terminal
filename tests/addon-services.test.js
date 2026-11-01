@@ -119,7 +119,7 @@ test('OmniRoute: panel password and secrets are generated once, kept, and passed
     assert.deepStrictEqual(a.serviceSecrets('omniroute'), first); // same on the next start
     assert.deepStrictEqual(a.serviceSecrets('headroom'), {});
     const status = (await a.status()).find(s => s.id === 'omniroute');
-    assert.strictEqual(status.panelPassword, first.INITIAL_PASSWORD);
+    assert.ok(!JSON.stringify(status).includes(first.INITIAL_PASSWORD)); // a tela não precisa mais da senha
     assert.ok(!JSON.stringify(status).includes(first.JWT_SECRET));
     const w = fakeWorld({ healthyAfter: 1 });
     const m = new ServiceManager({ defs: SERVICES, home: dir, secrets: id => a.serviceSecrets(id), fetchImpl: w.fetchImpl, spawnImpl: w.spawnImpl, healthIntervalMs: 1 });

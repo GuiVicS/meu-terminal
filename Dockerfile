@@ -22,6 +22,9 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --fix-missing \
     rclone \
     # Browser tabs: headless Chromium on the server + fonts so pages render text/emoji
     chromium \
+    # Troca de arquivos com o Claude (Ponte): file_info (tipo, duração) e media_preview (quadros)
+    ffmpeg \
+    file \
     fonts-liberation \
     fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
