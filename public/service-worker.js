@@ -351,6 +351,11 @@ self.addEventListener("activate", event => {
     event.waitUntil(
         Promise.resolve()
             .then(async () => {
+                // A new service worker means the app's files changed: start from an empty cache.
+                // Without this, a fix shipped without a version bump (or a hotfix copied into a
+                // running server) stays hidden behind the old files, served cache-first.
+                const stale = (await caches.keys()).filter(key => key.startsWith('MEUTERMINAL_CACHE_'));
+                await Promise.all(stale.map(key => caches.delete(key)));
                 // Take control of all clients
                 await self.clients.claim();
                 console.log("Service worker has claimed clients");
