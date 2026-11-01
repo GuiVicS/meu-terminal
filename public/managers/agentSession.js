@@ -770,7 +770,7 @@ export default class AgentSession {
                 }));
                 items.push('separator', ...(past.length ? past : [{ label: 'Nenhuma conversa anterior nesta pasta', icon: 'info', run: () => {} }]));
             } catch (e) {
-                items.push('separator', { label: `Histórico indisponível: ${e.message}`, icon: 'info', run: () => {} });
+                /* histórico indisponível: só não lista as anteriores */
             }
         }
         showMenu(items, { anchor, label: 'Conversas' });

@@ -3999,3 +3999,18 @@ audio.fm-media { width: min(520px, 90%); }
 .cc-txt small { color: var(--text-2); font-size: 12px; display: flex; align-items: center; gap: 5px; }
 .cc-row .icon-btn { min-width: 36px; min-height: 36px; }
 .cc-add { margin: 8px 0 4px; }
+/* Escolha da conversa ao abrir um agente pelo menu: "Nova conversa" + abertas + anteriores */
+.agent-picker .sheet-body { display: flex; flex-direction: column; gap: 10px; padding-bottom: 14px; }
+.ap-new { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; border: 0; border-radius: 14px;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 600; font-size: 16px; cursor: pointer; }
+.ap-new:active { filter: brightness(0.92); }
+.ap-search input { width: 100%; box-sizing: border-box; min-height: 40px; padding: 0 12px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--surface-1, transparent); color: var(--text); font-size: 16px; }
+.ap-list .cv-ul { list-style: none; margin: 0; padding: 0; }
+.ap-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 6px 8px; border: 0;
+    border-radius: 12px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.ap-row:hover, .ap-row:active { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.ap-txt { flex: 1; min-width: 0; display: grid; }
+.ap-txt b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-txt small { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-list .cv-note { display: flex; align-items: center; gap: 8px; }

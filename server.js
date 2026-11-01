@@ -1347,6 +1347,18 @@ app.get(BASE_PATH + '/api/agent-sessions/:id', agentRoute(async (req, res) => {
     res.json(session);
 }));
 
+// Conversas anteriores de um agente numa pasta, sem abrir conversa (tela de escolha do menu Agente)
+app.get(BASE_PATH + '/api/agent-history', agentRoute(async (req, res) => {
+    const agent = String(req.query.agent || '');
+    const def = agentGateway.agents[agent];
+    if (!def || def.terminalOnly) return res.status(400).json({ error: 'Agente desconhecido.' });
+    const cwd = path.resolve(HOME_DIR, String(req.query.cwd || '~').replace(/^~(?=$|[\\/])/, HOME_DIR));
+    let isDir = false;
+    try { isDir = fs.statSync(cwd).isDirectory(); } catch { /* não existe */ }
+    if (!isDir) return res.status(400).json({ error: 'Pasta não encontrada.' });
+    res.json({ sessions: await agentGateway.listHistory({ agent, cwd }) });
+}));
+
 app.get(BASE_PATH + '/api/agent-sessions/:id/history', agentRoute(async (req, res) => {
     const session = agentGateway.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
