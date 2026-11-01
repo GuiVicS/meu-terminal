@@ -270,10 +270,13 @@ export default class ConversationDrawer {
         if (!agent) { this.list.innerHTML = ''; return; }
         const q = this.query.trim().toLowerCase();
         // Conversas abertas deste agente (cada uma pode estar rodando) + histórico do agente
-        const opens = this.open_.filter(o => o.status !== 'closed');
-        const byAcp = new Map(opens.filter(o => o.acpSessionId).map(o => [o.acpSessionId, o]));
         const history = this.history || [];
         const known = new Set(history.map(h => h.sessionId));
+        // Parada e fora do histórico do agente (nunca recebeu mensagem, ou foi apagada): não dá para
+        // retomar, então não aparece. A desta aba sempre aparece.
+        const opens = this.open_.filter(o => o.status !== 'closed' && (o.id === agent.agentSessionId || o.status !== 'stopped'
+            || (o.acpSessionId && (this.history === null || known.has(o.acpSessionId)))));
+        const byAcp = new Map(opens.filter(o => o.acpSessionId).map(o => [o.acpSessionId, o]));
         const rows = [
             ...opens.filter(o => !o.acpSessionId || !known.has(o.acpSessionId))
                 .map(o => ({ key: `open:${o.id}`, acp: o.acpSessionId, title: o.title || 'Nova conversa', open: o })),
@@ -303,12 +306,11 @@ export default class ConversationDrawer {
         if (this.history === null && !rows.length) {
             html += '<p class="cv-note">Carregando conversas…</p>';
         } else if (!recent.length) {
-            html += `<p class="cv-note">${q ? 'Nenhuma conversa encontrada.' : agent.hasHistory ? 'Nenhuma conversa anterior nesta pasta.' : 'Este agente não lista conversas anteriores.'}</p>`;
+            html += `<p class="cv-note">${q ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa anterior nesta pasta.'}</p>`;
         } else {
             html += `<ul class="cv-ul">${recent.slice(0, limit).map(row).join('')}</ul>`;
             if (recent.length > limit) html += `<button type="button" class="cv-more" data-cv="all">Ver tudo ${icon('chevronRight', 16)}</button>`;
         }
-        if (this.historyError) html += `<p class="cv-note">Histórico indisponível: ${esc(this.historyError)}</p>`;
         this.list.innerHTML = html;
     }
 
@@ -336,6 +338,10 @@ export default class ConversationDrawer {
         const wasCurrent = (r.open && r.open.id === agent.agentSessionId) || r.acp === agent.session?.acpSessionId;
         try {
             await agentApi('DELETE', `agent-history/${encodeURIComponent(agent.session.agent)}/${encodeURIComponent(r.acp)}`);
+            // Some da lista na hora (sem esperar o agente listar de novo)
+            if (this.history) this.history = this.history.filter(h => h.sessionId !== r.acp);
+            this.open_ = this.open_.filter(o => o.acpSessionId !== r.acp);
+            this.render();
             toast('Conversa apagada.');
             if (this.pins.includes(r.acp)) await this.togglePin(r.acp);
             agent.historyCache = null;

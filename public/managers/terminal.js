@@ -20,6 +20,7 @@ import { toast } from '../ui/toast.js';
 import { playChime } from '../ui/sound.js';
 import { isHandset } from '../ui/device.js';
 import { withLoading, KIND_LABEL } from '../ui/loading.js';
+import { openAgentPicker } from '../ui/agentPicker.js';
 
 const RECONCILE_DELAY = 250;
 
@@ -450,25 +451,49 @@ export default class TerminalManager {
         // Um Claude Code só: a rota (Direto / Economia / Outros modelos) é a padrão de Complementos e
         // se troca dentro da conversa (⋮ → Rota)
         // Só as IAs instaladas no servidor (detectadas sozinhas: scripts/agents/detect.js)
+        // Escolher o agente mostra as conversas dele; "Nova conversa" fica no topo dessa tela
         const items = agents.filter(a => a.installed).map(a => ({ label: a.label, icon: 'bot',
-            run: () => this.createAgent(a.id, folder) }));
+            run: () => this.pickAgentConversation(a, folder, anchor) }));
         showMenu(items.length ? items : [{ label: 'Nenhuma IA de terminal instalada', icon: 'info', disabled: true }],
         { anchor, label: `Nova conversa em ${folder}` });
     }
 
-    createAgent(agent, cwd, route) {
-        const label = this.agentList?.find?.(a => a.id === agent)?.label || 'o agente';
-        return withLoading(label, 'bot', () => this.createAgentNow(agent, cwd, route));
+    /** Conversas do agente (abertas e anteriores nesta pasta) com "Nova conversa" no topo. */
+    pickAgentConversation(agent, folder, anchor) {
+        openAgentPicker({
+            agent, folder, source: anchor,
+            onNew: () => this.createAgent(agent.id, folder),
+            onResume: (acpSessionId, title) => this.createAgent(agent.id, folder, undefined, { resumeAcpSessionId: acpSessionId, title }),
+            onOpen: session => withLoading(agent.label, 'bot', async () => {
+                // Aberta agora: mostra na aba do agente (uma aba por agente)
+                const tab = [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agent.id);
+                try {
+                    if (tab) {
+                        if (tab.agentSessionId !== session.id) await this.switchAgentTab(tab.id, session.id);
+                        this.activate(tab.id, { focus: true });
+                    } else if (session.acpSessionId) {
+                        await this.createAgentNow(agent.id, session.cwd || folder, undefined, { resumeAcpSessionId: session.acpSessionId, title: session.title });
+                    }
+                } catch (e) {
+                    toast(e.message, { tone: 'error' });
+                }
+            }),
+        });
     }
 
-    async createAgentNow(agent, cwd, route) {
+    createAgent(agent, cwd, route, extra = {}) {
+        const label = this.agentList?.find?.(a => a.id === agent)?.label || 'o agente';
+        return withLoading(label, 'bot', () => this.createAgentNow(agent, cwd, route, extra));
+    }
+
+    async createAgentNow(agent, cwd, route, extra = {}) {
         try {
             const r = await fetch(joinPath('api/agent-sessions'), {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
                 // Uma aba por agente: se já há uma deste agente, a conversa nova abre nela
-                body: JSON.stringify({ agent, cwd, route, afterId: this.activeId || undefined,
+                body: JSON.stringify({ agent, cwd, route, ...extra, afterId: this.activeId || undefined,
                     intoTab: [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agent)?.id }),
             });
             const data = await r.json().catch(() => ({}));
