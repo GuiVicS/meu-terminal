@@ -3853,3 +3853,24 @@ audio.fm-media { width: min(520px, 90%); }
         .nt-fbtn.on, .nt-fbtn[aria-pressed="true"] { color: var(--nt-accent); }
     }
 }
+
+/* ---------- Telas dos complementos dentro de Configurações (admin/addonPanels.js) ---------- */
+.ad-back { display: inline-flex; align-items: center; gap: 2px; height: 40px; padding: 0 10px 0 2px; color: var(--accent); font-size: 15px; font-weight: 500; }
+.ad-panel-title { margin-top: 4px; }
+.ad-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 8px 0 4px; }
+.ad-stat { display: flex; flex-direction: column; gap: 2px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.ad-stat-value { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.ad-stat-label { font-size: 12px; color: var(--text-3); }
+.ad-badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; background: var(--surface-2); color: var(--text-2); vertical-align: middle; }
+.ad-badge.ok { background: color-mix(in srgb, var(--success, #22c55e) 18%, transparent); color: var(--success, #22c55e); }
+.ad-badge.err { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
+.ad-callout { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius); font-size: 13.5px; }
+.ad-callout small { display: block; margin-top: 4px; color: var(--text-3); }
+.ad-search { width: 100%; height: 40px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.ad-searchrow { display: flex; gap: 8px; margin: 10px 0; }
+.ad-pick { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 44px; padding: 0 12px; border-radius: var(--radius); color: var(--text); text-align: left; }
+.ad-pick:hover, .ad-pick:active { background: var(--surface-2); }
+.ad-add { display: grid; gap: 8px; }
+.ad-add input { height: 44px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+.ad-models { flex: 1 1 100%; }
+.ad-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

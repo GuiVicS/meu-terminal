@@ -87,7 +87,10 @@ const ADDONS = [
         // OMNIROUTE_SERVER_HOST: sem ele escuta em 0.0.0.0. REQUIRE_API_KEY: as abas de navegador
         // rodam neste servidor, então um site aberto nelas alcançaria o localhost sem chave.
         // A memória dele já vem desligada (a memória é do Claude Mem).
-        env: home => ({ DATA_DIR: `${home}/.omniroute`, OMNIROUTE_SERVER_HOST: '127.0.0.1', REQUIRE_API_KEY: 'true', OMNIROUTE_MEMORY_MB: '768' }),
+        // EXPOSE_CC_DISCOVERY_ALIASES: os modelos de outros provedores (GPT/Codex, GLM, Kimi...)
+        // aparecem no /model do Claude Code, que só lista ids que começam com "claude".
+        env: home => ({ DATA_DIR: `${home}/.omniroute`, OMNIROUTE_SERVER_HOST: '127.0.0.1', REQUIRE_API_KEY: 'true',
+            OMNIROUTE_MEMORY_MB: '768', EXPOSE_CC_DISCOVERY_ALIASES: 'true' }),
         port: 20128,
         health: '/api/health',
         panel: 'http://localhost:20128',
@@ -318,8 +321,6 @@ class Addons {
                 const p = st.services?.[a.id] || {};
                 out.push({ id: a.id, kind: a.kind, label: a.label, port: a.port, panel: a.panel || null,
                     enabled: !!p.enabled, hasApiKey: !!p.apiKey, model: p.model || null,
-                    // Mostrada só na tela de Complementos (atrás do login do MeuTerminal)
-                    panelPassword: p.secrets?.INITIAL_PASSWORD || null,
                     ...(services ? await services.status(a.id) : {}) });
             }
         }
