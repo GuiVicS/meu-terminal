@@ -68,6 +68,12 @@ class OmniRouteBridge {
         this.cookie = `auth_token=${m[1]}`;
     }
 
+    /** Valor do cookie de sessão do painel (entra de novo a cada chamada: sempre válido). */
+    async sessionToken() {
+        await this.login();
+        return this.cookie.slice('auth_token='.length);
+    }
+
     /** Chamada à API de gerenciamento, entrando (de novo) quando a sessão expira. */
     async api(method, route, body) {
         if (!this.cookie) await this.login();

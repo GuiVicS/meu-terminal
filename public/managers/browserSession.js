@@ -45,7 +45,11 @@ export default class BrowserSession {
      * @param {object} opts.settings - SettingsManager
      * @param {object} opts.hooks - callbacks into the workspace
      */
-    constructor({ row, settings, hooks }) {
+    /**
+     * @param {string} [opts.panel] - painel completo de um complemento (Configurações): conecta com
+     *   ?panel=<id> em vez de uma aba, e esconde o que é de aba (endereço, portas, ao vivo)
+     */
+    constructor({ row, settings, hooks, panel = null }) {
         this.kind = 'browser';
         this.id = row.id;
         this.name = row.name;
@@ -55,6 +59,7 @@ export default class BrowserSession {
         this.title = '';
         this.settings = settings;
         this.hooks = hooks;
+        this.embedPanel = panel;
 
         // Fields the rest of the app reads from terminal sessions
         this.state = STATE.CONNECTING;
@@ -97,6 +102,7 @@ export default class BrowserSession {
 
     mount(parent) {
         parent.appendChild(this.panel);
+        if (this.embedPanel) this.panel.classList.add('browser-embedded');
         this.panel.innerHTML = `
             <div class="browser-toolbar">
                 <button type="button" class="icon-btn" data-act="back" aria-label="Voltar" disabled>${icon('chevronLeft', 18)}</button>
@@ -210,7 +216,7 @@ export default class BrowserSession {
         const basePath = window.appConfig?.basePath || '';
         const v = this.computeViewport();
         const query = new URLSearchParams({
-            session: this.id,
+            ...(this.embedPanel ? { panel: this.embedPanel } : { session: this.id }),
             width: String(v.width), height: String(v.height), dpr: String(v.dpr),
             mobile: v.mobile ? '1' : '0', quality: String(v.quality), visible: this.active ? '1' : '0',
         });

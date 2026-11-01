@@ -10,6 +10,9 @@ import { toast } from '../ui/toast.js';
 import { api } from './remote.js';
 import { PANELS, esc } from './addonPanels.js';
 
+// Complementos com painel completo (o do próprio serviço, desenhado pelo navegador do servidor)
+const FULL_PANEL = new Set(['omniroute', 'claude-mem', 'headroom']);
+
 const APPS = {
     'claude-code-setup': {
         icon: 'lightbulb', color: 'yellow',
@@ -124,6 +127,12 @@ export function mountAddonsSection(section) {
             <p class="setting-help ad-about">${esc(app.about || '')}</p>
             ${app.howto ? `<ul class="ad-howto">${app.howto.map(h => `<li>${esc(h)}</li>`).join('')}</ul>` : ''}
             ${a.lastError && a.log?.length ? `<details class="ad-log"><summary>Log</summary><pre class="rm-output">${esc(a.log.join('\n'))}</pre></details>` : ''}
+            ${FULL_PANEL.has(a.id) && ready ? `
+            <div class="ad-full">
+                <button type="button" class="btn btn-ghost ad-full-toggle" data-full>${icon('maximize', 16)} Abrir painel completo</button>
+                <p class="setting-help">O painel inteiro do ${esc(a.label)}, com todas as opções, aqui mesmo: sem navegador e sem outro login.</p>
+                <div class="ad-full-view" hidden></div>
+            </div>` : ''}
             ${PANELS[a.id] ? (ready ? '<div class="ad-panel"></div>'
                 : `<p class="ad-off">${a.kind === 'service' ? `Ligue o ${esc(a.label)} para ver a tela dele.` : 'O plugin não está instalado.'}</p>`) : ''}`;
         const panel = section.querySelector('.ad-panel');
@@ -136,8 +145,46 @@ export function mountAddonsSection(section) {
         }
     }
 
+    // ---------- painel completo ----------
+    let full = null; // BrowserSession embutido
+    function closeFull() {
+        full?.dispose();
+        full = null;
+    }
+    async function toggleFull() {
+        const box = section.querySelector('.ad-full-view');
+        const btn = section.querySelector('[data-full]');
+        if (!box) return;
+        if (full) {
+            closeFull();
+            box.hidden = true;
+            box.innerHTML = '';
+            btn.innerHTML = `${icon('maximize', 16)} Abrir painel completo`;
+            return;
+        }
+        const { default: BrowserSession } = await import('../managers/browserSession.js');
+        const noop = () => {};
+        box.hidden = false;
+        btn.innerHTML = `${icon('minimize', 16)} Fechar painel completo`;
+        full = new BrowserSession({
+            row: { id: `addon-panel-${open}`, name: open, url: '' },
+            panel: open,
+            settings: null,
+            hooks: {
+                onAuthRequired: () => { window.location.href = `${(window.appConfig?.basePath || '').replace(/\/+$/, '')}/login`; },
+                onFocusChange: noop, onInfo: noop, onRemoved: noop, onServerMessage: noop,
+                onStateChange: noop, onWorkspaceChanged: noop, suggestFolder: () => '~',
+            },
+        });
+        full.mount(box);
+        full.setActive(true);
+        full.connect();
+        box.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    }
+
     function render() {
         if (!state) return;
+        closeFull();
         if (!state.enabled) {
             section.innerHTML = '<h3 class="section-label">Complementos</h3><p class="setting-help">Indisponível no modo demo.</p>';
             return;
@@ -166,9 +213,12 @@ export function mountAddonsSection(section) {
             return;
         }
         if (e.target.closest('[data-back]')) {
+            closeFull();
             open = null;
             refresh();
+            return;
         }
+        if (e.target.closest('[data-full]')) toggleFull();
     });
 
     refresh();

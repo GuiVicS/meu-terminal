@@ -3946,3 +3946,19 @@ audio.fm-media { width: min(520px, 90%); }
     .sheet-page .ag-sheet { transition: opacity 180ms ease; transform: none; opacity: 0; }
     .sheet-page.open .ag-sheet { opacity: 1; }
 }
+
+/* ---------- Painel completo de um complemento (Configurações → Complementos → app) ----------
+   O componente das abas de navegador, embutido num quadro: sem endereço, portas nem "ao vivo". */
+.ad-full { margin: 6px 0 14px; }
+.ad-full-toggle { width: 100%; justify-content: center; height: 46px; }
+.ad-full-view {
+    position: relative; height: min(76dvh, 820px); margin-top: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg);
+}
+.ad-full-view[hidden] { display: none; }
+.ad-full-view .browser-embedded { position: absolute; inset: 0; }
+.browser-embedded .browser-address input,
+.browser-embedded [data-act="ports"],
+.browser-embedded [data-act="live"],
+.browser-embedded [data-act="more"] { display: none !important; }
+.browser-embedded .browser-host { display: inline !important; }

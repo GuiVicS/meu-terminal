@@ -1051,6 +1051,28 @@ app.get(BASE_PATH + '/api/addons/:id/panel', async (req, res) => {
     }
 });
 
+// Painel completo de cada complemento: endereço local e como entrar sem login
+const ADDON_PANELS = {
+    omniroute: {
+        url: `http://localhost:${SERVICES.omniroute.port}/dashboard`,
+        prepare: async () => browsers.setCookie({ url: `http://localhost:${SERVICES.omniroute.port}`, name: 'auth_token', value: await bridges.omniroute.sessionToken() }),
+    },
+    'claude-mem': { url: 'http://localhost:37700/viewer', prepare: () => withMem(() => bridges['claude-mem'].panel()) },
+    headroom: { url: `http://localhost:${SERVICES.headroom.port}/dashboard` },
+};
+
+async function attachAddonPanel(ws, id, params) {
+    const def = ADDON_PANELS[id];
+    if (!def) throw new BridgeError('Complemento sem painel completo.', 404);
+    if (!browsers.available) throw new BridgeError('O navegador interno não está instalado no servidor.', 503);
+    await bridgeFor(id); // ligado? sobe o serviço se preciso
+    await def.prepare?.();
+    browsers.attach(ws, { id: `addon-panel-${id}`, url: def.url, cwd: null }, {
+        width: params.get('width'), height: params.get('height'), dpr: params.get('dpr'),
+        mobile: params.get('mobile') === '1', quality: params.get('quality'), visible: params.get('visible') !== '0',
+    });
+}
+
 // Só as ações que as telas usam (nada de repassar rotas arbitrárias)
 const BRIDGE_ACTIONS = {
     omniroute: {
@@ -1971,6 +1993,16 @@ wss.on('connection', (ws, req) => {
         const params = new URL(req.url, 'http://localhost').searchParams;
         const sessionId = params.get('session');
         const row = sessionId ? sessionStore.get(sessionId) : null;
+        const panel = params.get('panel');
+        if (panel) {
+            // Painel completo de um complemento (Configurações → Complementos): o Chromium do
+            // servidor abre o painel do serviço local já com a sessão feita; não vira aba.
+            attachAddonPanel(ws, panel, params).catch(e => {
+                if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'status', message: e.message }));
+                ws.close(1011, 'Painel indisponível');
+            });
+            return;
+        }
         if (row && row.status === 'open' && row.kind === 'browser') {
             debugLog('Attaching to browser tab', sessionId);
             // Also receives "tab list changed" notices, like terminal tabs
