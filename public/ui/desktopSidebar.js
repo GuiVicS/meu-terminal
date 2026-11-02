@@ -284,6 +284,17 @@ export default class DesktopSidebar {
         ], { anchor, label: 'Conversa' });
     }
 
+    /** Itens da paleta ⌘K: conversas deste agente e os apps. */
+    paletteItems() {
+        const convs = [...(this.rows?.values() || [])].map(r => ({
+            group: 'Conversas', label: r.title || 'Sem título', hint: r.open ? 'aberta' : when(r.at), icon: 'history', run: () => this.pick(r.key),
+        }));
+        const apps = APPS.filter(a => !a.flag || window.appConfig?.[a.flag]).map(a => ({
+            group: 'Apps', label: a.label, icon: a.icon, run: () => this.openApp(a.kind),
+        }));
+        return [...convs, ...apps];
+    }
+
     openApp(kind) {
         if (kind === 'notes') {
             const notes = [...this.ws.sessions.values()].find(x => x.kind === 'notes');

@@ -20,6 +20,7 @@ import { icon } from './ui/icons.js';
 import { sessionIcon } from './ui/sessionSheet.js';
 import ConversationDrawer, { MENU_ICON } from './ui/conversationDrawer.js';
 import DesktopSidebar from './ui/desktopSidebar.js';
+import { openCommandPalette } from './ui/commandPalette.js';
 import VibeForm from './ui/vibeForm.js';
 import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
@@ -310,7 +311,8 @@ document.addEventListener('DOMContentLoaded', async () => {
      * optionally straight at a section - going to /admin would reload every tab. Desktop: /admin.
      */
     function openSettings(section, source = menuBtn) {
-        if (isIphonePortrait()) {
+        // Celular: página inteira; desktop: janela estilo Ajustes do macOS (a mesma tela, CSS diferente)
+        if (isIphonePortrait() || document.documentElement.hasAttribute('data-desktop')) {
             openSettingsSheet({ settings, getSession: () => workspace?.active, commands, section, source });
             return;
         }
@@ -419,6 +421,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     ensureSidebar();
     window.addEventListener('resize', () => requestAnimationFrame(ensureSidebar));
     const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+    const openPalette = () => openCommandPalette(() => {
+        const actions = [
+            { group: 'Ações', label: 'Nova conversa', icon: 'plus', hint: mac ? '⌘⇧O' : 'Ctrl+Alt+J', run: () => sidebar.newConversation() },
+            { group: 'Ações', label: 'Ajustes', icon: 'settings', run: () => openSettings() },
+            { group: 'Ações', label: 'Mostrar/recolher a barra lateral', icon: 'panelLeft', hint: mac ? '⌘B' : 'Ctrl+Alt+L', run: () => sidebar.toggle() },
+            { group: 'Ações', label: 'Atalhos de teclado', icon: 'keyboard', run: () => shortcutsDialog.open() },
+        ];
+        const tabs = [...workspace.sessions.values()].map(x => ({
+            group: 'Abas abertas', label: x.name, hint: x.cwd || '', icon: x.kind === 'agent' ? 'bot' : x.kind === 'files' ? 'folder' : x.kind === 'notes' ? 'notes' : x.kind === 'browser' ? 'globe' : 'terminal',
+            run: () => workspace.activate(x.id, { focus: true }),
+        }));
+        return [...actions, ...tabs, ...sidebar.paletteItems()];
+    });
     document.addEventListener('keydown', e => {
         if (!sidebar || !document.documentElement.hasAttribute('data-desktop')) return;
         // Mac: ⌘B, ⌘⇧O, ⌘K, ⌘\ · Windows/Linux: Ctrl+Alt+L/J/K/\ (Ctrl+B sozinho é do terminal)
@@ -428,8 +443,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         let run = null;
         if ((mac && k === 'b' && !e.shiftKey) || (!mac && k === 'l')) run = () => sidebar.toggle();
         else if ((mac && k === 'o' && e.shiftKey) || (!mac && k === 'j')) run = () => sidebar.newConversation();
-        else if (k === 'k') run = () => sidebar.focusSearch();
+        else if (k === 'k') run = openPalette;
         else if (e.key === '\\') run = () => workspace.active?.togglePanel?.();
+        else if ((mac && k === 'l') || (!mac && k === 'm')) run = () => workspace.active?.focusComposer?.();
+        else if ((mac && k === 'c' && e.shiftKey) || (!mac && k === 'c' && e.shiftKey)) {
+            run = () => {
+                const text = workspace.active?.lastAnswerText?.();
+                if (!text) return;
+                navigator.clipboard?.writeText(text).then(() => toast('Resposta copiada.')).catch(() => {});
+            };
+        }
         if (!run) return;
         e.preventDefault();
         e.stopPropagation();

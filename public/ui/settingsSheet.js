@@ -75,7 +75,10 @@ export function openSettingsSheet({ settings, getSession, commands, section, sou
     sections = mountSettingsSections(page, { settings, getSession, commands });
     sections.refresh();
 
+    // Desktop: lista à esquerda sempre visível e a seção à direita (CSS em styles.css)
+    const desktop = document.documentElement.hasAttribute('data-desktop');
     const showIndex = () => {
+        if (desktop) return showSection('interface');
         page.hidden = true;
         index.hidden = false;
         sheet.setHead('Configurações');
@@ -92,9 +95,10 @@ export function openSettingsSheet({ settings, getSession, commands, section, sou
             meta.mount(el).catch(e => { el.textContent = e.message; });
         }
         page.querySelectorAll('[data-page]').forEach(el => { el.hidden = el.dataset.page !== slug; });
-        index.hidden = true;
+        index.hidden = !desktop;
         page.hidden = false;
-        sheet.setHead(meta.label, { label: 'Configurações', run: showIndex });
+        index.querySelectorAll('button.st-row').forEach(r => r.classList.toggle('is-current', r.dataset.slug === slug));
+        sheet.setHead(desktop ? 'Ajustes' : meta.label, desktop ? null : { label: 'Configurações', run: showIndex });
         sheet.sheet.scrollTop = 0;
     };
     index.addEventListener('click', e => {
@@ -102,5 +106,6 @@ export function openSettingsSheet({ settings, getSession, commands, section, sou
         if (row) showSection(row.dataset.slug);
     });
     if (section) showSection(section);
+    else if (desktop) showSection('interface');
     return sheet;
 }

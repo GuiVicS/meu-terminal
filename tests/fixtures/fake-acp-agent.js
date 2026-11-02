@@ -109,6 +109,19 @@ function playTurn(text) {
     if (text.includes('crash')) process.exit(7);
     if (text.includes('markdown')) return playRich();
     // "limite": responde como o Claude Code quando o limite da conta acaba (texto sintético)
+    // "varias": ferramentas seguidas, sem permissão entre elas (grupo no desktop)
+    if (text.includes('varias')) {
+        const tools = [
+            ['v1', 'Read a.txt', 'read', {}], ['v2', 'Read b.txt', 'read', {}], ['v3', 'ls', 'execute', { rawInput: { command: 'ls' } }],
+            ['v4', 'Edit nota.txt', 'edit', { content: [{ type: 'diff', path: '/root/nota.txt', oldText: null, newText: 'oi' }] }],
+        ];
+        for (const [id, title, kind, extra] of tools) {
+            update({ sessionUpdate: 'tool_call', toolCallId: id, title, kind, status: 'pending', ...extra });
+            update({ sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed', ...extra });
+        }
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Pronto.' }, messageId: 'vm' });
+        return finishTurn('end_turn');
+    }
     if (text.includes('limite')) {
         update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: "You've hit your 5-hour limit · resets 12:30am" }, messageId: 'lim' });
         return finishTurn('end_turn');
