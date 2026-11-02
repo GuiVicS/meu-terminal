@@ -137,8 +137,10 @@ export default class Conversation {
      * @param {(permissionId: string, optionId: string|null) => void} opts.onPermission
      * @param {(path: string) => void} [opts.onOpenFile]
      */
-    constructor(log, { cwd, onPermission, onOpenFile }) {
+    constructor(log, { cwd, onPermission, onOpenFile, onRetry = null }) {
         this.log = log;
+        this.onRetry = onRetry;
+        this.lastUserText = '';
         this.cwd = cwd;
         this.onPermission = onPermission;
         this.onOpenFile = onOpenFile;
@@ -164,6 +166,12 @@ export default class Conversation {
         const result = fn();
         if (stick) this.log.scrollTop = this.log.scrollHeight;
         return result;
+    }
+
+    /** Texto da última resposta (o mesmo do botão Copiar). */
+    lastAnswerText() {
+        const bars = this.log.querySelectorAll('.ag-msg-actions');
+        return bars.length ? COPY_TEXT.get(bars[bars.length - 1]) || '' : '';
     }
 
     // ---------- structure ----------
@@ -236,6 +244,7 @@ export default class Conversation {
             case 'message.user':
                 this.endStreams();
                 this.turn = null; // each user message starts a new turn
+                this.lastUserText = d.text || '';
                 this.add(`${d.images && d.images.length ? (d.images.some(i => i.url) ? mediaHtml(d.images) : `<div class="ag-attach">${icon('fileImage', 14)} ${d.images.length} imagem(ns)</div>`) : ''}${esc(d.text)}`,
                     'ag-user');
                 break;
@@ -258,7 +267,7 @@ export default class Conversation {
                 this.endStreams();
                 // Under the answer: copy it (as Markdown, like the chat apps)
                 if (last && last.text.trim()) {
-                    const bar = this.add(`<button type="button" class="ag-msg-btn" data-msg-copy aria-label="Copiar resposta" title="Copiar resposta">${icon('copy', 14)}<span>Copiar</span></button>`, 'ag-msg-actions');
+                    const bar = this.add(`<button type="button" class="ag-msg-btn" data-msg-copy aria-label="Copiar resposta" title="Copiar resposta">${icon('copy', 14)}<span>Copiar</span></button><button type="button" class="ag-msg-btn ag-msg-retry" data-msg-retry aria-label="Refazer" title="Enviar a mesma mensagem de novo">${icon('refresh', 14)}<span>Refazer</span></button>`, 'ag-msg-actions');
                     COPY_TEXT.set(bar, last.text.trim());
                 }
                 const shown = last ? imagePathsIn(last.text) : [];
@@ -325,6 +334,45 @@ export default class Conversation {
         return parent ? parent.el.querySelector('.ag-sub-children') : null;
     }
 
+    /** Desktop: ferramentas seguidas ficam num grupo ("Leu 4 arquivos, rodou 2 comandos"); celular: como antes. */
+    toolHome(kind) {
+        const turn = this.ensureTurn();
+        if (kind === 'task' || !document.documentElement.hasAttribute('data-desktop')) return turn;
+        const last = turn.lastElementChild;
+        if (last?.classList.contains('ag-tool-group')) return last.querySelector('.ag-group-body');
+        const group = document.createElement('div');
+        group.className = 'ag-tool-group is-open';
+        group.innerHTML = `<button type="button" class="ag-group-head" aria-expanded="true">
+                <span class="ag-group-state"></span><span class="ag-group-text"></span>${icon('chevronRight', 14)}
+            </button><div class="ag-group-body"></div>`;
+        turn.appendChild(group);
+        return group.querySelector('.ag-group-body');
+    }
+
+    /** Resumo do grupo; aberto enquanto trabalha ou se falhou, recolhe sozinho quando termina bem. */
+    updateGroup(group) {
+        if (!group) return;
+        const cards = [...group.querySelector('.ag-group-body').children].filter(c => c.classList.contains('ag-tool'));
+        group.dataset.count = String(cards.length);
+        const count = kinds => cards.filter(c => kinds.some(k => c.classList.contains(`kind-${k}`))).length;
+        const plural = (n, one, many) => (n === 1 ? one : many.replace('#', n));
+        const bits = [];
+        const read = count(['read']); if (read) bits.push(plural(read, 'leu 1 arquivo', 'leu # arquivos'));
+        const edit = count(['edit', 'write']); if (edit) bits.push(plural(edit, 'editou 1 arquivo', 'editou # arquivos'));
+        const bash = count(['bash']); if (bash) bits.push(plural(bash, 'rodou 1 comando', 'rodou # comandos'));
+        const search = count(['search']); if (search) bits.push(plural(search, 'fez 1 busca', 'fez # buscas'));
+        const others = cards.length - read - edit - bash - search;
+        if (others) bits.push(plural(others, 'usou 1 ferramenta', 'usou # ferramentas'));
+        const text = bits.join(', ');
+        group.querySelector('.ag-group-text').textContent = text ? text[0].toUpperCase() + text.slice(1) : '';
+        const running = cards.some(c => c.dataset.status === 'running');
+        const failed = cards.some(c => c.dataset.status === 'failed');
+        group.querySelector('.ag-group-state').innerHTML = running ? icon('loader', 14) : failed ? icon('x', 14) : icon('check', 14);
+        group.dataset.status = running ? 'running' : failed ? 'failed' : 'completed';
+        if (!group.dataset.user) group.classList.toggle('is-open', running || failed);
+        group.querySelector('.ag-group-head').setAttribute('aria-expanded', String(group.classList.contains('is-open')));
+    }
+
     renderTool(type, d) {
         let tool = this.tools.get(d.toolId);
         if (!tool) {
@@ -345,7 +393,7 @@ export default class Conversation {
             tool = { el, data: { kind }, parentToolId: d.parentToolId || null };
             this.tools.set(d.toolId, tool);
             const parent = this.toolParent(d.parentToolId);
-            this.keepBottom(() => (parent || this.ensureTurn()).appendChild(el));
+            this.keepBottom(() => (parent || this.toolHome(kind)).appendChild(el));
             // Subagents stay open (their tools stream inside); edits open on wide screens
             if (kind === 'task' || (!coarse() && (kind === 'edit' || kind === 'write'))) el.open = true;
         }
@@ -365,6 +413,7 @@ export default class Conversation {
         const state = el.querySelector('.ag-tool-state');
         const status = d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled' ? d.status : 'running';
         el.dataset.status = status;
+        this.updateGroup(el.closest('.ag-tool-group'));
         state.innerHTML = status === 'running' ? icon('loader', 14) : status === 'completed' ? icon('check', 14) : icon('x', 14);
         state.setAttribute('aria-label', status === 'running' ? 'Rodando' : status === 'completed' ? 'Concluído' : 'Falhou');
 
@@ -494,6 +543,18 @@ export default class Conversation {
         const msgCopy = e.target.closest('[data-msg-copy]');
         if (msgCopy) {
             copyText(COPY_TEXT.get(msgCopy.closest('.ag-msg-actions')) || '').then(ok => flashCopied(msgCopy, ok));
+            return;
+        }
+        if (e.target.closest('[data-msg-retry]')) {
+            if (this.lastUserText) this.onRetry?.(this.lastUserText);
+            return;
+        }
+        const groupHead = e.target.closest('.ag-group-head');
+        if (groupHead) {
+            const group = groupHead.closest('.ag-tool-group');
+            group.classList.toggle('is-open');
+            group.dataset.user = '1'; // a pessoa decidiu: não abre/fecha mais sozinho
+            groupHead.setAttribute('aria-expanded', String(group.classList.contains('is-open')));
             return;
         }
         const cmdCopy = e.target.closest('[data-copy-cmd]');

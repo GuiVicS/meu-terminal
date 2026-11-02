@@ -19,10 +19,13 @@ const CONVERSATION_EVENT = /^(message\.|tool\.|thought\.|plan\.|permission\.|sub
 import { isIphonePortrait } from '../ui/device.js';
 import { haptic } from '../ui/haptics.js';
 import { keepScreenOn } from '../ui/permissions.js';
+import { serverFileUrl } from '../ui/filePicker.js';
 
 const MAX_RECONNECT_ATTEMPTS = 8;
 const CLOSE_SESSION_GONE = 4404;
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
+const PANEL_KEY = 'meuterminal-painel-agente';
+const PREVIEW_MAX = 200000; // bytes mostrados na prévia de arquivo do painel
 const wide = () => window.matchMedia('(min-width: 1100px)').matches;
 
 const STATUS = {
@@ -93,6 +96,11 @@ export default class AgentSession {
         this.disposed = false;
         this.timers = new Set();
         this.panelOpen = null;    // null = automatic (open on wide screens)
+        // Desktop: o painel lembra se ficou aberto ou fechado
+        if (document.documentElement.hasAttribute('data-desktop')) {
+            const saved = localStorage.getItem(PANEL_KEY);
+            if (saved === '1' || saved === '0') this.panelOpen = saved === '1';
+        }
 
         this.panel = document.createElement('div');
         this.panel.className = 'terminal-panel agent-panel';
@@ -156,6 +164,7 @@ export default class AgentSession {
             cwd: () => this.cwd,
             onPermission: (permissionId, optionId) => this.answerPermission(permissionId, optionId),
             onOpenFile: path => this.openFile(path),
+            onRetry: text => this.sendPrompt({ text, images: [] }),
         });
         this.composer = new Composer(q('.ag-composer'), {
             cwd: () => this.cwd,
@@ -173,6 +182,7 @@ export default class AgentSession {
             onOpenFile: path => this.openFile(path),
             onCommand: name => this.composer.insert(`/${name} `),
             onShowTool: toolId => this.showTool(toolId),
+            onOpenInFiles: path => this.openInFiles(path),
         });
         this.side.render();
 
@@ -195,6 +205,28 @@ export default class AgentSession {
             const b = e.target.closest('[data-option]');
             if (b) this.answerPermission(b.dataset.perm, b.dataset.option);
             else if (e.target.closest('[data-goto]')) this.el.log.querySelector('.ag-perm:not(.answered)')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+        // Arrastar arquivos para qualquer parte da conversa
+        let dragDepth = 0;
+        const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+        this.panel.addEventListener('dragenter', e => { if (hasFiles(e)) { dragDepth++; this.panel.classList.add('ag-dropping'); } });
+        this.panel.addEventListener('dragleave', e => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; this.panel.classList.remove('ag-dropping'); } });
+        this.panel.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+        this.panel.addEventListener('drop', e => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            dragDepth = 0;
+            this.panel.classList.remove('ag-dropping');
+            this.composer.addDeviceFiles([...e.dataTransfer.files]);
+            this.composer.focus();
+        });
+        // Desktop: seta para cima com o campo vazio traz a última mensagem para editar
+        this.panel.addEventListener('keydown', e => {
+            if (e.key !== 'ArrowUp' || !document.documentElement.hasAttribute('data-desktop')) return;
+            const field = e.target.closest?.('.ag-composer textarea');
+            if (!field || field.value || !this.conversation.lastUserText) return;
+            e.preventDefault();
+            this.composer.insert(this.conversation.lastUserText);
         });
         // Permissão pendente: Enter permite e Esc recusa (com o campo de mensagem vazio)
         this.panel.addEventListener('keydown', e => {
@@ -224,6 +256,12 @@ export default class AgentSession {
         this.connect();
         void this.checkVibeProject();
     }
+
+    /** ⌘L: foco no campo de mensagem. */
+    focusComposer() { this.composer.focus(); }
+
+    /** ⌘⇧C: copia a última resposta do agente. */
+    lastAnswerText() { return this.conversation.lastAnswerText(); }
 
     /** Only vibecoding tabs get the agent switcher and "Publicar" - a plain agent conversation has no project. */
     async checkVibeProject() {
@@ -337,6 +375,7 @@ export default class AgentSession {
 
     togglePanel() {
         this.panelOpen = !this.isPanelOpen();
+        if (document.documentElement.hasAttribute('data-desktop')) localStorage.setItem(PANEL_KEY, this.panelOpen ? '1' : '0');
         this.applyPanel();
     }
 
@@ -642,7 +681,34 @@ export default class AgentSession {
     }
 
     /** Opens the file's folder in an "Arquivos" tab. */
+    /** Desktop: o arquivo abre numa prévia no painel; o celular segue indo para os Arquivos. */
     openFile(path) {
+        if (!document.documentElement.hasAttribute('data-desktop')) return this.openInFiles(path);
+        return this.previewFile(path);
+    }
+
+    async previewFile(path) {
+        const norm = String(path).replace(/\\/g, '/');
+        const full = norm.startsWith('/') || norm.startsWith('~') ? norm : `${String(this.cwd || '').replace(/\/+$/, '')}/${norm}`;
+        this.panelOpen = true;
+        this.applyPanel();
+        this.side.setPreview({ path: full, text: null, note: 'Carregando…' });
+        try {
+            const r = await fetch(serverFileUrl(full), { credentials: 'same-origin', headers: { Range: `bytes=0-${PREVIEW_MAX - 1}` } });
+            if (!r.ok) throw new Error(`Erro ${r.status}`);
+            const type = r.headers.get('content-type') || '';
+            if (/^(image|video|audio)\/|octet-stream|pdf|zip/.test(type)) {
+                this.side.setPreview({ path: full, text: null, note: 'Sem prévia para este tipo de arquivo. Abra nos Arquivos.' });
+                return;
+            }
+            const text = (await r.text()).slice(0, PREVIEW_MAX); // o servidor pode ignorar o Range
+            this.side.setPreview({ path: full, text, note: text.length >= PREVIEW_MAX ? 'Mostrando o começo do arquivo.' : '' });
+        } catch (e) {
+            this.side.setPreview({ path: full, text: null, note: `Não deu para abrir: ${e.message}` });
+        }
+    }
+
+    openInFiles(path) {
         const norm = String(path).replace(/\\/g, '/');
         const folder = norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/')) || '/' : this.cwd;
         this.hooks.openTab({ kind: 'files', url: 'local', cwd: folder, afterId: this.id });
@@ -651,6 +717,7 @@ export default class AgentSession {
     showTool(toolId) {
         const card = this.el.log.querySelector(`[data-tool-id="${CSS.escape(toolId)}"]`);
         if (!card) return;
+        card.closest('.ag-tool-group')?.classList.add('is-open');
         card.open = true;
         card.scrollIntoView({ block: 'center', behavior: 'smooth' });
         card.classList.add('flash');

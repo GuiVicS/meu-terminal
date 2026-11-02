@@ -1018,7 +1018,10 @@ export default class TerminalManager {
             // Desktop (barra lateral, index.js)
             { keys: this.isMacOS ? '⌘B' : 'Ctrl+Alt+L', label: 'Mostrar/recolher a barra lateral' },
             { keys: this.isMacOS ? '⌘⇧O' : 'Ctrl+Alt+J', label: 'Nova conversa com o agente' },
-            { keys: this.isMacOS ? '⌘K' : 'Ctrl+Alt+K', label: 'Buscar conversas' },
+            { keys: this.isMacOS ? '⌘K' : 'Ctrl+Alt+K', label: 'Buscar tudo: conversas, abas, apps e ações' },
+            { keys: this.isMacOS ? '⌘L' : 'Ctrl+Alt+M', label: 'Ir para o campo de mensagem' },
+            { keys: this.isMacOS ? '⌘⇧C' : 'Ctrl+Alt+Shift+C', label: 'Copiar a última resposta do agente' },
+            { keys: '↑ (campo vazio)', label: 'Editar a última mensagem' },
             { keys: this.isMacOS ? '⌘\\' : 'Ctrl+Alt+\\', label: 'Painel do agente' },
             { keys: 'Enter / Esc', label: 'Permitir / recusar o pedido do agente (campo vazio)' },
         ];
