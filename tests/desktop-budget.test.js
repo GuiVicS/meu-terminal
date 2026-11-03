@@ -14,7 +14,7 @@ const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'ui', 'conversat
 // Só o que flutua. Vidro em cada mensagem (são muitas, e rolam) deixaria a rolagem pesada
 const FLOATING = ['.tabstrip', '.topbar-actions .icon-btn', '.ag-jump', '.dk-reopen', '.ns-close', '.ns-settings',
     '.browser-toolbar [data-act="back"]', '.browser-more', '.browser-pill', '.fm-toolbar', '.nt-toolbar',
-    '.ag-composer', '.ag-side', '.menu', '.toast', '.dialog', '.cp', '.search-bar', '.fm-selbar', '.fm-pastebar', '.nt-fbar',
+    '.ag-composer::before', '.ag-side', '.menu', '.toast', '.dialog', '.cp', '.search-bar', '.fm-selbar', '.fm-pastebar', '.nt-fbar',
     '.settings-sheet.sheet-page .ag-sheet', '.agent-picker .ag-sheet'];
 
 test('desktop com a cor original do app: nenhum gradiente próprio', () => {

@@ -101,7 +101,7 @@ export default class AgentSession {
         // Desktop: o painel lembra se ficou aberto ou fechado
         if (document.documentElement.hasAttribute('data-desktop')) {
             const saved = localStorage.getItem(PANEL_KEY);
-            if (saved === '1' || saved === '0') this.panelOpen = saved === '1';
+            this.panelOpen = saved === '1'; // fechado até você abrir: a conversa ocupa a tela
         }
 
         this.panel = document.createElement('div');

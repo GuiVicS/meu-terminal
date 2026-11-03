@@ -74,22 +74,20 @@ export default class DesktopSidebar {
         this.el.setAttribute('aria-label', 'Conversas e apps');
         this.el.innerHTML = `
             <div class="dk-side-head">
-                <button type="button" class="dk-icon" data-dk="toggle" aria-label="Recolher a barra lateral (⌘B)" title="Recolher (⌘B)">${icon('panelLeft', 18)}</button>
+                <button type="button" class="dk-icon" data-dk="toggle" aria-label="Recolher a barra lateral" title="Recolher a barra lateral">${icon('panelLeft', 18)}</button>
                 <span class="dk-brand">MeuTerminal</span>
+                <div class="dk-agents" role="tablist" aria-label="Agente"></div>
             </div>
-            <button type="button" class="dk-new" data-dk="new">${icon('plus', 17)}<span>Nova conversa</span><kbd>${/Mac/.test(navigator.platform) ? '⌘⇧O' : 'Ctrl+Alt+J'}</kbd></button>
-            <label class="dk-search">${icon('search', 15)}<input type="search" placeholder="Buscar conversas" aria-label="Buscar conversas" spellcheck="false"></label>
-            <div class="dk-agents" role="tablist" aria-label="Agente"></div>
-            <nav class="dk-scroll">
-                <div class="dk-convs"></div>
-                <h3 class="dk-section">Apps</h3>
-                <ul class="dk-ul dk-apps">${APPS.filter(a => !a.flag || window.appConfig?.[a.flag]).map(a => `
-                    <li><button type="button" class="dk-row" data-app="${a.kind}">
-                        <span class="dk-app-ic" style="--tc: var(--c-${a.color})">${icon(a.icon, 14)}</span><span class="dk-row-title">${a.label}</span>
-                    </button></li>`).join('')}</ul>
-            </nav>
+            <div class="dk-nav">
+                <button type="button" class="dk-new dk-row" data-dk="new">${icon('plus', 18)}<span class="dk-row-title">Nova conversa</span></button>
+                <label class="dk-search dk-row">${icon('search', 18)}<input type="search" placeholder="Buscar" aria-label="Buscar conversas" spellcheck="false"></label>
+                ${APPS.filter(a => !a.flag || window.appConfig?.[a.flag]).map(a => `
+                    <button type="button" class="dk-row" data-app="${a.kind}">${icon(a.icon, 18)}<span class="dk-row-title">${a.label}</span></button>`).join('')}
+                <button type="button" class="dk-row" data-dk="apps">${icon('grid', 18)}<span class="dk-row-title">Todos os apps</span></button>
+            </div>
+            <nav class="dk-scroll"><div class="dk-convs"></div></nav>
             <div class="dk-side-foot">
-                <button type="button" class="dk-row" data-dk="settings">${icon('settings', 17)}<span class="dk-row-title">Ajustes</span></button>
+                <button type="button" class="dk-row" data-dk="settings">${icon('settings', 18)}<span class="dk-row-title">Ajustes</span></button>
             </div>`;
         document.body.appendChild(this.el);
         this.reopen = document.createElement('button');
@@ -288,6 +286,7 @@ export default class DesktopSidebar {
             if (act === 'toggle') this.toggle();
             else if (act === 'new') this.newConversation();
             else if (act === 'settings') this.openSettings();
+            else if (act === 'apps') this.ws.openNewSessionPage();
             else if (act === 'retry') this.refresh();
             else if (act === 'folder') {
                 this.onlyFolder = !this.onlyFolder;
