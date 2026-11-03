@@ -4519,3 +4519,6 @@ audio.fm-media { width: min(520px, 90%); }
 /* Ir para o fim no terminal: o mesmo botão da conversa */
 .term-jump { position: absolute; z-index: 6; left: 50%; transform: translateX(-50%); bottom: 16px; }
 :root[data-desktop] .term-jump { bottom: 20px; }
+
+/* Ao subir a conversa: enquanto as mensagens anteriores chegam */
+.ag-older { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px; font-size: 12.5px; color: var(--text-muted); }

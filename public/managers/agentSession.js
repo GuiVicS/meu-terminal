@@ -25,6 +25,8 @@ import { loaderHtml } from '../ui/loading.js';
 
 const MAX_RECONNECT_ATTEMPTS = 8;
 const CLOSE_SESSION_GONE = 4404;
+// Começa a buscar as mensagens anteriores antes de chegar no topo: o bloco entra sem a pessoa ver o fim
+const OLDER_MARGIN = 1200;
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
 const PANEL_KEY = 'meuterminal-painel-agente';
 const PREVIEW_MAX = 200000; // bytes mostrados na prévia de arquivo do painel
@@ -244,10 +246,16 @@ export default class AgentSession {
         }, true);
         this.el.log.addEventListener('scroll', () => {
             this.el.jump.hidden = this.conversation.nearBottom();
+            if (this.el.log.scrollTop < OLDER_MARGIN) this.loadOlderIfNeeded();
         }, { passive: true });
         this.el.jump.addEventListener('click', () => {
             this.el.log.scrollTop = this.el.log.scrollHeight;
         });
+        // A área mudou de tamanho (painel abriu, campo cresceu): quem estava no fim continua no fim
+        this.logResize = new ResizeObserver(() => {
+            if (this.conversation.nearBottom()) this.el.log.scrollTop = this.el.log.scrollHeight;
+        });
+        this.logResize.observe(this.el.log);
         this.mediaQuery = window.matchMedia('(min-width: 1100px)');
         this.onMedia = () => this.applyPanel();
         this.mediaQuery.addEventListener('change', this.onMedia);
@@ -390,7 +398,8 @@ export default class AgentSession {
             }
             if (m.type === 'agent-session') this.applySession(m.session);
             else if (m.type === 'agent-event') this.applyEvent(m.event);
-            else if (m.type === 'agent-transcript') this.applyTranscript(m);
+            else if (m.type === 'agent-history') this.applyHistory(m);
+            else if (m.type === 'agent-side') this.applySide(m.events);
             else if (m.type === 'ready') this.onReady();
             else if (m.type === 'agent-missing') this.showMissing();
             else if (m.type === 'workspace') this.hooks.onWorkspaceChanged();
@@ -481,23 +490,108 @@ export default class AgentSession {
         this.hooks.onInfo?.(this);
     }
 
-    /** Conversa lida do arquivo do agente (nenhum agente ligado para isso). */
-    applyTranscript({ events, lastSeq = 0 }) {
+    /** A abertura: o fim da conversa de uma vez só, já na última mensagem. O resto vem ao subir. */
+    applyHistory({ transcript = false, meta = [], events = [], firstTurn = 0, lastSeq = 0, title = null }) {
+        if (this.lastSeq < lastSeq && this.historyShown) this.lastSeq = lastSeq;
+        if (this.historyShown) return;
+        this.historyShown = true;
+        if (title && this.session && !this.session.title) this.session.title = title; // da primeira mensagem, que pode não ter vindo
+        const activity = this.hasActivity; // o que já aconteceu não é novidade
+        this.conversation.batch(() => {
+            for (const e of meta) this.applyEvent(e, { silent: true });
+            for (const e of events) {
+                if (!transcript) {
+                    this.applyEvent(e);
+                    continue;
+                }
+                this.conversation.apply(e);
+                this.side.apply(e);
+            }
+        });
+        this.hasActivity = activity;
         if (this.lastSeq < lastSeq) this.lastSeq = lastSeq;
-        if (this.transcriptShown) return;
-        this.transcriptShown = true;
-        this.hasConversation = true;
-        this.el.log.querySelector('.ag-empty')?.remove();
-        this.panel.classList.remove('ag-is-empty');
-        for (const e of events) {
-            this.conversation.apply(e);
-            this.side.apply(e);
+        if (transcript && events.length || firstTurn > 0) {
+            this.hasConversation = true;
+            this.el.log.querySelector('.ag-empty')?.remove();
+            this.panel.classList.remove('ag-is-empty');
         }
-        this.side.render();
-        this.el.log.scrollTop = this.el.log.scrollHeight;
+        this.renderHead();
+        this.setOlder(firstTurn);
+        this.pinToEnd();
     }
 
-    applyEvent(event) {
+    /** Painel lateral: o resumo da conversa inteira, inclusive do que ainda não subiu. */
+    applySide(events = []) {
+        this.side.reset();
+        for (const e of events) this.side.apply(e);
+        this.scheduleSide();
+    }
+
+    /** Vai ao fim e confere de novo no quadro seguinte (a altura só assenta depois de desenhar). */
+    pinToEnd() {
+        const log = this.el.log;
+        log.scrollTop = log.scrollHeight;
+        requestAnimationFrame(() => {
+            log.scrollTop = log.scrollHeight;
+            this.loadOlderIfNeeded();
+        });
+    }
+
+    // ---------- turnos anteriores ----------
+
+    setOlder(firstTurn) {
+        this.olderCursor = firstTurn;
+        let mark = this.el.log.querySelector(':scope > .ag-older');
+        if (firstTurn <= 0) {
+            mark?.remove();
+            return;
+        }
+        if (!mark) {
+            mark = document.createElement('div');
+            mark.className = 'ag-older';
+            mark.addEventListener('click', e => {
+                if (e.target.closest('button')) this.loadOlderIfNeeded(true);
+            });
+            this.el.log.prepend(mark);
+        }
+        mark.innerHTML = `<span class="cv-spin"></span> Carregando mensagens anteriores…`;
+    }
+
+    /** Perto do topo (ou sem conteúdo para rolar): busca o bloco anterior. */
+    async loadOlderIfNeeded(force = false) {
+        const log = this.el.log;
+        if (this.loadingOlder || !(this.olderCursor > 0) || !this.session?.id) return false;
+        if (this.olderFailed && !force) return false;
+        if (!force && log.scrollTop > OLDER_MARGIN) return false;
+        this.loadingOlder = true;
+        this.olderFailed = false;
+        const mark = log.querySelector(':scope > .ag-older');
+        if (force && mark) mark.innerHTML = `<span class="cv-spin"></span> Carregando mensagens anteriores…`;
+        try {
+            const res = await fetch(`${basePath()}/api/agent-sessions/${encodeURIComponent(this.session.id)}/older?before=${this.olderCursor}`);
+            if (!res.ok) throw new Error(String(res.status));
+            const { events, firstTurn } = await res.json();
+            if (this.disposed) return false;
+            const nodes = this.conversation.renderOlder(events);
+            // Medido do fim: o que está na tela não sai do lugar quando entra conteúdo em cima
+            const fromEnd = log.scrollHeight - log.scrollTop;
+            if (mark) mark.after(...nodes);
+            else log.prepend(...nodes);
+            log.scrollTop = log.scrollHeight - fromEnd;
+            this.setOlder(firstTurn);
+            this.loadingOlder = false;
+            requestAnimationFrame(() => this.loadOlderIfNeeded());
+            return true;
+        } catch {
+            this.olderFailed = true;
+            if (mark) mark.innerHTML = 'Não deu para carregar as mensagens anteriores. <button type="button" class="ag-link">Tentar de novo</button>';
+            return false;
+        } finally {
+            this.loadingOlder = false;
+        }
+    }
+
+    applyEvent(event, { silent = false } = {}) {
         if (event.seq <= this.lastSeq) return; // replay overlap after a reconnect
         this.lastSeq = event.seq;
         // A tela vazia (saudação) só sai quando aparece conversa de verdade; avisos de sistema
@@ -508,9 +602,11 @@ export default class AgentSession {
             this.panel.classList.remove('ag-is-empty');
         }
         const d = event.data || {};
-        this.conversation.apply(event);
-        this.side.apply(event);
-        this.scheduleSide();
+        if (!silent) {
+            this.conversation.apply(event);
+            this.side.apply(event);
+            this.scheduleSide();
+        }
 
         switch (event.type) {
             case 'status':
@@ -706,12 +802,24 @@ export default class AgentSession {
         this.hooks.openTab({ kind: 'files', url: 'local', cwd: folder, afterId: this.id });
     }
 
-    showTool(toolId) {
-        const card = this.el.log.querySelector(`[data-tool-id="${CSS.escape(toolId)}"]`);
+    async showTool(toolId) {
+        const find = () => this.el.log.querySelector(`[data-tool-id="${CSS.escape(toolId)}"]`);
+        // O cartão pode estar num trecho que ainda não subiu
+        let loaded = false;
+        while (!find() && this.olderCursor > 0) {
+            if (!await this.loadOlderIfNeeded(true)) break;
+            loaded = true;
+        }
+        const card = find();
         if (!card) return;
         card.closest('.ag-tool-group')?.classList.add('is-open');
         card.open = true;
-        card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        // Veio de um trecho que acabou de entrar: vai direto (mais conteúdo ainda pode entrar em cima)
+        card.scrollIntoView({ block: 'center', behavior: loaded ? 'auto' : 'smooth' });
+        if (loaded) {
+            requestAnimationFrame(() => card.scrollIntoView({ block: 'center' }));
+            this.later(() => card.scrollIntoView({ block: 'center' }), 400);
+        }
         card.classList.add('flash');
         this.later(() => card.classList.remove('flash'), 1200);
         if (!wide()) {
@@ -898,6 +1006,7 @@ export default class AgentSession {
     /** Removes the view only; the agent keeps running on the server until the tab is closed. */
     dispose() {
         this.disposed = true;
+        this.logResize?.disconnect();
         this.timers.forEach(clearTimeout);
         this.timers.clear();
         this.mediaQuery?.removeEventListener('change', this.onMedia);

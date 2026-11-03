@@ -289,6 +289,41 @@ class AgentStore {
             .map(row => ({ sessionId, seq: row.seq, type: row.type, at: row.at, data: parseJson(row.data, {}) }));
     }
 
+    /** seq de cada mensagem do usuário, em ordem: é o que divide a conversa em turnos. */
+    turnStarts(sessionId) {
+        return this.db.prepare("SELECT seq FROM agent_events WHERE session_id = ? AND type = 'message.user' ORDER BY seq").all(sessionId).map(r => r.seq);
+    }
+
+    /** Eventos de `from` (inclusive; null = início) até `to` (exclusive; null = fim). */
+    eventsRange(sessionId, from = null, to = null) {
+        return this.db.prepare(`SELECT seq, type, at, data FROM agent_events
+            WHERE session_id = ? AND seq >= ? AND seq < ? ORDER BY seq`).all(sessionId, from ?? 0, to ?? Number.MAX_SAFE_INTEGER)
+            .map(row => ({ sessionId, seq: row.seq, type: row.type, at: row.at, data: parseJson(row.data, {}) }));
+    }
+
+    /** O último evento de cada tipo que não aparece na conversa, antes de `before`: o estado da tela. */
+    latestState(sessionId, before = null) {
+        return this.db.prepare(`SELECT MAX(seq) AS seq, type, at, data FROM agent_events
+            WHERE session_id = ? AND seq < ? AND type NOT LIKE 'message.%' AND type NOT LIKE 'tool.%' AND type NOT LIKE 'thought.%'
+              AND type NOT LIKE 'plan.%' AND type NOT LIKE 'permission.%' AND type NOT LIKE 'subagent.%'
+              AND type NOT IN ('notice', 'error', 'raw', 'session.end')
+            GROUP BY type ORDER BY seq`).all(sessionId, before ?? Number.MAX_SAFE_INTEGER)
+            .map(row => ({ sessionId, seq: row.seq, type: row.type, at: row.at, data: parseJson(row.data, {}) }));
+    }
+
+    /** Só os eventos que o painel lateral usa, já sem as ferramentas que não contam para ele. */
+    sideEvents(sessionId) {
+        return this.db.prepare(`SELECT seq, type, data FROM agent_events WHERE session_id = ? AND (
+                type IN ('plan.update', 'commands.update', 'usage.update') OR type LIKE 'subagent.%'
+                OR (type IN ('tool.start', 'tool.result') AND (json_type(data, '$.diffs') = 'array' OR json_extract(data, '$.parentToolId') IS NOT NULL))
+            ) ORDER BY seq`).all(sessionId)
+            .map(row => ({ seq: row.seq, type: row.type, data: parseJson(row.data, {}) }));
+    }
+
+    lastSeq(sessionId) {
+        return this.db.prepare('SELECT MAX(seq) AS seq FROM agent_events WHERE session_id = ?').get(sessionId)?.seq || 0;
+    }
+
     // ---------- permissions ----------
 
     insertPermission({ id, sessionId, request }) {

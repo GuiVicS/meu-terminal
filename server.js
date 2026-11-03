@@ -47,6 +47,7 @@ const { detectAgents, searchDirs } = require('./scripts/agents/detect');
 const { ClaudeAccounts } = require('./scripts/claude-accounts');
 const { listOpenCodeModels } = require('./scripts/opencode-login');
 const { readTranscript, listOnDisk, transcriptStamp } = require('./scripts/agents/transcript');
+const { turnRange, compactEvents, sideSummary, STATE_ONLY } = require('./scripts/agents/history');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
@@ -1445,6 +1446,18 @@ app.get(BASE_PATH + '/api/agent-history', agentRoute(async (req, res) => {
     res.json({ sessions: historyRows(agent, cwd) });
 }));
 
+// Os turnos anteriores a `before` (a conversa sobe aos poucos)
+app.get(BASE_PATH + '/api/agent-sessions/:id/older', agentRoute(async (req, res) => {
+    const session = agentGateway.get(req.params.id);
+    if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
+    const before = Math.max(0, Number(req.query.before) || 0);
+    const transcript = transcriptOf(session);
+    const events = transcript.length
+        ? (() => { const r = turnRange(userStarts(transcript), before); return { r, list: transcript.slice(r.from ?? 0, r.to ?? undefined) }; })()
+        : (() => { const r = turnRange(agentGateway.store.turnStarts(session.id), before); return { r, list: agentGateway.store.eventsRange(session.id, r.from, r.to) }; })();
+    res.json({ events: compactEvents(events.list.filter(e => !STATE_ONLY.test(e.type)), { keepState: false }), firstTurn: events.r.firstTurn });
+}));
+
 app.get(BASE_PATH + '/api/agent-sessions/:id/history', agentRoute(async (req, res) => {
     const session = agentGateway.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
@@ -1518,7 +1531,7 @@ function conversationContent(agent, acp) {
     const saved = store.getTranscript(agent, acp);
     const stamp = transcriptStamp(agent, acp, HOME_DIR);
     if (saved && (stamp === null || saved.stamp === stamp)) return saved.events;
-    const events = readTranscript(agent, acp, HOME_DIR);
+    const events = readTranscript(agent, acp, HOME_DIR, { limit: 20000 });
     if (events.length) store.saveTranscript(agent, acp, stamp, events);
     return events.length ? events : (saved?.events || []);
 }
@@ -1544,7 +1557,41 @@ function archiveOldConversations() {
 }
 setTimeout(archiveOldConversations, 5000).unref?.();
 
-const CONVERSATION_EVENT = /^(message\.|tool\.|thought\.|plan\.|permission\.|subagent\.)/;
+/** Conversa de fora do app: o texto vem do agente (ele escreve no mesmo arquivo ao continuar). */
+function transcriptOf(session) {
+    const stored = agentGateway.store.getSession(session.id);
+    if (!session.acpSessionId || !(stored.from_disk || !agentGateway.store.hasUserMessages(session.id))) return [];
+    return conversationContent(session.agent, session.acpSessionId);
+}
+
+const userStarts = events => events.reduce((all, e, i) => (e.type === 'message.user' && all.push(i), all), []);
+
+/** O fim da conversa, que é o que aparece ao abrir; o painel lateral recebe o resumo da conversa toda. */
+function openingHistory(session) {
+    const store = agentGateway.store;
+    const lastSeq = store.lastSeq(session.id);
+    const transcript = transcriptOf(session);
+    if (transcript.length) {
+        const { from, firstTurn } = turnRange(userStarts(transcript));
+        return {
+            history: { transcript: true, meta: store.latestState(session.id), events: compactEvents(transcript.slice(from ?? 0), { keepState: false }), firstTurn, lastSeq },
+            side: sideSummary(transcript),
+        };
+    }
+    const starts = store.turnStarts(session.id);
+    const { from, firstTurn } = turnRange(starts);
+    return {
+        history: {
+            transcript: false,
+            title: from !== null && !session.title ? String(store.eventsRange(session.id, starts[0], starts[0] + 1)[0]?.data?.text || '').slice(0, 60) : null,
+            meta: from === null ? [] : store.latestState(session.id, from),
+            events: compactEvents(store.eventsRange(session.id, from)),
+            firstTurn,
+            lastSeq,
+        },
+        side: sideSummary(store.sideEvents(session.id)),
+    };
+}
 
 function attachAgentTab(ws, row, since) {
     sessions.sockets.add(ws);
@@ -1565,17 +1612,12 @@ function attachAgentTab(ws, row, since) {
         return;
     }
     send({ type: 'agent-session', session });
-    const replay = agentGateway.events(row.url, since);
-    // Conversa de fora do app: o texto vem do arquivo do agente, só para mostrar, sem ligar nada.
-    // O agente escreve no mesmo arquivo ao continuar, então ele é a fonte da conversa inteira
-    const stored = agentGateway.store.getSession(row.url);
-    const transcript = session.acpSessionId && !since && (stored.from_disk || !agentGateway.store.hasUserMessages(row.url))
-        ? conversationContent(session.agent, session.acpSessionId) : [];
-    if (transcript.length) {
-        for (const event of replay) if (!CONVERSATION_EVENT.test(event.type)) send({ type: 'agent-event', event });
-        send({ type: 'agent-transcript', events: transcript, lastSeq: replay.length ? replay[replay.length - 1].seq : 0 });
+    if (since) {
+        for (const event of agentGateway.events(row.url, since)) send({ type: 'agent-event', event });
     } else {
-        for (const event of replay) send({ type: 'agent-event', event });
+        const { history, side } = openingHistory(session);
+        send({ type: 'agent-history', ...history });
+        send({ type: 'agent-side', events: side });
     }
     send({ type: 'ready' });
 }
