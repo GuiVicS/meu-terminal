@@ -27,6 +27,8 @@ const ICONS = {
     pin: 'pin',
     copy: 'copy',
     edit: 'pencil',
+    archive: 'archive',
+    power: 'power',
     history: 'rotate-ccw-clock',
     keyboard: 'keyboard',
     user: 'user',

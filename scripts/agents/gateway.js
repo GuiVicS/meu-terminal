@@ -328,6 +328,15 @@ class AgentGateway extends EventEmitter {
         return up;
     }
 
+    /** Mudar o nome de uma conversa: vale na lista e no cabeçalho de quem está com ela aberta. */
+    renameConversation(agent, acpSessionId, title) {
+        this.store.updateConversation(agent, acpSessionId, { title });
+        for (const id of this.store.sessionIdsForConversation(agent, acpSessionId)) {
+            this.store.updateSession(id, { title });
+            this.emitEvent(id, 'session.info', { title });
+        }
+    }
+
     /** Sem lugar: desliga o agente ocioso mais antigo; só recusa se todos estiverem trabalhando. */
     async makeRoom() {
         if (this.runtimes.size < this.maxSessions) return;
@@ -971,8 +980,10 @@ class AgentGateway extends EventEmitter {
             }
             if (type === 'session.info' && data.title) {
                 const title = String(data.title).slice(0, 120);
-                this.store.updateSession(sessionId, { title });
                 const row = this.store.getSession(sessionId);
+                // Nome dado pela pessoa fica: o título do agente não o substitui
+                if (row?.acp_session_id && this.store.getConversation(row.agent, row.acp_session_id)?.custom_title) continue;
+                this.store.updateSession(sessionId, { title });
                 if (row?.acp_session_id) this.store.saveConversation({ agent: row.agent, acpSessionId: row.acp_session_id, sessionId, title });
             }
             if (type === 'commands.update') this.enableCapability(sessionId, runtime, 'slashCommands');
@@ -1055,9 +1066,12 @@ class AgentGateway extends EventEmitter {
     emitEvent(sessionId, type, data) {
         const live = this.runtimes.get(sessionId);
         if (live) live.lastActive = Date.now();
-        if (type === 'message.user' || type === 'message.assistant.done') {
+        if (type === 'message.user' || type === 'message.assistant.done' || type === 'permission.request') {
             const r = this.store.getSession(sessionId);
-            if (r?.acp_session_id) this.store.touchConversation(r.agent, r.acp_session_id, type === 'message.user' ? data?.text : null);
+            if (r?.acp_session_id) {
+                if (type === 'message.user') this.store.touchConversation(r.agent, r.acp_session_id, data?.text);
+                else this.store.markUnread(r.agent, r.acp_session_id);
+            }
         }
         if (type === 'tool.start') {
             const rt = this.runtimes.get(sessionId);

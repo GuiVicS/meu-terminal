@@ -7,9 +7,9 @@
  */
 import { icon } from './icons.js';
 import { agentIconName } from './agent-logos.js';
-import { fetchConversations, conversationRows, deleteConversation } from '../agent/conversations.js';
+import { fetchConversations, conversationRows, updateConversation } from '../agent/conversations.js';
+import { conversationMenuItems } from '../agent/conversationMenu.js';
 import { showMenu } from './contextMenu.js';
-import { askConfirm } from './prompt.js';
 import { toast } from './toast.js';
 import { haptic } from './haptics.js';
 
@@ -65,6 +65,8 @@ export default class DesktopSidebar {
         this.historyFolder = null;
         this.onlyFolder = localStorage.getItem(FOLDER_KEY) === '1';
         this.error = null;
+        this.archived = null; // null = seção fechada
+        this.keepUnread = null;
         this.pins = [];
         this.query = '';
         this.sig = '';
@@ -157,10 +159,13 @@ export default class DesktopSidebar {
         const folder = this.onlyFolder ? this.ws.currentFolder() : null;
         this.historyFolder = this.ws.currentFolder();
         try {
-            const [list, pins] = await Promise.all([fetchConversations(agent, { cwd: folder }), api('GET', 'agent-pins').catch(() => null)]);
+            const [list, pins, archived] = await Promise.all([fetchConversations(agent, { cwd: folder }), api('GET', 'agent-pins').catch(() => null),
+                this.archived ? fetchConversations(agent, { cwd: folder, archived: true }) : null]);
             if (agent !== this.agent) return;
             if (pins) this.pins = pins.pins || [];
-            const sig = JSON.stringify([list, this.pins, folder]);
+            if (archived) this.archived = archived;
+            this.clearCurrentUnread(list);
+            const sig = JSON.stringify([list, this.pins, folder, archived]);
             this.error = null;
             this.history = list;
             if (sig !== this.sig) { this.sig = sig; this.render(); }
@@ -169,6 +174,17 @@ export default class DesktopSidebar {
             this.error = e.message;
             if (this.history === null) this.render();
         }
+    }
+
+    /** Você está olhando a conversa: ela deixa de ser não lida (com a janela à vista). */
+    clearCurrentUnread(list) {
+        const active = this.ws.active;
+        const acp = active?.kind === 'agent' ? active.session?.acpSessionId : null;
+        if (this.keepUnread && this.keepUnread !== acp) this.keepUnread = null;
+        const row = acp && list.find(c => c.acpSessionId === acp);
+        if (!row?.unread || this.keepUnread === acp || document.visibilityState !== 'visible') return;
+        row.unread = false;
+        updateConversation(this.agent, acp, { unread: false }).catch(() => {});
     }
 
     // ---------- desenho ----------
@@ -188,9 +204,10 @@ export default class DesktopSidebar {
         const match = r => !q || `${r.title || ''} ${r.cwd || ''}`.toLowerCase().includes(q);
         const pinned = rows.filter(r => r.acp && this.pins.includes(r.acp) && match(r));
         const recent = rows.filter(r => !(r.acp && this.pins.includes(r.acp)) && match(r));
-        const row = r => `<li><button type="button" class="dk-row dk-conv${r.current ? ' is-current' : ''}" data-key="${esc(r.key)}" ${r.current ? 'aria-current="true"' : ''} title="${esc(r.title || '')}${r.cwd ? ` · ${esc(r.cwd)}` : ''}">
+        const row = r => `<li><button type="button" class="dk-row dk-conv${r.current ? ' is-current' : ''}${r.unread ? ' is-unread' : ''}" data-key="${esc(r.key)}" ${r.current ? 'aria-current="true"' : ''} title="${esc(r.title || '')}${r.cwd ? ` · ${esc(r.cwd)}` : ''}">
                 <span class="dk-conv-ic">${r.working ? '<span class="cv-spin" aria-label="trabalhando"></span>' : BUBBLE}</span>
                 <span class="dk-row-title">${esc(r.title || 'Sem título')}</span>
+                ${r.unread || r.waiting ? `<span class="conv-unread${r.waiting ? ' is-waiting' : ''}" aria-label="${r.waiting ? 'esperando você' : 'não lida'}"></span>` : ''}
                 ${r.online ? '<span class="cv-online" aria-label="agente ligado"></span>' : `<span class="dk-when">${esc(when(r.at))}</span>`}
                 ${r.acp ? `<span class="dk-more" data-more aria-label="Mais ações" role="button">${icon('more', 15)}</span>` : ''}
             </button></li>`;
@@ -202,6 +219,14 @@ export default class DesktopSidebar {
         else if (this.history === null) html += `<p class="dk-note">Não deu para carregar. <button type="button" class="ag-link" data-dk="retry">Tentar de novo</button></p>`;
         else if (!recent.length) html += `<p class="dk-note">${q ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
         else html += `<ul class="dk-ul">${recent.slice(0, q ? 300 : 60).map(row).join('')}</ul>`;
+        if (this.archived) {
+            const rowsA = conversationRows(this.archived, null).map(r => ({ ...r, archived: true }));
+            rowsA.forEach(r => this.rows.set(r.key, r));
+            html += `<h3 class="dk-section">Arquivadas <button type="button" class="dk-filter" data-dk="archived">ocultar</button></h3>`
+                + (rowsA.length ? `<ul class="dk-ul">${rowsA.filter(match).map(row).join('')}</ul>` : '<p class="dk-note">Nenhuma conversa arquivada.</p>');
+        } else {
+            html += '<button type="button" class="dk-filter dk-archived" data-dk="archived">Ver arquivadas</button>';
+        }
         this.convs.innerHTML = html;
     }
 
@@ -228,28 +253,18 @@ export default class DesktopSidebar {
         this.render();
     }
 
-    async remove(key) {
-        const r = this.rows?.get(key);
-        if (!r?.acp) return;
-        if (!await askConfirm({ title: 'Apagar conversa', message: `Apagar "${r.title || 'Sem título'}"? Ela vai para a lixeira do servidor.`, confirm: 'Apagar', danger: true })) return;
-        try {
-            await deleteConversation(this.agent, r.acp);
-            if (this.history) this.history = this.history.filter(h => h.acpSessionId !== r.acp);
-            if (r.current) await this.newConversation();
-            if (this.pins.includes(r.acp)) await this.togglePin(r.acp);
-            this.render();
-            toast('Conversa apagada.');
-        } catch (e) { toast(e.message, { tone: 'error', duration: 6000 }); }
-    }
-
     rowMenu(key, anchor) {
         const r = this.rows?.get(key);
-        if (!r) return;
-        showMenu([
-            { label: 'Abrir', icon: 'bot', run: () => this.pick(key) },
-            ...(r.acp ? [{ label: this.pins.includes(r.acp) ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(r.acp) }] : []),
-            ...(r.acp ? [{ label: 'Apagar', icon: 'trash', run: () => this.remove(key) }] : []),
-        ], { anchor, label: 'Conversa' });
+        if (!r?.acp) return;
+        const items = [...conversationMenuItems({
+            agent: this.agent, row: r, pins: this.pins,
+            togglePin: acp => this.togglePin(acp),
+            openTab: opts => this.ws.create(opts),
+            refresh: () => this.refresh(),
+            afterDeleteCurrent: () => this.newConversation(),
+            keepUnread: acp => { if (r.current) this.keepUnread = acp; },
+        })];
+        showMenu(items, { anchor, label: 'Conversa' });
     }
 
     /** Itens da paleta ⌘K: conversas deste agente e os apps. */
@@ -288,6 +303,11 @@ export default class DesktopSidebar {
             else if (act === 'settings') this.openSettings();
             else if (act === 'apps') this.ws.openNewSessionPage();
             else if (act === 'retry') this.refresh();
+            else if (act === 'archived') {
+                this.archived = this.archived ? null : [];
+                this.sig = '';
+                this.refresh();
+            }
             else if (act === 'folder') {
                 this.onlyFolder = !this.onlyFolder;
                 localStorage.setItem(FOLDER_KEY, this.onlyFolder ? '1' : '0');

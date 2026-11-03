@@ -542,3 +542,35 @@ test('lista: apagada não volta pelo índice; pasta é filtro opcional; a mais r
     store.indexConversation({ agent: 'a', acpSessionId: 'x1', title: 'Outro', updatedAt: 400 });
     assert.equal(store.listConversations({ agent: 'a' })[0].title, 'Um'); // título já existente fica
 });
+
+test('menu: nome da pessoa fica mesmo com título do agente; arquivar tira da lista e mensagem traz de volta', async () => {
+    const { store, gateway } = lazyGateway();
+    const s = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.ensureRuntime(s.id);
+    await gateway.prompt(s.id, 'markdown oi');
+    const acp = gateway.get(s.id).acpSessionId;
+    gateway.renameConversation('fake', acp, 'Meu nome');
+    assert.equal(store.listConversations({ agent: 'fake' })[0].title, 'Meu nome');
+    assert.equal(gateway.get(s.id).title, 'Meu nome');
+    store.updateConversation('fake', acp, { archived: true });
+    assert.deepEqual(store.listConversations({ agent: 'fake' }), []);
+    assert.equal(store.listConversations({ agent: 'fake', archived: true }).length, 1);
+    await gateway.prompt(s.id, 'markdown de novo');
+    assert.equal(store.listConversations({ agent: 'fake' }).length, 1);
+    await gateway.shutdown();
+});
+
+test('não lida: fica marcada quando o agente termina ou pede permissão; mensagem nova limpa', async () => {
+    const { store, gateway } = lazyGateway();
+    const s = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.ensureRuntime(s.id);
+    await gateway.prompt(s.id, 'markdown oi');
+    const acp = gateway.get(s.id).acpSessionId;
+    for (let i = 0; i < 100 && !store.getConversation('fake', acp).unread; i++) await new Promise(r => setTimeout(r, 20));
+    assert.equal(store.getConversation('fake', acp).unread, 1);
+    store.touchConversation('fake', acp, 'x');
+    assert.equal(store.getConversation('fake', acp).unread, 0);
+    gateway.emitEvent(s.id, 'permission.request', { permissionId: 'p', toolId: 't', title: 'x', options: [{ id: 'a', name: 'a', kind: 'allow_once' }] });
+    assert.equal(store.getConversation('fake', acp).unread, 1);
+    await gateway.shutdown();
+});
