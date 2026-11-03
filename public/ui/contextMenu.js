@@ -7,6 +7,14 @@ import { icon } from './icons.js';
 import { haptic } from './haptics.js';
 
 let openMenu = null;
+// Apertar o botão que abriu o menu: o toque fecha (é "fora" do menu) e o clique que vem depois não reabre
+let pressedAnchor = null;
+
+function consumePress(anchor) {
+    const hit = anchor && pressedAnchor?.el === anchor && Date.now() - pressedAnchor.at < 1000;
+    pressedAnchor = null;
+    return !!hit;
+}
 
 export function closeMenu() {
     if (!openMenu) return;
@@ -32,6 +40,7 @@ export function closeMenu() {
  */
 export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', restoreFocus = null } = {}) {
     const pointer = { x, y }; // where a touch/right click opened it (x/y are moved to fit the screen)
+    if (consumePress(anchor)) return;
     closeMenu();
 
     const el = document.createElement('div');
@@ -115,7 +124,9 @@ export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', r
         }
     };
     const onPointer = e => {
-        if (!el.contains(e.target)) closeMenu();
+        if (el.contains(e.target)) return;
+        if (anchor?.contains(e.target)) pressedAnchor = { el: anchor, at: Date.now() };
+        closeMenu();
     };
     el.addEventListener('keydown', onKey);
     // Defer so the event that opened the menu doesn't immediately close it
