@@ -406,7 +406,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateShortcutBar();
 
     document.getElementById('newTabBtn').innerHTML = icon('plus', 18);
-    document.getElementById('newTabBtn').addEventListener('click', () => workspace.openNewSessionPage());
+    document.getElementById('newTabBtn').addEventListener('click', () => {
+        // De novo no "+": fecha a página (se houver aba para onde voltar)
+        if (workspace.newSessionPage.isOpen && workspace.sessions.size > 0) workspace.closeNewSessionPage();
+        else workspace.openNewSessionPage();
+    });
     // Celular, aba de agente: lista lateral de conversas (arrastar da esquerda ou o ☰ no topo).
     // App novo: só pelo "+" da folha de sessões (sem gesto para a página de apps).
     const drawer = new ConversationDrawer({

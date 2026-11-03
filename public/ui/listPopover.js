@@ -33,6 +33,11 @@ function bindPress(btn, handler) {
  * @param {Array<{label: string, onClick: Function, tone?: 'danger'}>} [opts.actions]
  */
 export function openPopover({ title, anchor, items, empty, note, actions = [] }) {
+    // O mesmo botão de novo: fecha
+    if (current?.anchor === anchor) {
+        closePopover();
+        return closePopover;
+    }
     closePopover();
     const el = document.createElement('div');
     el.className = 'popover';
@@ -134,6 +139,7 @@ export function openPopover({ title, anchor, items, empty, note, actions = [] })
 
     current = {
         el,
+        anchor,
         cleanup: () => {
             document.removeEventListener('keydown', onKey, true);
             document.removeEventListener('pointerdown', onOutside, true);
