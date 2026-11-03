@@ -4273,3 +4273,139 @@ audio.fm-media { width: min(520px, 90%); }
     margin: 0; border-radius: 14px; border: 1px solid var(--border); overflow: auto;
 }
 :root[data-desktop] .agent-picker .ag-sheet-grabber { display: none; }
+
+/* =====================================================================================
+   Desktop: vidro de verdade, o mesmo material do iPhone (--glass-*). Vidro precisa de algo atrás:
+   um fundo com profundidade (gradientes parados, sem custo de animação) e peças flutuantes, com a
+   conversa passando por trás ao rolar. Terminal, arquivos e anotações ficam sólidos para ler.
+   "Reduzir transparência" e "Aumentar contraste" deixam tudo sólido (tokens --glass-*).
+   ===================================================================================== */
+:root[data-desktop] { --dk-gap: 8px;
+    --dk-wall:
+        radial-gradient(900px 700px at 8% 0%, rgba(139, 92, 246, .42), transparent 65%),
+        radial-gradient(800px 640px at 96% 12%, rgba(56, 130, 246, .26), transparent 62%),
+        radial-gradient(900px 700px at 78% 104%, rgba(217, 70, 239, .24), transparent 62%),
+        radial-gradient(760px 600px at 18% 100%, rgba(20, 184, 166, .16), transparent 62%);
+}
+:root[data-desktop][data-theme="light"] {
+    --dk-wall:
+        radial-gradient(900px 700px at 8% 0%, rgba(139, 92, 246, .34), transparent 65%),
+        radial-gradient(800px 640px at 96% 12%, rgba(56, 130, 246, .26), transparent 62%),
+        radial-gradient(900px 700px at 78% 104%, rgba(236, 72, 153, .22), transparent 62%),
+        radial-gradient(760px 600px at 18% 100%, rgba(45, 212, 191, .20), transparent 62%);
+}
+:root[data-desktop] { background: #0a0a12; }
+:root[data-desktop] body { background: transparent; }
+:root[data-desktop] body::before {
+    content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: var(--dk-wall);
+}
+:root[data-desktop][data-theme="light"] { background: #ece9f6; }
+:root[data-desktop][data-theme="light"] body::before {
+    background: var(--dk-wall);
+}
+
+/* estrutura: peças soltas sobre o fundo */
+:root[data-desktop] .app {
+    margin-left: calc(var(--dk-w) + var(--dk-gap)); height: 100dvh; box-sizing: border-box;
+    padding: var(--dk-gap) var(--dk-gap) var(--dk-gap) 0; gap: var(--dk-gap); background: transparent;
+}
+:root[data-desktop][data-sidebar-collapsed] .app { margin-left: 0; padding-left: var(--dk-gap); }
+
+:root[data-desktop] .dk-side {
+    top: var(--dk-gap); bottom: var(--dk-gap); left: var(--dk-gap); width: calc(var(--dk-w) - var(--dk-gap));
+    border: 1px solid var(--glass-border); border-radius: 18px;
+    background: var(--glass-sheen-img), var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+:root[data-desktop][data-sidebar-collapsed] .dk-side { transform: translateX(calc(-100% - 2 * var(--dk-gap))); }
+:root[data-desktop][data-sidebar-collapsed] .dk-reopen { top: 16px; left: 16px; }
+:root[data-desktop] .dk-new { background: var(--glass-fill); border-color: var(--glass-border); white-space: nowrap; }
+:root[data-desktop] .dk-new kbd { font-size: 10px; }
+:root[data-desktop] .dk-search, :root[data-desktop] .dk-agents { background: var(--glass-fill); }
+:root[data-desktop] .dk-row:hover { background: var(--glass-fill); }
+:root[data-desktop] .dk-agent[aria-selected="true"] { background: var(--glass-fill-pressed); }
+:root[data-desktop] .dk-side-foot { border-top-color: var(--glass-border); }
+
+:root[data-desktop] .topbar {
+    border: 1px solid var(--glass-border); border-radius: 16px; background: var(--glass-sheen-img), var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+:root[data-desktop] .tab:hover { background: var(--glass-fill); }
+:root[data-desktop] .tab.active { background: var(--glass-fill-pressed); border-color: var(--glass-border); box-shadow: inset 0 1px 0 var(--glass-rim-low); }
+:root[data-desktop] .tab.agent .tab-logo:not([hidden]) + .tab-dot,
+:root[data-desktop] .tab.agent.active .tab-logo:not([hidden]) + .tab-dot { border-color: transparent; }
+:root[data-desktop] .new-tab { background: var(--glass-fill); border-color: var(--glass-border); box-shadow: none; }
+:root[data-desktop] .statusbar {
+    border: 1px solid var(--glass-border); border-radius: 12px; background: var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--glass-edge);
+}
+
+/* área de trabalho: sem fundo próprio na conversa; o resto é sólido, com cantos */
+:root[data-desktop] .workspace { background: transparent; border: 0; border-radius: 16px; overflow: hidden; }
+:root[data-desktop] .terminal-panel { border-radius: 16px; overflow: hidden; }
+:root[data-desktop] .terminal-panel.agent-panel { background: transparent; }
+
+/* conversa: cabeçalho e campo flutuam, e o texto passa por trás ao rolar */
+:root[data-desktop] .agent-panel { position: absolute; }
+:root[data-desktop] .ag-head {
+    position: absolute; z-index: 6; top: 0; left: 0; right: 0; border: 1px solid var(--glass-border); border-radius: 16px;
+    background: var(--glass-sheen-img), var(--glass-bg);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+:root[data-desktop] .ag-banner { position: absolute; z-index: 6; top: 62px; left: 50%; transform: translateX(-50%); border-radius: 12px; background: var(--glass-bg-dense); border: 1px solid var(--glass-border); }
+:root[data-desktop] .ag-body { height: 100%; background: transparent; }
+:root[data-desktop] .ag-main { background: transparent; min-height: 0; }
+:root[data-desktop] .ag-log { background: transparent; padding-top: 78px; padding-bottom: 190px; }
+:root[data-desktop] .ag-is-empty .ag-log { padding-top: 0; padding-bottom: 18px; }
+:root[data-desktop] .ag-composer {
+    position: absolute; z-index: 5; left: 50%; transform: translateX(-50%); bottom: 10px; margin: 0;
+    width: min(760px, calc(100% - 48px)); border: 1px solid var(--glass-border); border-radius: 24px;
+    background: var(--glass-sheen-img), var(--glass-bg-dense);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+:root[data-desktop] .ag-composer:focus-within { box-shadow: var(--glass-edge), var(--glass-shadow), 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); border-color: transparent; }
+:root[data-desktop] .ag-is-empty .ag-composer { position: relative; left: auto; bottom: auto; transform: none; margin: 0 auto 18px; }
+:root[data-desktop] .ag-selectors .ag-select:hover { background: var(--glass-fill); }
+:root[data-desktop] .ag-jump { bottom: 190px; }
+:root[data-desktop] .ag-side {
+    margin: 70px 0 0 var(--dk-gap); border: 1px solid var(--glass-border); border-radius: 16px;
+    background: var(--glass-bg); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-edge);
+}
+/* peças de dentro da conversa: preenchimento translúcido, sem desfoque (muitas, e rolam) */
+:root[data-desktop] .ag-user { background: color-mix(in srgb, var(--accent) 26%, transparent); box-shadow: inset 0 0 0 1px var(--glass-border); }
+:root[data-desktop] .ag-tool, :root[data-desktop] .ag-plan, :root[data-desktop] .ag-perm { background: var(--glass-bg-dense); border-color: var(--glass-border); }
+:root[data-desktop] .ag-hello-logo { background: var(--glass-fill); border-color: var(--glass-border); box-shadow: var(--glass-edge), var(--glass-shadow); }
+:root[data-desktop] .ag-tip { background: var(--glass-fill); border-color: var(--glass-border); color: var(--text); }
+:root[data-desktop] .ag-tip:hover { background: var(--glass-fill-pressed); }
+
+/* tudo que flutua por cima: menus, avisos e janelas */
+:root[data-desktop] .menu, :root[data-desktop] .toast, :root[data-desktop] .dialog, :root[data-desktop] .cp {
+    border: 1px solid var(--glass-border); background: var(--glass-sheen-img), var(--glass-bg-dense);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+:root[data-desktop] .settings-sheet.sheet-page .ag-sheet, :root[data-desktop] .agent-picker .ag-sheet {
+    border: 1px solid var(--glass-border); background: var(--glass-sheen-img), var(--glass-bg-dense);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+:root[data-desktop] .settings-sheet .st-index { border-right-color: var(--glass-border); }
+:root[data-desktop] .settings-sheet .st-row:hover { background: var(--glass-fill); }
+:root[data-desktop] .ap-search input { background: var(--glass-fill); border-color: var(--glass-border); }
+
+/* página de apps sobre o fundo, com peças de vidro */
+:root[data-desktop] .new-session { background: var(--dk-wall), #0a0a12; background-attachment: fixed; }
+:root[data-desktop][data-theme="light"] .new-session { background: var(--dk-wall), #ece9f6; background-attachment: fixed; }
+:root[data-desktop] .dk-side { z-index: 30; }
+:root[data-desktop] .app-tile { background: var(--glass-sheen-img), var(--glass-bg); border-color: var(--glass-border); box-shadow: var(--glass-edge); }
+:root[data-desktop] .app-tile:hover { background: var(--glass-fill-pressed); }
+:root[data-desktop] .ag-scrolling .ag-head, :root[data-desktop] .ag-scrolling .ag-composer {
+    -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--glass-sheen-img), var(--glass-bg-dense);
+}
+:root[data-desktop] .settings-sheet .ag-sheet-head, :root[data-desktop] .agent-picker .ag-sheet-head { background: transparent; border-bottom: 1px solid var(--glass-border); }

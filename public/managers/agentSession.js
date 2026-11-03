@@ -244,8 +244,16 @@ export default class AgentSession {
             e.stopPropagation();
             this.answerPermission(permissionId, opt.id);
         }, true);
+        let scrollTimer = null;
         this.el.log.addEventListener('scroll', () => {
             this.el.jump.hidden = this.conversation.nearBottom();
+            // Redesenhar o desfoque a cada quadro pesa: durante a rolagem o vidro fica mais denso
+            if (!scrollTimer) this.panel.classList.add('ag-scrolling');
+            clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(() => {
+                scrollTimer = null;
+                this.panel.classList.remove('ag-scrolling');
+            }, 160);
         }, { passive: true });
         this.el.jump.addEventListener('click', () => {
             this.el.log.scrollTop = this.el.log.scrollHeight;

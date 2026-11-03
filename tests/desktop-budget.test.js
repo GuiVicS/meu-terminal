@@ -11,11 +11,15 @@ const path = require('path');
 const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
 const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'ui', 'conversationDrawer.js'), 'utf8');
 
-test('orçamento: no desktop, desfoque só na barra lateral e na barra de cima', () => {
+// Só o que flutua. Vidro em cada mensagem (são muitas, e rolam) deixaria a rolagem pesada
+const FLOATING = ['.dk-side', '.topbar', '.statusbar', '.ag-head', '.ag-composer', '.ag-side', '.menu', '.toast', '.dialog', '.cp',
+    '.settings-sheet.sheet-page .ag-sheet', '.agent-picker .ag-sheet'];
+
+test('orçamento: no desktop, desfoque só nas peças que flutuam', () => {
     const rules = [...css.matchAll(/([^{}]*\[data-desktop\][^{}]*)\{([^{}]*)\}/g)]
-        .filter(m => /(^|[\s;])backdrop-filter\s*:\s*(?!none)/.test(m[2]))
-        .map(m => m[1].replace(/\/\*[\s\S]*?\*\//g, '').trim().replace(/\s+/g, ' '));
-    assert.deepEqual(rules.sort(), [':root[data-desktop] .dk-side', ':root[data-desktop] .topbar'].sort());
+        .filter(m => /(^|[\s;])backdrop-filter\s*:\s*(?!\s|none)/.test(m[2]))
+        .flatMap(m => m[1].replace(/\/\*[\s\S]*?\*\//g, '').split(',').map(x => x.trim().replace(/\s+/g, ' ').replace(':root[data-desktop] ', '')));
+    assert.deepEqual([...new Set(rules)].sort(), [...FLOATING].sort());
 });
 
 test('orçamento: a lista lateral não anima variável CSS no app inteiro', () => {
