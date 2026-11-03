@@ -472,6 +472,9 @@ export default class Composer {
                 parts.push(`<label class="ag-select" title="${esc(option.name)}"><span>${label}</span><em class="ag-select-name">${esc(option.name)}</em><select data-config="${esc(option.id)}" aria-label="${esc(option.name)}">${opts}</select></label>`);
             }
         }
+        // Pasta da conversa, à esquerda da linha (desktop)
+        const folder = String(this.opts.cwd?.() || '');
+        if (folder) parts.unshift(`<span class="ag-folder" title="${esc(folder)}">${icon('folder', 15)}<span>${esc(folder.split('/').filter(Boolean).pop() || folder)}</span></span>`);
         this.ui.selectors.innerHTML = parts.join('');
         this.ui.selectors.hidden = !parts.length;
         // iPhone: the selectors live in the sheet; the button shows what's selected

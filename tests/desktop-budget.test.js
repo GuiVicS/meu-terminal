@@ -12,8 +12,16 @@ const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 
 const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'ui', 'conversationDrawer.js'), 'utf8');
 
 // Só o que flutua. Vidro em cada mensagem (são muitas, e rolam) deixaria a rolagem pesada
-const FLOATING = ['.dk-side', '.topbar', '.statusbar', '.ag-head', '.ag-composer', '.ag-side', '.menu', '.toast', '.dialog', '.cp',
+const FLOATING = ['.tabstrip', '.topbar-actions .icon-btn', '.ag-jump', '.dk-reopen', '.ns-close', '.ns-settings',
+    '.browser-toolbar [data-act="back"]', '.browser-more', '.browser-pill', '.fm-toolbar', '.nt-toolbar',
+    '.ag-composer::before', '.ag-side', '.menu', '.toast', '.dialog', '.cp', '.search-bar', '.fm-selbar', '.fm-pastebar', '.nt-fbar',
     '.settings-sheet.sheet-page .ag-sheet', '.agent-picker .ag-sheet'];
+
+test('desktop com a cor original do app: nenhum gradiente próprio', () => {
+    assert.ok(!/--dk-wall/.test(css));
+    const rules = [...css.matchAll(/([^{}]*\[data-desktop\][^{}]*)\{([^{}]*)\}/g)].filter(m => /gradient\(/.test(m[2]));
+    assert.deepEqual(rules.map(m => m[1].trim()), []);
+});
 
 test('orçamento: no desktop, desfoque só nas peças que flutuam', () => {
     const rules = [...css.matchAll(/([^{}]*\[data-desktop\][^{}]*)\{([^{}]*)\}/g)]
