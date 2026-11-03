@@ -125,7 +125,12 @@ export default class ConversationDrawer {
         app.appendChild(this.dim);
         this.list = this.el.querySelector('.cv-list');
         attachEdgeFade(this.list);
-        this.account = createAccountRow(() => this.getAgent(), 'cv-account');
+        this.account = createAccountRow({
+            getAgentId: () => this.getAgent()?.agentId || null,
+            getSession: () => this.getAgent(),
+            showTab: id => { this.close(); this.getAgent()?.hooks.showTab?.(id); },
+            className: 'cv-account',
+        });
         this.list.after(this.account.el);
         this.searchBox = this.el.querySelector('.cv-search');
         this.searchInput = this.searchBox.querySelector('input');

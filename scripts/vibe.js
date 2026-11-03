@@ -287,6 +287,7 @@ class Vibe {
             deploy_url: p.deployUrl,
             deployed_at: p.deployedAt,
             can_publish: this.deployer.configured,
+            browser_tab_id: p.browserTabId || null,
             agents: Object.entries(p.agents)
                 .filter(([, info]) => info.kind === 'agent') // the MCP flow's terminal entry can't be "switched to"
                 .map(([agent, info]) => ({ agent, tab_id: info.tabId, last_used_at: info.lastUsedAt })),

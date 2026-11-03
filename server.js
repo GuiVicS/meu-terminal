@@ -45,6 +45,7 @@ const { Addons, SERVICES } = require('./scripts/addons');
 const { deleteConversation, canDelete: canDeleteConversation, startedInTerminal, hasConversationFile } = require('./scripts/agents/history-files');
 const { detectAgents, searchDirs } = require('./scripts/agents/detect');
 const { ClaudeAccounts } = require('./scripts/claude-accounts');
+const { CodexAccounts, OpenCodeAccounts, AgyAccounts } = require('./scripts/agent-accounts');
 const { listOpenCodeModels } = require('./scripts/opencode-login');
 const { readTranscript, listOnDisk, transcriptStamp } = require('./scripts/agents/transcript');
 const { turnRange, compactEvents, sideSummary, STATE_ONLY } = require('./scripts/agents/history');
@@ -806,7 +807,7 @@ const addonServices = new ServiceManager({ defs: SERVICES, home: HOME_DIR, env: 
 /** Env da rota para um agente; liga o serviço se precisar. Só o Claude Code fala o protocolo da Anthropic. */
 async function agentRouteEnv({ agent, route, routeModel = null, account = null }) {
     route = normalizeRoute(route);
-    if (agent !== 'claude') return {};
+    if (agent !== 'claude') return account && agentAccounts[agent] ? agentAccounts[agent].env(account) : {};
     // Conta extra do Claude Code (a rota do OmniRoute não usa a assinatura, então não precisa)
     const acct = account && route !== 'omniroute' ? claudeAccounts.env(account) : {};
     if (route === DEFAULT_ROUTE) return acct;
@@ -902,6 +903,12 @@ async function usageLimitFallback({ sessionId, row, text, images, partial = fals
 }
 
 const claudeAccounts = new ClaudeAccounts({ home: HOME_DIR, env: childEnv({ HOME: HOME_DIR }) });
+const agentAccounts = {
+    claude: claudeAccounts,
+    codex: new CodexAccounts({ home: HOME_DIR }),
+    opencode: new OpenCodeAccounts({ home: HOME_DIR }),
+    agy: new AgyAccounts({ home: HOME_DIR, env: childEnv({ HOME: HOME_DIR }) }),
+};
 
 const agentGateway = new AgentGateway({
     store: new AgentStore(DB_PATH),
@@ -1318,9 +1325,64 @@ app.delete(BASE_PATH + '/api/claude-accounts/:id', (req, res) => {
 });
 
 // Trocar a conta do Claude Code de uma conversa (null/'' = principal)
+// Contas de cada agente. A conta principal é o id ''. A padrão é a das conversas novas
+const readDefaultAccounts = () => {
+    try { return JSON.parse(sessionStore.getMeta('agent-default-accounts') || '{}') || {}; } catch { return {}; }
+};
+const accountsOf = agent => {
+    const accounts = agentAccounts[agent];
+    if (!accounts) throw Object.assign(new Error('Agente desconhecido.'), { status: 400 });
+    return accounts;
+};
+const defaultAccount = agent => {
+    const id = readDefaultAccounts()[agent];
+    return id && agentAccounts[agent]?.ids().includes(id) ? id : null;
+};
+const accountRoute = fn => async (req, res) => {
+    try {
+        await fn(req, res);
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
+};
+app.get(BASE_PATH + '/api/agent-accounts', accountRoute(async (req, res) => {
+    const agent = String(req.query.agent || '');
+    const accounts = accountsOf(agent);
+    const ids = ['', ...accounts.ids()];
+    const list = await Promise.all(ids.map(async id => ({
+        id, name: id || 'Principal', ...(await accounts.status(id || null)),
+        limitedUntil: agent === 'claude' && (limitedAccounts.get(id) || 0) > Date.now() ? limitedAccounts.get(id) : null,
+    })));
+    res.json({ accounts: list, shared: !!accounts.shared, default: defaultAccount(agent) || '' });
+}));
+app.post(BASE_PATH + '/api/agent-accounts', accountRoute(async (req, res) => {
+    const agent = String(req.body?.agent || '');
+    const accounts = accountsOf(agent);
+    // id '' = entrar na conta principal; sem id = conta nova
+    const id = req.body?.id === '' ? '' : (req.body?.id && accounts.ids().includes(req.body.id) ? req.body.id : accounts.create(req.body?.name));
+    const label = agentGateway.agents[agent]?.label || agent;
+    const tab = sessions.create({ kind: 'terminal', name: `Login ${label}: ${id || 'principal'}`, cwd: HOME_DIR });
+    sessions.runCommand(tab.id, accounts.loginCommand(id || null));
+    res.status(201).json({ id, tab });
+}));
+app.put(BASE_PATH + '/api/agent-accounts/default', accountRoute(async (req, res) => {
+    const agent = String(req.body?.agent || '');
+    const accounts = accountsOf(agent);
+    const id = String(req.body?.id || '');
+    if (id && !accounts.ids().includes(id)) return res.status(400).json({ error: 'Conta não encontrada.' });
+    sessionStore.setMeta('agent-default-accounts', JSON.stringify({ ...readDefaultAccounts(), [agent]: id }));
+    res.json({ default: id });
+}));
+app.delete(BASE_PATH + '/api/agent-accounts/:agent/:id', accountRoute(async (req, res) => {
+    if (!accountsOf(req.params.agent).remove(req.params.id)) return res.status(404).json({ error: 'Conta não encontrada.' });
+    res.json({ ok: true });
+}));
+
 app.post(BASE_PATH + '/api/agent-sessions/:id/account', agentRoute(async (req, res) => {
     const id = String(req.body?.account || '');
-    if (id && !claudeAccounts.ids().includes(id)) return res.status(400).json({ error: 'Conta não encontrada.' });
+    const row = agentGateway.get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Sessão não encontrada.' });
+    if (id && !agentAccounts[row.agent]?.ids().includes(id)) return res.status(400).json({ error: 'Conta não encontrada.' });
     res.json(await agentGateway.setAccount(req.params.id, id || null));
 }));
 
@@ -1355,7 +1417,7 @@ app.get(BASE_PATH + '/api/agent-media/:session/:file', (req, res) => {
 });
 // New agent conversation in its own tab ("Nova conversa"), or an old one resumed ("Conversas")
 app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
-    const { agent, cwd, resumeAcpSessionId, title, afterId, route, intoTab } = req.body || {};
+    const { agent, cwd, resumeAcpSessionId, title, afterId, route, intoTab, account } = req.body || {};
     if (typeof cwd !== 'string' || !cwd.trim()) return res.status(400).json({ error: 'Pasta inválida.' });
     let folder = path.resolve(HOME_DIR, cwd.replace(/^~(?=$|[\\/])/, HOME_DIR));
     if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
@@ -1373,6 +1435,14 @@ app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
         route: ROUTES[route] ? (route !== DEFAULT_ROUTE ? route : null)
             : (String(agent) === 'claude' && terminalRoute() !== DEFAULT_ROUTE ? terminalRoute() : null),
     });
+    // Conversa nova: na conta pedida, ou na padrão deste agente
+    if (!resumeAcpSessionId) {
+        const pick = typeof account === 'string' && agentAccounts[session.agent]?.ids().includes(account) ? account : (account === '' ? null : defaultAccount(session.agent));
+        if (pick) {
+            agentGateway.store.updateSession(session.id, { account: pick });
+            session.account = pick;
+        }
+    }
     const def = agentGateway.agents[session.agent];
     // Lista lateral: a conversa nova abre na aba do mesmo agente, em vez de uma aba a mais
     const host = typeof intoTab === 'string' ? sessionStore.get(intoTab) : null;
@@ -1647,6 +1717,37 @@ function openingHistory(session) {
     };
 }
 
+const EVENT_PAGE = 5000; // o tamanho do bloco de AgentStore.eventsSince
+
+/**
+ * Conversa aberta para ver, que continua fora do app (no terminal): o que o agente grava no arquivo
+ * dele chega a esta tela. Enquanto o agente daqui trabalha, os eventos já cuidam disso.
+ */
+function watchTranscript(ws, row, send) {
+    const read = () => {
+        const s = agentGateway.get(row.url);
+        return s?.acpSessionId ? transcriptStamp(s.agent, s.acpSessionId, HOME_DIR) : null;
+    };
+    let stamp = read();
+    const timer = setInterval(() => {
+        const session = agentGateway.get(row.url);
+        if (!session || session.status === 'thinking' || session.status === 'waiting_permission') return;
+        const now = read();
+        if (now === null || now === stamp) return;
+        stamp = now;
+        try {
+            const { history, side } = openingHistory(session);
+            if (!history.transcript) return;
+            send({ type: 'agent-history', ...history, reset: true });
+            send({ type: 'agent-side', events: side });
+        } catch (e) {
+            debugLog(`Conversa ${row.url}: ${e.message}`);
+        }
+    }, 4000);
+    timer.unref?.();
+    ws.on('close', () => clearInterval(timer));
+}
+
 function attachAgentTab(ws, row, since) {
     sessions.sockets.add(ws);
     const send = message => {
@@ -1666,12 +1767,24 @@ function attachAgentTab(ws, row, since) {
         return;
     }
     send({ type: 'agent-session', session });
+    // O navegador não enxerga a conexão morta (celular que dormiu): ele pergunta, e daqui responde
+    ws.on('message', data => {
+        try {
+            if (JSON.parse(data).type === 'app-ping') send({ type: 'app-pong' });
+        } catch { /* não é para cá */ }
+    });
     if (since) {
-        for (const event of agentGateway.events(row.url, since)) send({ type: 'agent-event', event });
+        // Em blocos: quem ficou muito tempo fora recebe tudo, não só o primeiro bloco
+        for (let from = since, list; (list = agentGateway.events(row.url, from)).length;) {
+            for (const event of list) send({ type: 'agent-event', event });
+            from = list[list.length - 1].seq;
+            if (list.length < EVENT_PAGE) break;
+        }
     } else {
         const { history, side } = openingHistory(session);
         send({ type: 'agent-history', ...history });
         send({ type: 'agent-side', events: side });
+        if (history.transcript) watchTranscript(ws, row, send);
     }
     send({ type: 'ready' });
 }

@@ -17,6 +17,8 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{0,30}$/;
 const OWN = new Set(['.credentials.json', '.claude.json']);
 
 class ClaudeAccounts {
+    shared = true; // a conversa continua ao trocar de conta
+
     /**
      * @param {object} opts
      * @param {string} opts.home

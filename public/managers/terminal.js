@@ -104,6 +104,7 @@ export default class TerminalManager {
         this.hooks = {
             onStateChange: s => this.onSessionChanged(s),
             onInfo: s => this.onSessionChanged(s),
+            onPairChanged: () => this.syncPairEdge(),
             onOutput: s => this.onOutput(s),
             onFocusChange: (s, focused) => this.events.onFocusChange(focused),
             onAuthRequired: () => { window.location.href = joinPath('login'); },
@@ -141,6 +142,10 @@ export default class TerminalManager {
                 this.scheduleReconcile();
             }
         });
+        // Voltou a rede ou o app saiu do cache de voltar: a conexão pode ter morrido sem avisar
+        for (const event of ['online', 'pageshow']) {
+            window.addEventListener(event, () => this.sessions.forEach(s => s.reconnectIfDropped()));
+        }
 
         this.restore();
     }
@@ -265,6 +270,97 @@ export default class TerminalManager {
         return s.a === this.activeId || s.b === this.activeId ? [s.a, s.b] : null;
     }
 
+    /** Celular: a aba que fica "ao lado" desta (conversa e prévia do vibecoding). */
+    pairOf(id) {
+        const p = this.phonePair;
+        if (p && this.sessions.has(p.a) && this.sessions.has(p.b)) {
+            if (p.a === id) return { other: p.b, main: true };
+            if (p.b === id) return { other: p.a, main: false };
+        }
+        const s = this.sessions.get(id);
+        const preview = s?.vibeProject?.browser_tab_id;
+        if (preview && this.sessions.has(preview)) return { other: preview, main: true };
+        for (const [other, o] of this.sessions) {
+            if (o.vibeProject?.browser_tab_id === id) return { other, main: false };
+        }
+        return null;
+    }
+
+    /** A alça na borda: puxa a outra aba com o dedo (a área dela não briga com a rolagem nem com a página). */
+    setupPairEdge() {
+        const edge = document.createElement('button');
+        edge.type = 'button';
+        edge.className = 'pair-edge';
+        edge.hidden = true;
+        edge.innerHTML = '<span aria-hidden="true"></span>';
+        this.panelsEl.appendChild(edge);
+        this.pairEdge = edge;
+        let drag = null;
+        const panelOf = id => this.sessions.get(id)?.panel;
+        const clear = (a, b) => {
+            for (const p of [a, b]) if (p) { p.style.transform = ''; p.style.transition = ''; p.style.visibility = ''; p.style.zIndex = ''; }
+        };
+        const finish = commit => {
+            const d = drag;
+            drag = null;
+            if (!d) return;
+            const W = this.panelsEl.clientWidth;
+            const sign = d.main ? -1 : 1;
+            const moved = commit ? sign * W : 0;
+            d.cur.style.transition = d.next.style.transition = 'transform 220ms cubic-bezier(.2,.8,.2,1)';
+            d.cur.style.transform = `translateX(${moved}px)`;
+            d.next.style.transform = `translateX(${moved - sign * W}px)`;
+            setTimeout(() => {
+                clear(d.cur, d.next);
+                if (commit) this.activate(d.other, { focus: false });
+            }, 230);
+        };
+        edge.addEventListener('pointerdown', e => {
+            const pair = this.activeId && this.pairOf(this.activeId);
+            if (!pair) return;
+            const cur = panelOf(this.activeId);
+            const next = panelOf(pair.other);
+            if (!cur || !next) return;
+            e.preventDefault();
+            edge.setPointerCapture(e.pointerId);
+            drag = { x: e.clientX, at: performance.now(), dx: 0, main: pair.main, other: pair.other, cur, next };
+            next.style.visibility = 'visible';
+            next.style.zIndex = '5';
+            next.style.transform = `translateX(${(pair.main ? 1 : -1) * this.panelsEl.clientWidth}px)`;
+        });
+        edge.addEventListener('pointermove', e => {
+            if (!drag) return;
+            const W = this.panelsEl.clientWidth;
+            const sign = drag.main ? -1 : 1;
+            drag.dx = Math.max(0, Math.min(W, (e.clientX - drag.x) * sign)); // só para o lado certo
+            drag.cur.style.transform = `translateX(${sign * drag.dx}px)`;
+            drag.next.style.transform = `translateX(${sign * (drag.dx - W)}px)`;
+        });
+        edge.addEventListener('pointerup', () => {
+            if (!drag) return;
+            const fast = drag.dx / Math.max(1, performance.now() - drag.at) > 0.4;
+            const tap = drag.dx < 6; // toque na alça também troca
+            finish(tap || fast || drag.dx > this.panelsEl.clientWidth * 0.3);
+        });
+        edge.addEventListener('pointercancel', () => finish(false));
+        // Teclado e leitor de tela: o clique sem arrastar não passa pelo gesto
+        edge.addEventListener('click', e => {
+            if (e.detail !== 0) return;
+            const pair = this.activeId && this.pairOf(this.activeId);
+            if (pair) this.activate(pair.other, { focus: false });
+        });
+    }
+
+    syncPairEdge() {
+        const edge = this.pairEdge;
+        if (!edge) return;
+        const pair = isPhoneScreen() && this.activeId ? this.pairOf(this.activeId) : null;
+        edge.hidden = !pair;
+        if (!pair) return;
+        edge.classList.toggle('left', !pair.main);
+        edge.setAttribute('aria-label', pair.main ? 'Puxar para abrir a prévia' : 'Puxar para voltar à conversa');
+    }
+
     /** Shows the active tab (or the split pair) and hides the rest. */
     applyVisibility() {
         const pair = this.visiblePair();
@@ -282,6 +378,7 @@ export default class TerminalManager {
             }
         });
         this.layoutPanels(pair);
+        this.syncPairEdge();
     }
 
     /** Positions the two panels and the divider (row on wide screens, stacked on phones). */
@@ -313,9 +410,13 @@ export default class TerminalManager {
     /** Pairs two tabs (a = usually the terminal) and shows them. */
     setSplit(a, b, { focus = a, ratio } = {}) {
         if (!this.sessions.has(a) || !this.sessions.has(b) || a === b) return;
-        // Celular não divide (o vibecoding pede a divisão a todas as janelas): só abre a aba principal
+        // Celular não divide (o vibecoding pede a divisão a todas as janelas): abre a principal, e a outra
+        // fica a um gesto de distância
         if (isPhoneScreen()) {
+            this.phonePair = { a, b };
+            this.storage.set('phonePair', this.phonePair);
             this.activate(focus, { focus: false });
+            this.syncPairEdge();
             return;
         }
         this.split = { a, b, ratio: ratio || this.split?.ratio || 0.5 };
@@ -340,6 +441,8 @@ export default class TerminalManager {
         this.panelsEl = this.workspaceEl.querySelector('.terminal-panels');
         const saved = this.storage.get('split');
         this.split = saved && saved.a && saved.b && !isPhoneScreen() ? saved : null;
+        this.phonePair = this.storage.get('phonePair') || (isPhoneScreen() && saved?.a && saved?.b ? { a: saved.a, b: saved.b } : null);
+        this.setupPairEdge();
 
         const divider = document.createElement('div');
         divider.className = 'split-divider';

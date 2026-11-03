@@ -88,7 +88,12 @@ export default class DesktopSidebar {
             </div>
             <nav class="dk-scroll"><div class="dk-convs"></div></nav>
             <div class="dk-side-foot"></div>`;
-        this.account = createAccountRow(() => (this.ws.active?.kind === 'agent' ? this.ws.active : null), 'dk-row');
+        this.account = createAccountRow({
+            getAgentId: () => this.agent,
+            getSession: () => (this.ws.active?.kind === 'agent' ? this.ws.active : null),
+            showTab: id => this.ws.activate(id, { focus: true }),
+            className: 'dk-row',
+        });
         this.el.querySelector('.dk-side-foot').appendChild(this.account.el);
         document.body.appendChild(this.el);
         this.reopen = document.createElement('button');
@@ -145,6 +150,7 @@ export default class DesktopSidebar {
 
     setAgent(id) {
         this.agent = id;
+        void this.account.sync();
         localStorage.setItem(AGENT_KEY, id);
         this.sig = '';
         this.history = null;

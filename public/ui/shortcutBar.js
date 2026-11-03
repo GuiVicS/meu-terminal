@@ -19,6 +19,15 @@ const NAV = {
     end: ['\x1b[F', '\x1bOF', 'F'],
 };
 
+// A linha de cima, fixa à direita
+const PINNED_KEYS = [
+    { id: 'cmds', icon: 'bolt', aria: 'Comandos rápidos', action: 'commands' },
+    // Tap pastes the device clipboard; long press opens the "recently copied" list
+    { id: 'clip', icon: 'clipboard', aria: 'Colar (segure para ver copiados recentemente)',
+        action: 'paste', longAction: 'clipboard-history' },
+];
+
+// A linha de baixo: cada uma liga ou desliga em Configurações → Terminal
 const KEYS = [
     { id: 'esc', label: 'ESC', aria: 'Escape', send: '\x1b' },
     { id: 'tab', label: 'TAB', aria: 'Tab', send: '\t' },
@@ -28,26 +37,25 @@ const KEYS = [
     { id: 'down', label: '↓', aria: 'Seta para baixo', nav: 'down', repeat: true },
     { id: 'left', label: '←', aria: 'Seta para esquerda', nav: 'left', repeat: true },
     { id: 'right', label: '→', aria: 'Seta para direita', nav: 'right', repeat: true },
-    // Pinned: always visible at the right edge, outside the scrolling keys
-    { id: 'cmds', icon: 'bolt', aria: 'Comandos rápidos', action: 'commands', pinned: true },
-    // Tap pastes the device clipboard; long press opens the "recently copied" list
-    { id: 'clip', icon: 'clipboard', aria: 'Colar (segure para ver copiados recentemente)',
-        action: 'paste', longAction: 'clipboard-history', pinned: true },
     { id: 'mic', icon: 'mic', aria: 'Transcrever voz', dictation: true },
-    { id: 'more', label: '…', aria: 'Mais teclas', toggle: true },
-    // Extra keys: revealed by "…"
-    { id: 'home', label: 'HOME', aria: 'Home', nav: 'home', extra: true },
-    { id: 'end', label: 'END', aria: 'End', nav: 'end', extra: true },
-    { id: 'pgup', label: 'PGUP', aria: 'Page Up', send: '\x1b[5~', repeat: true, extra: true },
-    { id: 'pgdn', label: 'PGDN', aria: 'Page Down', send: '\x1b[6~', repeat: true, extra: true },
-    { id: 'pipe', label: '|', aria: 'Barra vertical', char: '|', extra: true },
-    { id: 'slash', label: '/', aria: 'Barra', char: '/', extra: true },
-    { id: 'tilde', label: '~', aria: 'Til', char: '~', extra: true },
-    { id: 'dash', label: '-', aria: 'Hífen', char: '-', extra: true },
-    { id: 'dollar', label: '$', aria: 'Cifrão', char: '$', extra: true },
-    { id: 'amp', label: '&', aria: 'E comercial', char: '&', extra: true },
-    { id: 'gt', label: '>', aria: 'Maior que', char: '>', extra: true },
+    { id: 'home', label: 'HOME', aria: 'Home', nav: 'home' },
+    { id: 'end', label: 'END', aria: 'End', nav: 'end' },
+    { id: 'pgup', label: 'PGUP', aria: 'Page Up', send: '\x1b[5~', repeat: true },
+    { id: 'pgdn', label: 'PGDN', aria: 'Page Down', send: '\x1b[6~', repeat: true },
+    { id: 'pipe', label: '|', aria: 'Barra vertical', char: '|' },
+    { id: 'slash', label: '/', aria: 'Barra', char: '/' },
+    { id: 'tilde', label: '~', aria: 'Til', char: '~' },
+    { id: 'dash', label: '-', aria: 'Hífen', char: '-' },
+    { id: 'dollar', label: '$', aria: 'Cifrão', char: '$' },
+    { id: 'amp', label: '&', aria: 'E comercial', char: '&' },
+    { id: 'gt', label: '>', aria: 'Maior que', char: '>' },
 ];
+
+/** O que vem ligado: cabe tudo numa linha, em qualquer celular. */
+export const DEFAULT_SHORTCUT_KEYS = ['esc', 'tab', 'ctrl', 'alt', 'up', 'down', 'left', 'right', 'mic'];
+
+/** Para o configurador de teclas. */
+export const SHORTCUT_KEY_OPTIONS = KEYS.map(k => ({ id: k.id, label: k.label || null, icon: k.icon || null, aria: k.aria }));
 
 /** Converts one character to its Ctrl-code (Ctrl+C -> \x03). Returns null if none. */
 export function ctrlChar(ch) {
@@ -64,9 +72,10 @@ export function ctrlChar(ch) {
 export default class ShortcutBar {
     /**
      * @param {HTMLElement} el - container element
-     * @param {{ getSession: () => any, onAction: (name: string, button: Element) => void }} deps
+     * @param {{ getSession: () => any, onAction: (name: string, button: Element) => void, keys?: string[] }} deps
      */
-    constructor(el, { getSession, onAction }) {
+    constructor(el, { getSession, onAction, keys }) {
+        this.enabled = keys;
         this.el = el;
         this.getSession = getSession;
         this.onAction = onAction;
@@ -106,31 +115,47 @@ export default class ShortcutBar {
             });
         }
 
-        const row = document.createElement('div');
-        row.className = 'shortcut-row';
-        const scroller = document.createElement('div');
-        scroller.className = 'shortcut-scroll';
+        const top = document.createElement('div');
+        top.className = 'shortcut-row shortcut-row-top';
         const pinned = document.createElement('div');
         pinned.className = 'shortcut-pinned';
-        KEYS.forEach(key => {
-            if (key.dictation && !this.dictation) return; // browser has no speech recognition
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            const wide = key.label && key.label.length > 2;
-            btn.className = 'shortcut-key' + (wide ? ' wide' : '') + (key.extra ? ' extra' : '')
-                + (key.icon ? ' icon-key' : '');
-            btn.dataset.key = key.id;
-            if (key.icon) btn.innerHTML = icon(key.icon, 19);
-            else btn.textContent = key.label;
-            if (key.dictation) btn.setAttribute('aria-pressed', 'false');
-            btn.setAttribute('aria-label', key.aria);
-            if (key.modifier) btn.setAttribute('aria-pressed', 'false');
-            if (key.toggle) btn.setAttribute('aria-expanded', 'false');
-            this.bindKey(btn, key);
-            (key.pinned ? pinned : scroller).appendChild(btn);
-        });
-        row.append(scroller, pinned);
-        this.el.appendChild(row);
+        PINNED_KEYS.forEach(key => pinned.appendChild(this.keyButton(key)));
+        top.appendChild(pinned);
+        // O vazio ao lado também não pode tirar o foco do terminal (fecharia o teclado)
+        top.addEventListener('pointerdown', e => e.preventDefault());
+        top.addEventListener('mousedown', e => e.preventDefault());
+
+        const row = document.createElement('div');
+        row.className = 'shortcut-row';
+        this.scroller = document.createElement('div');
+        this.scroller.className = 'shortcut-scroll';
+        row.appendChild(this.scroller);
+        this.el.append(top, row);
+        this.setKeys(this.enabled);
+    }
+
+    keyButton(key) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const wide = key.label && key.label.length > 2;
+        btn.className = 'shortcut-key' + (wide ? ' wide' : '') + (key.icon ? ' icon-key' : '');
+        btn.dataset.key = key.id;
+        if (key.icon) btn.innerHTML = icon(key.icon, 19);
+        else btn.textContent = key.label;
+        if (key.dictation) btn.setAttribute('aria-pressed', 'false');
+        btn.setAttribute('aria-label', key.aria);
+        if (key.modifier) btn.setAttribute('aria-pressed', 'false');
+        this.bindKey(btn, key);
+        return btn;
+    }
+
+    /** Monta a linha de baixo com as teclas ligadas no configurador. */
+    setKeys(ids) {
+        this.enabled = Array.isArray(ids) ? ids : DEFAULT_SHORTCUT_KEYS;
+        this.clearModifiers();
+        this.scroller.replaceChildren(...KEYS
+            .filter(k => this.enabled.includes(k.id) && !(k.dictation && !this.dictation)) // navegador sem reconhecimento de voz
+            .map(k => this.keyButton(k)));
     }
 
     bindKey(btn, key) {
@@ -207,11 +232,6 @@ export default class ShortcutBar {
         }
         if (key.dictation) {
             this.dictation?.toggle();
-            return;
-        }
-        if (key.toggle) {
-            const expanded = this.el.classList.toggle('expanded');
-            this.el.querySelector('[data-key="more"]').setAttribute('aria-expanded', String(expanded));
             return;
         }
         if (key.modifier) {

@@ -173,6 +173,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ---------- mobile shortcut bar ----------
     const shortcutBar = new ShortcutBar(document.getElementById('shortcutBar'), {
+        keys: settings.get('shortcutKeys'),
         getSession: () => workspace?.active,
         onAction: (name, button) => {
             if (name === 'commands') openCommands(button);
@@ -402,6 +403,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     settings.onChange(key => {
         if (key === 'shortcutBar') updateShortcutBar();
+        if (key === 'shortcutKeys') shortcutBar.setKeys(settings.get('shortcutKeys'));
     });
     updateShortcutBar();
 

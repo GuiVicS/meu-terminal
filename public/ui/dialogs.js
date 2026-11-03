@@ -5,6 +5,7 @@
  */
 import { icon } from './icons.js';
 import { isHandset } from './device.js';
+import { DEFAULT_SHORTCUT_KEYS, SHORTCUT_KEY_OPTIONS } from './shortcutBar.js';
 import { pushStatus, enablePush, disablePush, testPush } from '../managers/push.js';
 import { toast } from './toast.js';
 import { agentIconName } from './agent-logos.js';
@@ -217,6 +218,20 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
                     <span class="setting-help">Definido no servidor (variável SHELL)</span></span>
                 <span class="setting-readonly mono" data-shell>—</span>
             </div>
+            <label class="setting">
+                <span class="setting-text">Barra de atalhos (celular)
+                    <span class="setting-help">ESC, TAB, CTRL e setas acima do teclado</span></span>
+                <select data-setting="shortcutBar">
+                    <option value="auto">Com o teclado aberto</option>
+                    <option value="always">Sempre</option>
+                    <option value="never">Nunca</option>
+                </select>
+            </label>
+            <div class="setting setting-stack" data-shortcut-config>
+                <span class="setting-text">Teclas da barra de atalhos
+                    <span class="setting-help">Toque para ligar ou desligar. Comandos rápidos e colar ficam sempre na linha de cima.</span></span>
+                <div class="sk-grid" data-shortcut-keys role="group" aria-label="Teclas da barra de atalhos"></div>
+            </div>
         </section>
         <section class="settings-section" data-page="interface">
             <h3 class="section-label">Interface</h3>
@@ -248,15 +263,6 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
                 <span class="setting-text">Feedback tátil
                     <span class="setting-help">Vibração leve ao tocar (Android; iPhone com iOS 18+)</span></span>
                 <input type="checkbox" class="switch" data-setting="haptics">
-            </label>
-            <label class="setting">
-                <span class="setting-text">Barra de atalhos (celular)
-                    <span class="setting-help">ESC, TAB, CTRL e setas acima do teclado</span></span>
-                <select data-setting="shortcutBar">
-                    <option value="auto">Com o teclado aberto</option>
-                    <option value="always">Sempre</option>
-                    <option value="never">Nunca</option>
-                </select>
             </label>
         </section>
         <section class="settings-section" data-page="sessoes">
@@ -346,7 +352,25 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
             .catch(() => { mcpCommand.textContent = 'Não foi possível carregar.'; });
     };
 
+    // Configurador das teclas da barra de atalhos (celular)
+    const keysBox = body.querySelector('[data-shortcut-keys]');
+    const enabledKeys = () => settings.get('shortcutKeys') || DEFAULT_SHORTCUT_KEYS;
+    const renderKeys = () => {
+        const on = enabledKeys();
+        keysBox.innerHTML = SHORTCUT_KEY_OPTIONS.map(k => `<button type="button" class="sk-key" data-sk="${k.id}"
+            aria-pressed="${on.includes(k.id)}" aria-label="${k.aria}" title="${k.aria}">${k.icon ? icon(k.icon, 17) : k.label}</button>`).join('');
+    };
+    keysBox?.addEventListener('click', e => {
+        const btn = e.target.closest('[data-sk]');
+        if (!btn) return;
+        const id = btn.dataset.sk;
+        const on = enabledKeys();
+        settings.set('shortcutKeys', on.includes(id) ? on.filter(x => x !== id) : [...on, id]);
+        renderKeys();
+    });
+
     const sync = () => {
+        if (keysBox) renderKeys();
         body.querySelectorAll('[data-setting]').forEach(input => {
             const value = settings.get(input.dataset.setting);
             if (input.type === 'checkbox') input.checked = !!value;

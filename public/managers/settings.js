@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS = {
     // Session
     defaultCwd: '',           // empty = server default (HOME)
     shortcutBar: 'auto',      // 'auto' (with virtual keyboard) | 'always' | 'never'
+    shortcutKeys: null,       // teclas ligadas na barra de atalhos (null = as de fábrica)
 };
 
 export default class SettingsManager {
