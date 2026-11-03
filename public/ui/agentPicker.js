@@ -4,6 +4,7 @@
  * conversas dele (as abertas agora e as anteriores desta pasta) com "Nova conversa" no topo.
  */
 import { icon } from './icons.js';
+import { agentIconName } from './agent-logos.js';
 import { openSheet } from './sheet.js';
 
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
@@ -45,6 +46,8 @@ function when(iso) {
 export function openAgentPicker({ agent, folder, source, onNew, onResume, onOpen }) {
     const isPhone = document.documentElement.hasAttribute('data-iphone');
     const sheet = openSheet({ title: agent.label, className: 'agent-picker', source, page: isPhone });
+    // Logo do agente no título
+    sheet.sheet.querySelector('h3')?.insertAdjacentHTML('afterbegin', `<span class="ap-title-logo">${icon(agentIconName(agent.id), 20)}</span>`);
     let open = [];
     let past = null; // null = carregando
     let query = '';

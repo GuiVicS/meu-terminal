@@ -7,6 +7,7 @@ import { icon } from './icons.js';
 import { isHandset } from './device.js';
 import { pushStatus, enablePush, disablePush, testPush } from '../managers/push.js';
 import { toast } from './toast.js';
+import { agentIconName } from './agent-logos.js';
 
 function createDialog(id, title) {
     const dialog = document.createElement('dialog');
@@ -486,7 +487,7 @@ export function mountSettingsSections(body, { settings, getSession, commands }) 
         agentIntercept.checked = prefs.intercept;
         agentPrefs.innerHTML = agents.filter(a => !a.terminalOnly).map(a => `
             <label class="setting">
-                <span class="setting-text">${a.label}
+                <span class="setting-text"><span class="setting-agent">${icon(agentIconName(a.id), 16)} ${a.label}</span>
                     <span class="setting-help">${a.installed ? '' : 'Adaptador não instalado: abre sempre no terminal.'}</span></span>
                 <select data-agent-pref="${a.id}"${prefs.intercept ? '' : ' disabled'}>
                     <option value="ask">Perguntar</option>

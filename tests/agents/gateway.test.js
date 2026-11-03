@@ -369,3 +369,71 @@ test('conta: setAccount grava a conta, passa para o ambiente e retoma a mesma co
     assert.deepEqual(calls.at(-1), ['economia', 'trabalho']);
     await gateway.shutdown();
 });
+
+test('conversas: a lista mostra só as iniciadas pela pessoa; subagentes e sessões automáticas ficam de fora', async () => {
+    const store = new AgentStore(':memory:');
+    const gateway = new AgentGateway({
+        store, env: { ...process.env },
+        agents: { fake: { label: 'Fake', command: process.execPath, args: [FAKE], install: 'n/a' } },
+        isUserStarted: (agent, id) => id === 'old-2', // "old-2" foi aberta no terminal
+        log: () => {},
+    });
+    // o agente lista old-1 e old-2; nenhuma foi iniciada aqui
+    assert.deepEqual((await gateway.listHistory({ agent: 'fake', cwd: process.cwd() })).map(s => s.sessionId), ['old-2']);
+    assert.equal(store.getConversation('fake', 'old-2').origin, 'terminal');
+    assert.equal(store.getConversation('fake', 'old-1'), null);
+    // iniciar uma conversa grava no banco, ligada à sessão do agente e à do MeuTerminal
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    const acp = gateway.get(s.id).acpSessionId;
+    assert.equal(store.getConversation('fake', acp).session_id, s.id);
+    assert.equal(store.getConversation('fake', acp).origin, 'ui');
+    // retomar uma do histórico passa a contar como iniciada pela pessoa
+    await gateway.shutdown();
+    const r = await gateway.startSession({ agent: 'fake', cwd: process.cwd(), resumeAcpSessionId: 'old-1' });
+    assert.ok(store.getConversation('fake', gateway.get(r.id).acpSessionId));
+    store.deleteConversation('fake', 'old-2');
+    await gateway.shutdown();
+});
+
+test('conversas: sessões que já existiam entram no banco ao atualizar (sem perder nenhuma)', () => {
+    const fs = require('fs'); const os = require('os');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mt-conv-')), 'x.db');
+    const a = new AgentStore(file);
+    const row = a.insertSession({ id: 's1', agent: 'claude', cwd: '/root', title: 'Antiga' });
+    a.updateSession(row.id, { acp_session_id: 'acp-1' });
+    a.insertSession({ id: 's2', agent: 'claude', cwd: '/root' }); // nunca abriu: sem id do agente
+    a.db.exec('DROP TABLE agent_conversations');
+    a.db.close?.();
+    const b = new AgentStore(file);
+    assert.equal(b.getConversation('claude', 'acp-1').title, 'Antiga');
+    assert.equal(b.db.prepare('SELECT count(*) n FROM agent_conversations').get().n, 1);
+});
+
+test('limite: detecta no fim de um turno longo (casos reais) e não quando o agente só cita o aviso', () => {
+    const { isUsageLimitText: yes } = require('../../scripts/agents/gateway');
+    assert.ok(yes("You've hit your session limit · resets 2:30am (UTC)"));
+    assert.ok(yes(`${'x'.repeat(2020)}You've hit your session limit · resets 12:30pm (America/Sao_Paulo)`));
+    assert.ok(yes("Terminei a parte 1.\nYou've reached your usage limit"));
+    assert.ok(!yes('Tudo certo, terminei.'));
+    assert.ok(!yes(`O aviso "You've hit your usage limit", com liberação só em 5 de novembro de 2026, apareceu ontem e ${'x'.repeat(200)}`));
+    assert.ok(!yes(`You've hit your limit\n${'mais texto depois '.repeat(5)}`));
+});
+
+test('limite no meio do trabalho: chama a troca marcando que já havia trabalho feito', async () => {
+    const calls = [];
+    const gateway = new AgentGateway({
+        store: new AgentStore(':memory:'), env: { ...process.env },
+        agents: { fake: { label: 'Fake', command: process.execPath, args: [FAKE], install: 'n/a' } },
+        onUsageLimit: async c => calls.push(c), log: () => {},
+    });
+    const s = await gateway.startSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.prompt(s.id, 'limite no meio');
+    for (let i = 0; i < 100 && !calls.length; i++) await new Promise(r => setTimeout(r, 20));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].partial, true);
+    calls.length = 0;
+    await gateway.prompt(s.id, 'limite');
+    for (let i = 0; i < 100 && !calls.length; i++) await new Promise(r => setTimeout(r, 20));
+    assert.equal(calls[0].partial, false);
+    await gateway.shutdown();
+});

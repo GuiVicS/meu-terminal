@@ -122,6 +122,14 @@ function playTurn(text) {
         update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Pronto.' }, messageId: 'vm' });
         return finishTurn('end_turn');
     }
+    // o limite chega depois de trabalho já feito, como nos turnos longos reais
+    if (text.includes('meio')) {
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `${'Trabalhando. '.repeat(250)}` }, messageId: 'mm' });
+        update({ sessionUpdate: 'tool_call', toolCallId: 'mt1', title: 'ls', kind: 'execute', status: 'pending', rawInput: { command: 'ls' } });
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'mt1', status: 'completed' });
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: "You've hit your session limit · resets 2:30am (UTC)" }, messageId: 'ml' });
+        return finishTurn('end_turn');
+    }
     if (text.includes('limite')) {
         update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: "You've hit your 5-hour limit · resets 12:30am" }, messageId: 'lim' });
         return finishTurn('end_turn');

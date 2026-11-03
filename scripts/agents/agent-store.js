@@ -65,6 +65,44 @@ class AgentStore {
         if (!columns.has('route_model')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN route_model TEXT');
         // account: conta extra do Claude Code (scripts/claude-accounts.js); null = a principal
         if (!columns.has('account')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN account TEXT');
+        // Conversas que a pessoa iniciou, ligadas à sessão do agente. O histórico do agente também traz
+        // o que ele mesmo dispara (subagentes, "claude -p", plugins), sem marca que separe: a lista
+        // lateral mostra só o que está aqui. session_id: a sessão do MeuTerminal (null = terminal).
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS agent_conversations (
+                agent          TEXT NOT NULL,
+                acp_session_id TEXT NOT NULL,
+                session_id     TEXT,
+                cwd            TEXT,
+                title          TEXT,
+                origin         TEXT NOT NULL DEFAULT 'ui',
+                created_at     INTEGER NOT NULL,
+                updated_at     INTEGER NOT NULL,
+                PRIMARY KEY (agent, acp_session_id)
+            );
+            INSERT OR IGNORE INTO agent_conversations (agent, acp_session_id, session_id, cwd, title, origin, created_at, updated_at)
+                SELECT agent, acp_session_id, id, cwd, title, 'ui', created_at, updated_at
+                FROM agent_sessions WHERE acp_session_id IS NOT NULL;
+        `);
+    }
+
+    // ---------- conversas iniciadas pela pessoa ----------
+
+    saveConversation({ agent, acpSessionId, sessionId = null, cwd = null, title = null, origin = 'ui' }) {
+        const now = Date.now();
+        this.db.prepare(`INSERT INTO agent_conversations (agent, acp_session_id, session_id, cwd, title, origin, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (agent, acp_session_id) DO UPDATE SET
+                session_id = COALESCE(excluded.session_id, session_id), title = COALESCE(excluded.title, title), updated_at = excluded.updated_at`)
+            .run(agent, acpSessionId, sessionId, cwd, title, origin, now, now);
+    }
+
+    getConversation(agent, acpSessionId) {
+        return this.db.prepare('SELECT * FROM agent_conversations WHERE agent = ? AND acp_session_id = ?').get(agent, acpSessionId) || null;
+    }
+
+    deleteConversation(agent, acpSessionId) {
+        this.db.prepare('DELETE FROM agent_conversations WHERE agent = ? AND acp_session_id = ?').run(agent, acpSessionId);
     }
 
     // ---------- sessions ----------

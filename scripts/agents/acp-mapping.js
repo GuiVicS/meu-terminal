@@ -1,4 +1,5 @@
 const { visibleCommand } = require('../addons');
+const { translateOption } = require('./i18n');
 /**
  * acp-mapping.js
  * Translates ACP `session/update` notifications and permission requests into the
@@ -57,7 +58,8 @@ function normalizeConfigOptions(list) {
                 options.push({ value: item.value, name: item.name || item.value, description: item.description || '', group: null });
             }
         }
-        return {
+        // Texto em português (i18n.js); id e valores ficam como o agente mandou
+        return translateOption({
             id: o.id,
             name: o.name || o.id,
             description: o.description || '',
@@ -65,7 +67,7 @@ function normalizeConfigOptions(list) {
             type: o.type || 'select',
             currentValue: o.currentValue,
             options,
-        };
+        });
     });
 }
 

@@ -44,6 +44,7 @@ function omniroute(el, { load, call, toast }) {
     function render() {
         const u = data.usage;
         const hasCodex = data.connections.some(c => c.provider === 'codex');
+        const hasOpenCode = data.connections.some(c => c.provider === 'opencode-zen' && c.name === 'OpenCode (login do servidor)');
         el.innerHTML = `
             ${stats([['requisições', num(u.requests)], ['tokens', num(u.tokens)], ['custo', usd(u.cost)], ['sucesso', pct(u.successPct)]])}
 
@@ -58,6 +59,15 @@ function omniroute(el, { load, call, toast }) {
                         <small>Usar a assinatura do ChatGPT por um gateway pode ir contra os termos da OpenAI; uma chave de API não tem esse risco.</small></span>
                     <button type="button" class="btn btn-primary btn-sm" data-act="codex">Usar minha conta do Codex</button>
                 </div>` : ''}
+            ${data.openCodeLogin && !hasOpenCode ? `
+                <div class="ad-callout">
+                    <span>Você já está logado no OpenCode neste servidor. Conecte esse login para usar os modelos pagos dele no Claude Code, sem chave de API.
+                        <small>Precisa de saldo em opencode.ai/zen. Os modelos gratuitos só funcionam dentro do OpenCode: para eles, abra o agente OpenCode no Modo UI. Usar o login por um gateway pode ir contra os termos do serviço.</small></span>
+                    <button type="button" class="btn btn-primary btn-sm" data-act="opencode">Usar meu login do OpenCode</button>
+                </div>` : ''}
+            ${hasOpenCode && data.openCodeLogin?.expiresInDays != null && data.openCodeLogin.expiresInDays < 3 ? `
+                <div class="ad-callout"><span>O login do OpenCode vence em ${Math.max(0, data.openCodeLogin.expiresInDays)} dia(s).
+                    <small>Use o OpenCode uma vez ou rode "opencode auth login" para renovar; a conexão acompanha sozinha.</small></span></div>` : ''}
             <ul class="rm-list">${data.connections.length ? data.connections.map(c => {
                 const [cls, label] = STATUS[c.status] || ['', c.status];
                 return `
@@ -162,6 +172,10 @@ function omniroute(el, { load, call, toast }) {
             } else if (act === 'clear-model') {
                 data.model = (await call('setModel', { model: '' })).model;
                 render();
+            } else if (act === 'opencode') {
+                await call('importOpenCode');
+                toast('Login do OpenCode conectado.');
+                await refresh();
             } else if (act === 'codex') {
                 await call('importCodex');
                 toast('Conta do Codex conectada.');

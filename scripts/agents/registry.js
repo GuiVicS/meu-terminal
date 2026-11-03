@@ -34,8 +34,8 @@ const AGENTS = {
     },
     // agy has no ACP mode: agy-acp.js adapts its stream-json headless mode (no permission prompts there)
     agy: {
-        label: 'agy',
-        uiName: 'agy UI',
+        label: 'Antigravity',
+        uiName: 'Antigravity UI',
         command: process.execPath,
         args: [path.join(__dirname, 'agy-acp.js')],
         requires: 'agy',

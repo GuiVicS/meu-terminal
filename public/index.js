@@ -429,7 +429,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             { group: 'Ações', label: 'Atalhos de teclado', icon: 'keyboard', run: () => shortcutsDialog.open() },
         ];
         const tabs = [...workspace.sessions.values()].map(x => ({
-            group: 'Abas abertas', label: x.name, hint: x.cwd || '', icon: x.kind === 'agent' ? 'bot' : x.kind === 'files' ? 'folder' : x.kind === 'notes' ? 'notes' : x.kind === 'browser' ? 'globe' : 'terminal',
+            group: 'Abas abertas', label: x.name, hint: x.cwd || '', icon: x.kind === 'agent' ? sessionIcon(x) : x.kind === 'files' ? 'folder' : x.kind === 'notes' ? 'notes' : x.kind === 'browser' ? 'globe' : 'terminal',
             run: () => workspace.activate(x.id, { focus: true }),
         }));
         return [...actions, ...tabs, ...sidebar.paletteItems()];

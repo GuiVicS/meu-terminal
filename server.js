@@ -42,9 +42,10 @@ const { AgentLauncher } = require('./scripts/agents/launch');
 const { writeShims, writeRcFile } = require('./scripts/agents/shims');
 const { execFile } = require('child_process');
 const { Addons, SERVICES } = require('./scripts/addons');
-const { deleteConversation, canDelete: canDeleteConversation } = require('./scripts/agents/history-files');
+const { deleteConversation, canDelete: canDeleteConversation, startedInTerminal } = require('./scripts/agents/history-files');
 const { detectAgents, searchDirs } = require('./scripts/agents/detect');
 const { ClaudeAccounts } = require('./scripts/claude-accounts');
+const { listOpenCodeModels } = require('./scripts/opencode-login');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
@@ -862,7 +863,7 @@ const LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
  * (Configurações → Complementos) que não seja o atual e esteja disponível: outra conta do Claude
  * Code ou um modelo do OmniRoute. Se esse também estiver no limite, o próximo aviso move de novo.
  */
-async function usageLimitFallback({ sessionId, row, text, images }) {
+async function usageLimitFallback({ sessionId, row, text, images, partial = false }) {
     const prefs = addons.prefs();
     if (!prefs.fallback.enabled || row.agent !== 'claude' || normalizeRoute(row.route) === 'omniroute') return;
     const now = Date.now();
@@ -893,7 +894,9 @@ async function usageLimitFallback({ sessionId, row, text, images }) {
     agentGateway.emitEvent(sessionId, 'notice', { text: `O limite do Claude acabou: continuando ${target.label}…` });
     if (target.model) await agentGateway.setRoute(sessionId, 'omniroute', target.model);
     else await agentGateway.setAccount(sessionId, target.account);
-    if (text && text.trim() || (images && images.length)) await agentGateway.prompt(sessionId, text, { images });
+    // Parou no meio do trabalho: continua de onde estava (reenviar repetiria o que já foi feito)
+    if (partial) await agentGateway.prompt(sessionId, 'O limite de uso interrompeu a sua resposta anterior. Continue de onde parou, sem refazer o que já foi concluído.');
+    else if (text && text.trim() || (images && images.length)) await agentGateway.prompt(sessionId, text, { images });
 }
 
 const claudeAccounts = new ClaudeAccounts({ home: HOME_DIR, env: childEnv({ HOME: HOME_DIR }) });
@@ -910,6 +913,7 @@ const agentGateway = new AgentGateway({
     routeEnv: agentRouteEnv,
     onUsageLimit: usageLimitFallback,
     extraModels: extraAgentModels,
+    isUserStarted: (agent, id) => startedInTerminal(agent, id, HOME_DIR),
     log: debugLog,
 });
 // Os agentes acham os programas instalados nas pastas do usuário (~/.local/bin, ~/.opencode/bin...)
@@ -1095,12 +1099,19 @@ app.put(BASE_PATH + '/api/addons', async (req, res) => {
 // Telas dos complementos dentro das Configurações (scripts/addon-bridges.js): o servidor fala com
 // cada serviço em 127.0.0.1; o usuário não abre painel no navegador nem faz outro login.
 const bridges = {
-    omniroute: new OmniRouteBridge({ port: SERVICES.omniroute.port, password: () => addons.serviceSecrets('omniroute').INITIAL_PASSWORD, home: HOME_DIR }),
+    omniroute: new OmniRouteBridge({ port: SERVICES.omniroute.port, password: () => addons.serviceSecrets('omniroute').INITIAL_PASSWORD, home: HOME_DIR,
+        openCodeModels: () => listOpenCodeModels({ env: { ...agentGateway.env } }) }),
     'claude-mem': new ClaudeMemBridge(),
     headroom: new HeadroomBridge({ port: SERVICES.headroom.port }),
 };
 
 /** Com o OmniRoute ligado e sem chave salva, cria a chave da rota "Outros modelos". */
+// O OpenCode renova o próprio token: a conexão do OmniRoute acompanha (só lê, a cada hora)
+setInterval(() => {
+    if (!addons.prefs().services.omniroute?.enabled) return;
+    bridges.omniroute.syncOpenCode(HOME_DIR).catch(() => { /* OmniRoute parado: tenta na próxima */ });
+}, 60 * 60 * 1000).unref?.();
+
 async function ensureOmniKey() {
     const omni = addons.prefs().services.omniroute || {};
     if (!omni.enabled || omni.apiKey) return;
@@ -1147,6 +1158,7 @@ app.get(BASE_PATH + '/api/addons/:id/panel', async (req, res) => {
         if (req.params.id === 'omniroute') {
             data.model = addons.prefs().services.omniroute?.model || null;
             data.codexLogin = OmniRouteBridge.hasCodexLogin(HOME_DIR);
+            data.openCodeLogin = OmniRouteBridge.openCodeLoginInfo(HOME_DIR);
         }
         res.json(data);
     } catch (e) {
@@ -1186,6 +1198,7 @@ const BRIDGE_ACTIONS = {
         models: (b, a) => b.models(String(a.id || '')),
         allModels: b => b.allModels(),
         importCodex: b => b.importCodex(HOME_DIR),
+        importOpenCode: b => b.importOpenCode(HOME_DIR),
         setModel: (b, a) => {
             const model = typeof a.model === 'string' ? a.model : '';
             addons.setPrefs({ services: { omniroute: { model } } });
@@ -1335,7 +1348,9 @@ app.delete(BASE_PATH + '/api/agent-history/:agent/:acpId', agentRoute(async (req
         await agentGateway.closeSession(s.id).catch(() => {});
     }
     try {
-        res.json(deleteConversation(agent, acpId, HOME_DIR));
+        const trashed = deleteConversation(agent, acpId, HOME_DIR);
+        agentGateway.store.deleteConversation(agent, acpId);
+        res.json(trashed);
     } catch (e) {
         res.status(e.status || 500).json({ error: e.message });
     }

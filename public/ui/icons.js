@@ -5,6 +5,7 @@
  * (e.g. 'more', 'bolt') or the official Lucide names (e.g. 'ellipsis-vertical', 'zap').
  */
 import ICONS from './lucide-icons.js';
+import { agentLogoSvg } from './agent-logos.js';
 
 /**
  * Returns the SVG markup for an icon. Icons are decorative (aria-hidden):
@@ -13,6 +14,11 @@ import ICONS from './lucide-icons.js';
  * @param {number} size - Pixel size
  */
 export function icon(name, size = 16) {
+    if (String(name).startsWith('agent:')) {
+        const logo = agentLogoSvg(name.slice(6), size);
+        if (logo) return logo;
+        name = 'bot';
+    }
     return `<svg class="icon icon-${name}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" `
         + `stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" `
         + `aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
