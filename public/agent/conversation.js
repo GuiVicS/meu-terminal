@@ -151,6 +151,7 @@ export default class Conversation {
         this.turn = null;             // container of the current turn
         this.pendingRender = new Set();
         this.frame = 0;
+        this.batching = false;
         this.log.addEventListener('click', e => this.onClick(e));
     }
 
@@ -162,10 +163,37 @@ export default class Conversation {
 
     /** Runs a DOM change and keeps the view pinned to the bottom if it was there. */
     keepBottom(fn) {
+        if (this.batching) return fn(); // em lote, ninguém mede nada: a rolagem é acertada no fim
         const stick = this.nearBottom();
         const result = fn();
         if (stick) this.log.scrollTop = this.log.scrollHeight;
         return result;
+    }
+
+    /** Aplica vários eventos de uma vez: a tela só é desenhada no fim, nunca de cima para baixo. */
+    batch(fn) {
+        this.batching = true;
+        try {
+            fn();
+        } finally {
+            this.batching = false;
+            [...this.pendingRender].forEach(b => this.renderNow(b));
+        }
+    }
+
+    /**
+     * Desenha turnos anteriores à parte, para entrarem de uma vez no topo. Compartilha as ferramentas:
+     * os cliques dos cartões chegam neste log depois que eles mudam de lugar.
+     * @returns {Node[]}
+     */
+    renderOlder(events) {
+        const view = new this.constructor(document.createElement('div'), { cwd: this.cwd, onPermission: this.onPermission, onOpenFile: this.onOpenFile, onRetry: this.onRetry });
+        view.tools = this.tools;
+        view.batch(() => {
+            events.forEach(e => view.apply(e));
+            view.endStreams();
+        });
+        return [...view.log.childNodes];
     }
 
     /** Texto da última resposta (o mesmo do botão Copiar). */
@@ -211,7 +239,7 @@ export default class Conversation {
     /** Coalesces Markdown re-renders to one per animation frame. */
     schedule(block) {
         this.pendingRender.add(block);
-        if (this.frame) return;
+        if (this.frame || this.batching) return;
         this.frame = requestAnimationFrame(() => {
             this.frame = 0;
             const blocks = [...this.pendingRender];
