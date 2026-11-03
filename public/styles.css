@@ -4210,11 +4210,10 @@ audio.fm-media { width: min(520px, 90%); }
 .agent-logo { flex-shrink: 0; display: block; }
 .tab-logo { position: relative; display: inline-grid; place-items: center; width: 18px; height: 18px; flex-shrink: 0; }
 .tab-logo[hidden] { display: none; }
-.tab.agent .tab-logo:not([hidden]) + .tab-dot {
+.tab .tab-logo:not([hidden]) + .tab-dot {
     position: absolute; left: 25px; top: calc(50% + 3px); width: 8px; height: 8px; margin: 0; z-index: 1;
     border: 1.5px solid var(--surface); box-sizing: content-box;
 }
-:root[data-desktop] .tab.agent.active .tab-logo:not([hidden]) + .tab-dot { border-color: var(--bg); }
 .ag-head-icon .agent-logo { width: 19px; height: 19px; }
 .ap-title-logo { display: inline-grid; vertical-align: -3px; margin-right: 8px; }
 .cv-title { display: flex; align-items: center; gap: 10px; }
@@ -4329,8 +4328,8 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .tab { height: 38px; border-radius: 19px; }
 :root[data-desktop] .tab:hover { background: var(--glass-fill); }
 :root[data-desktop] .tab.active { background: var(--glass-fill-pressed); border-color: transparent; box-shadow: none; }
-:root[data-desktop] .tab.agent .tab-logo:not([hidden]) + .tab-dot,
-:root[data-desktop] .tab.agent.active .tab-logo:not([hidden]) + .tab-dot { border-color: transparent; }
+:root[data-desktop] .tab .tab-logo:not([hidden]) + .tab-dot { border-color: transparent; width: 7px; height: 7px; }
+.tab .tab-logo { color: var(--c); }
 :root[data-desktop] .new-tab { width: 36px; height: 36px; border: none; border-radius: 50%; background: var(--glass-fill); box-shadow: none; flex-shrink: 0; }
 :root[data-desktop] .topbar-actions { display: flex; align-items: center; gap: 8px; }
 :root[data-desktop] .topbar-actions .icon-btn { width: 44px; height: 44px; color: var(--text); }
@@ -4383,7 +4382,6 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .ag-selectors .ag-select, :root[data-desktop] .ag-selectors .ag-toggle { height: 44px; padding: 0 12px; border: none; border-radius: 22px; background: var(--glass-fill); color: var(--text); }
 :root[data-desktop] .ag-selectors .ag-select:hover, :root[data-desktop] .ag-selectors .ag-toggle:hover { background: var(--glass-fill-pressed); }
 :root[data-desktop] .ag-jump { bottom: 150px; }
-/* rolando, o campo fica sem desfoque: redesenhá-lo a cada quadro pesa */
 
 /* painel direito: flutua, como a folha do celular */
 :root[data-desktop] .ag-side { margin: 8px 8px 8px 0; padding: 18px; border-left: 0.5px solid var(--glass-border); }
@@ -4439,14 +4437,8 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .dk-row.is-current { background: var(--glass-fill); }
 :root[data-desktop] .dk-side-foot { margin-top: 6px; padding-top: 6px; }
 
-/* conversa: sem barra de status; abas só com mais de uma aberta */
+/* conversa: sem barra de status; a barra de abas é igual em todas as abas */
 :root[data-desktop] body:has(.agent-panel.active) .statusbar { display: none; }
-:root[data-desktop] body:has(.agent-panel.active) .tabstrip:has(.tab:only-child) { visibility: hidden; }
-:root[data-desktop] body:has(.agent-panel.active) .topbar { padding: 6px 10px 0; }
-:root[data-desktop] body:has(.agent-panel.active) .tabstrip { height: 40px; }
-:root[data-desktop] body:has(.agent-panel.active) .tab { height: 32px; }
-:root[data-desktop] body:has(.agent-panel.active) .new-tab { width: 30px; height: 30px; }
-:root[data-desktop] body:has(.agent-panel.active) .topbar-actions .icon-btn { width: 36px; height: 36px; background: transparent; background-image: none; border: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; color: var(--text-2); }
 :root[data-desktop] .ag-head { min-height: 44px; padding: 2px 14px; border-bottom: none; background: transparent; }
 :root[data-desktop] .ag-head .icon-btn { width: 34px; height: 34px; border-radius: 8px; background: transparent; background-image: none; border: none; box-shadow: none; color: var(--text-2); }
 :root[data-desktop] .ag-head .icon-btn:hover { background: var(--glass-fill); color: var(--text); }
@@ -4469,7 +4461,6 @@ audio.fm-media { width: min(520px, 90%); }
     -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
     border: 0.5px solid var(--glass-border); box-shadow: var(--glass-edge), var(--glass-shadow);
 }
-:root[data-desktop] .ag-scrolling .ag-composer::before { -webkit-backdrop-filter: none; backdrop-filter: none; }
 :root[data-desktop] .ag-composer textarea { min-height: 68px; padding: 16px 20px 4px; font-size: 16px; }
 :root[data-desktop] .ag-composer .ag-images { padding: 12px 16px 0; }
 :root[data-desktop] .ag-composer .ag-attach-btn { width: 34px; height: 34px; margin: 0 0 12px 12px; border-radius: 8px; background: transparent; }
@@ -4495,13 +4486,36 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .ag-welcome .ag-hello { margin: 0; font-size: 40px; font-weight: 500; letter-spacing: -.02em; }
 :root[data-desktop] .ag-welcome p, :root[data-desktop] .ag-welcome .ag-tips { display: none; }
 :root[data-desktop] .ag-composer textarea { min-height: 84px; }
-/* uma aba só: os botões da barra de cima dividem a linha com os da conversa */
-:root[data-desktop] body:has(.agent-panel.active):has(.tab-list .tab:only-child) .tabstrip { display: none; }
-:root[data-desktop] body:has(.agent-panel.active):has(.tab-list .tab:only-child) .topbar { position: absolute; top: 6px; right: 8px; z-index: 7; padding: 0; }
-:root[data-desktop] body:has(.agent-panel.active):has(.tab-list .tab:only-child) .ag-head { padding-right: 96px; }
 
 /* conversa não lida: bolinha roxa e título em destaque; pedindo permissão, laranja */
 .conv-unread { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
 .conv-unread.is-waiting { background: var(--warning); }
 .is-unread .dk-row-title, .is-unread .cv-row-title { font-weight: 600; }
 .dk-archived { margin: 10px 12px; }
+
+/* Comandos rápidos no desktop: só esta bolinha flutuante, em aba de terminal */
+.dk-cmds { display: none; }
+:root[data-desktop] .dk-cmds:not([hidden]) {
+    display: grid; place-items: center; position: fixed; z-index: 15; right: 20px; bottom: calc(var(--status-h) + 20px);
+    width: 48px; height: 48px; padding: 0; border-radius: 50%; color: var(--text); cursor: pointer;
+    background-color: var(--glass-bg); background-image: var(--glass-sheen-img);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border: 0.5px solid var(--glass-border); box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+:root[data-desktop] .dk-cmds:hover { color: var(--accent); }
+:root[data-desktop] .popover {
+    border: 0.5px solid var(--glass-border); border-radius: 22px; background-color: var(--glass-bg-dense); background-image: var(--glass-sheen-img);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+
+/* A lista lateral é do chat: nas outras abas (e na página de apps) a tela fica inteira */
+:root[data-desktop][data-no-sidebar] .dk-side, :root[data-desktop][data-no-sidebar] .dk-reopen,
+:root[data-desktop] body:has(.new-session:not([hidden])) .dk-side,
+:root[data-desktop] body:has(.new-session:not([hidden])) .dk-reopen { display: none; }
+:root[data-desktop][data-no-sidebar] .app { margin-left: 0; }
+:root[data-desktop][data-no-sidebar] .topbar { padding-left: 10px; }
+:root[data-desktop] .dk-scroll { flex: 1; min-height: 0; }
+
+/* Ir para o fim no terminal: o mesmo botão da conversa */
+.term-jump { position: absolute; z-index: 6; left: 50%; transform: translateX(-50%); bottom: 16px; }
+:root[data-desktop] .term-jump { bottom: 20px; }

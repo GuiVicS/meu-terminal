@@ -574,3 +574,17 @@ test('não lida: fica marcada quando o agente termina ou pede permissão; mensag
     assert.equal(store.getConversation('fake', acp).unread, 1);
     await gateway.shutdown();
 });
+
+test('cópia no SQL: guarda, atualiza e some ao apagar', () => {
+    const store = new AgentStore(':memory:');
+    store.indexConversation({ agent: 'a', acpSessionId: 'x1', title: 'Um' });
+    assert.equal(store.getTranscript('a', 'x1'), null);
+    store.saveTranscript('a', 'x1', 10, [{ type: 'message.user', data: { text: 'oi' } }]);
+    assert.equal(store.getTranscript('a', 'x1').events[0].data.text, 'oi');
+    store.saveTranscript('a', 'x1', 20, [{ type: 'message.user', data: { text: 'novo' } }]);
+    assert.equal(store.getTranscript('a', 'x1').stamp, 20);
+    assert.equal(store.conversationsToArchive().length, 1);
+    store.deleteConversation('a', 'x1');
+    assert.equal(store.getTranscript('a', 'x1'), null);
+    assert.equal(store.conversationsToArchive().length, 0);
+});

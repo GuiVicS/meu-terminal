@@ -78,3 +78,17 @@ test('índice do disco: só o que a pessoa abriu; subagente e automático ficam 
     assert.deepEqual(listOnDisk(home, seen), []);
     fs.rmSync(home, { recursive: true, force: true });
 });
+
+test('versão do original: muda com o arquivo; sem fonte, null', () => {
+    const { transcriptStamp } = require('../../scripts/agents/transcript');
+    const home = fixture();
+    const a = transcriptStamp('claude', 'clau-cli', home);
+    assert.equal(typeof a, 'number');
+    fs.utimesSync(path.join(home, '.claude', 'projects', '-root', 'clau-cli.jsonl'), new Date(), new Date(Date.now() + 5000));
+    assert.notEqual(transcriptStamp('claude', 'clau-cli', home), a);
+    assert.equal(typeof transcriptStamp('codex', 'code-1', home), 'number');
+    assert.equal(transcriptStamp('opencode', 'oc-1', home), 5);
+    assert.equal(transcriptStamp('claude', 'nao-existe', home), null);
+    assert.equal(transcriptStamp('agy', 'x-1234', home), null);
+    fs.rmSync(home, { recursive: true, force: true });
+});

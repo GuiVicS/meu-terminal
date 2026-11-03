@@ -87,6 +87,10 @@ class AgentStore {
         // pending: modo e opções escolhidos antes de o agente subir (aplicados ao subir)
         if (!columns.has('pending')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN pending TEXT');
         if (!columns.has('from_disk')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN from_disk INTEGER');
+        // Cópia para ver as conversas de fora do app; stamp diz de que versão do original ela é
+        this.db.exec(`CREATE TABLE IF NOT EXISTS agent_transcripts (
+            agent TEXT NOT NULL, acp_session_id TEXT NOT NULL, stamp REAL, events TEXT NOT NULL, updated_at INTEGER NOT NULL,
+            PRIMARY KEY (agent, acp_session_id))`);
         const conv = new Set(this.db.prepare('PRAGMA table_info(agent_conversations)').all().map(c => c.name));
         // custom_title: nome dado pela pessoa (o agente não troca); archived_at: fora da lista principal;
         // unread: o agente terminou ou pediu algo e a pessoa ainda não viu
@@ -130,8 +134,25 @@ class AgentStore {
         return this.db.prepare('SELECT * FROM agent_conversations WHERE agent = ? AND acp_session_id = ?').get(agent, acpSessionId) || null;
     }
 
+    getTranscript(agent, acpSessionId) {
+        const row = this.db.prepare('SELECT stamp, events FROM agent_transcripts WHERE agent = ? AND acp_session_id = ?').get(agent, acpSessionId);
+        return row ? { stamp: row.stamp, events: parseJson(row.events, []) } : null;
+    }
+
+    saveTranscript(agent, acpSessionId, stamp, events) {
+        this.db.prepare(`INSERT INTO agent_transcripts (agent, acp_session_id, stamp, events, updated_at) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (agent, acp_session_id) DO UPDATE SET stamp = excluded.stamp, events = excluded.events, updated_at = excluded.updated_at`)
+            .run(agent, acpSessionId, stamp, JSON.stringify(events), Date.now());
+    }
+
+    /** Conversas da lista que podem ter conteúdo fora do app. */
+    conversationsToArchive() {
+        return this.db.prepare('SELECT agent, acp_session_id FROM agent_conversations WHERE has_messages = 1 AND deleted_at IS NULL').all();
+    }
+
     /** Apagada: some da lista e o índice do disco não a traz de volta. */
     deleteConversation(agent, acpSessionId) {
+        this.db.prepare('DELETE FROM agent_transcripts WHERE agent = ? AND acp_session_id = ?').run(agent, acpSessionId);
         this.db.prepare(`INSERT INTO agent_conversations (agent, acp_session_id, origin, created_at, updated_at, deleted_at)
             VALUES (?, ?, 'ui', ?, ?, ?) ON CONFLICT (agent, acp_session_id) DO UPDATE SET deleted_at = excluded.deleted_at`)
             .run(agent, acpSessionId, Date.now(), Date.now(), Date.now());

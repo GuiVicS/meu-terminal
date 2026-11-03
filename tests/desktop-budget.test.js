@@ -15,7 +15,7 @@ const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'ui', 'conversat
 const FLOATING = ['.tabstrip', '.topbar-actions .icon-btn', '.ag-jump', '.dk-reopen', '.ns-close', '.ns-settings',
     '.browser-toolbar [data-act="back"]', '.browser-more', '.browser-pill', '.fm-toolbar', '.nt-toolbar',
     '.ag-composer::before', '.ag-side', '.menu', '.toast', '.dialog', '.cp', '.search-bar', '.fm-selbar', '.fm-pastebar', '.nt-fbar',
-    '.settings-sheet.sheet-page .ag-sheet', '.agent-picker .ag-sheet'];
+    '.settings-sheet.sheet-page .ag-sheet', '.agent-picker .ag-sheet', '.dk-cmds:not([hidden])', '.popover'];
 
 test('desktop com a cor original do app: nenhum gradiente próprio', () => {
     assert.ok(!/--dk-wall/.test(css));

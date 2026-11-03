@@ -4,7 +4,8 @@
  * cada formato é lido direto de onde o agente guarda. Só leitura. Formato desconhecido: lista vazia
  * (a conversa ainda pode ser retomada; quem responde por ela é o próprio agente).
  *  - listOnDisk: as conversas abertas fora do app (terminal), para o índice no SQL.
- *  - readTranscript: o conteúdo, como os mesmos eventos do chat (não é gravado em lugar nenhum).
+ *  - readTranscript: o conteúdo, como os mesmos eventos do chat. O servidor guarda uma cópia no SQL
+ *    (agent_transcripts), para abrir sem reler e para a conversa seguir visível se o arquivo sumir.
  */
 const fs = require('fs');
 const path = require('path');
@@ -185,6 +186,31 @@ function openCodeEvents(home, id) {
 
 const READERS = { claude: claudeEvents, codex: codexEvents, opencode: openCodeEvents };
 
+/** Identifica a versão atual da conversa no agente (null = sem fonte: arquivo sumiu ou agente sem leitor). */
+function transcriptStamp(agent, id, home) {
+    if (typeof id !== 'string' || !/^[\w-]{4,120}$/.test(id)) return null;
+    try {
+        if (agent === 'claude' || agent === 'codex') {
+            let file = null;
+            const root = agent === 'claude' ? path.join(home, '.claude', 'projects') : path.join(home, '.codex', 'sessions');
+            walk(root, agent === 'claude' ? 1 : 4, f => {
+                if (!file && (agent === 'claude' ? path.basename(f, '.jsonl') === id : f.endsWith(`${id}.jsonl`))) file = f;
+            });
+            return file ? fs.statSync(file).mtimeMs : null;
+        }
+        if (agent === 'opencode') {
+            const db = openDb(home);
+            if (!db) return null;
+            try {
+                return db.prepare('SELECT time_updated t FROM session WHERE id = ?').get(id)?.t ?? null;
+            } finally {
+                db.close();
+            }
+        }
+    } catch { /* sem fonte */ }
+    return null;
+}
+
 /** O conteúdo da conversa, como eventos do chat (os mais recentes, se for enorme). */
 function readTranscript(agent, id, home, { limit = 1500 } = {}) {
     if (!READERS[agent] || typeof id !== 'string' || !/^[\w-]{4,120}$/.test(id)) return [];
@@ -195,4 +221,4 @@ function readTranscript(agent, id, home, { limit = 1500 } = {}) {
     }
 }
 
-module.exports = { readTranscript, listOnDisk };
+module.exports = { readTranscript, listOnDisk, transcriptStamp };

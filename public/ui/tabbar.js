@@ -6,6 +6,8 @@
  */
 import { icon } from './icons.js';
 import { agentIconName } from './agent-logos.js';
+
+const KIND_ICONS = { terminal: 'terminal', browser: 'globe', files: 'folder', notes: 'notes' };
 import { haptic } from './haptics.js';
 
 const STATE_LABELS = {
@@ -164,15 +166,14 @@ export default class TabBar {
         el.classList.toggle('files', session.kind === 'files');
         el.classList.toggle('notes', session.kind === 'notes');
         el.classList.toggle('agent', session.kind === 'agent');
-        if (session.kind === 'agent') {
-            // O logo do agente na aba; a bolinha de estado fica no cantinho dele
-            const logo = el.querySelector('.tab-logo');
-            if (logo.dataset.agent !== session.agentId) {
-                logo.dataset.agent = session.agentId || '';
-                logo.innerHTML = icon(agentIconName(session.agentId), 17);
-            }
-            logo.hidden = false;
+        // O ícone de cada tipo de aba (logo, no caso de agente); a bolinha de estado fica no cantinho dele
+        const iconName = session.kind === 'agent' ? agentIconName(session.agentId) : (KIND_ICONS[session.kind] || 'terminal');
+        const logo = el.querySelector('.tab-logo');
+        if (logo.dataset.icon !== iconName) {
+            logo.dataset.icon = iconName;
+            logo.innerHTML = icon(iconName, 17);
         }
+        logo.hidden = false;
         el.classList.toggle('pinned', session.pinned);
         el.classList.toggle('activity', session.hasActivity && session.id !== this.activeId);
         const stateLabel = STATE_LABELS[session.state] || session.state;
