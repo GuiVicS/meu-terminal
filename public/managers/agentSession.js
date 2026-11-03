@@ -18,7 +18,6 @@ import { esc } from '../agent/markdown.js';
 const CONVERSATION_EVENT = /^(message\.|tool\.|thought\.|plan\.|permission\.|subagent\.|media)/;
 import { isIphonePortrait } from '../ui/device.js';
 import { attachEdgeFade } from '../ui/edgeFade.js';
-import { fetchAccounts } from '../ui/accountRow.js';
 import { openFolderMenu } from '../ui/folderPicker.js';
 import { haptic } from '../ui/haptics.js';
 import { keepScreenOn } from '../ui/permissions.js';
@@ -251,12 +250,16 @@ export default class AgentSession {
         }, true);
         this.el.log.addEventListener('scroll', () => {
             this.el.jump.hidden = this.conversation.nearBottom();
+            if (this.pendingHistory && this.conversation.nearBottom()) this.applyHistory(this.pendingHistory);
             if (this.el.log.scrollTop < OLDER_MARGIN) this.loadOlderIfNeeded();
         }, { passive: true });
         this.el.jump.addEventListener('click', () => {
             this.el.log.scrollTop = this.el.log.scrollHeight;
         });
         this.logFade = attachEdgeFade(this.el.log);
+        this.probeEvery = setInterval(() => {
+            if (document.visibilityState === 'visible') this.probeConnection();
+        }, 30000);
         // A área mudou de tamanho (painel abriu, campo cresceu): quem estava no fim continua no fim
         this.logResize = new ResizeObserver(() => {
             if (this.conversation.nearBottom()) this.el.log.scrollTop = this.el.log.scrollHeight;
@@ -287,6 +290,7 @@ export default class AgentSession {
         try {
             this.vibeProject = await api('GET', `vibe/tab/${encodeURIComponent(this.id)}`);
             if (!this.vibeProject) return;
+            this.hooks.onPairChanged?.(); // celular: dá para puxar a prévia
             this.el.publishBtn.hidden = !this.vibeProject.can_publish;
         } catch {
             this.vibeProject = null;
@@ -404,6 +408,7 @@ export default class AgentSession {
             }
             if (m.type === 'agent-session') this.applySession(m.session);
             else if (m.type === 'agent-event') this.applyEvent(m.event);
+            else if (m.type === 'app-pong') clearTimeout(this.probeTimer);
             else if (m.type === 'agent-history') this.applyHistory(m);
             else if (m.type === 'agent-side') this.applySide(m.events);
             else if (m.type === 'ready') this.onReady();
@@ -439,7 +444,29 @@ export default class AgentSession {
         if (this.state === STATE.DISCONNECTED) {
             this.reconnectAttempts = 0;
             this.connect();
+        } else {
+            this.probeConnection();
         }
+    }
+
+    /**
+     * Celular que dormiu: a conexão parece aberta, mas morreu, e nada mais chega. Pergunta ao servidor;
+     * sem resposta, reconecta e busca o que perdeu.
+     */
+    probeConnection() {
+        const ws = this.ws;
+        if (this.disposed || !ws || ws.readyState !== WebSocket.OPEN) return;
+        clearTimeout(this.probeTimer);
+        try {
+            ws.send(JSON.stringify({ type: 'app-ping' }));
+        } catch { /* a resposta não vem: reconecta abaixo */ }
+        this.probeTimer = setTimeout(() => {
+            if (this.ws !== ws || this.disposed) return;
+            this.ws = null; // a conexão morta pode demorar a avisar que fechou
+            try { ws.close(); } catch { /* já era */ }
+            this.reconnectAttempts = 0;
+            this.connect();
+        }, 4000);
     }
 
     setState(state) {
@@ -497,9 +524,20 @@ export default class AgentSession {
     }
 
     /** A abertura: o fim da conversa de uma vez só, já na última mensagem. O resto vem ao subir. */
-    applyHistory({ transcript = false, meta = [], events = [], firstTurn = 0, lastSeq = 0, title = null }) {
-        if (this.lastSeq < lastSeq && this.historyShown) this.lastSeq = lastSeq;
-        if (this.historyShown) return;
+    applyHistory(message) {
+        const { transcript = false, meta = [], events = [], firstTurn = 0, lastSeq = 0, title = null } = message;
+        if (this.historyShown) {
+            // De novo: a conexão voltou, ou a conversa andou fora do app. Quem está lendo lá em cima
+            // não é tirado do lugar: atualiza ao voltar para o fim
+            if (!events.length && !meta.length) return;
+            if (!this.conversation.nearBottom()) {
+                this.pendingHistory = message;
+                return;
+            }
+            this.pendingHistory = null;
+            this.conversation.clear();
+            this.lastSeq = 0;
+        }
         this.historyShown = true;
         if (title && this.session && !this.session.title) this.session.title = title; // da primeira mensagem, que pode não ter vindo
         const activity = this.hasActivity; // o que já aconteceu não é novidade
@@ -924,21 +962,10 @@ export default class AgentSession {
         })), { anchor, label: 'Rota do Claude Code' });
     }
 
-    /** Contas do Claude Code: troca a conta da conversa (pela rota direta). */
-    async openAccountMenu(anchor, onDone) {
-        const accounts = await fetchAccounts({ fresh: true });
-        const direct = (this.session?.route || 'direto') === 'direto';
-        const cur = this.session?.account || '';
-        showMenu(accounts.map(a => {
-            const active = a.id === cur && direct;
-            return {
-                label: a.email ? `${a.name} · ${a.email}` : a.name,
-                icon: active ? 'check' : 'user',
-                hint: a.loggedIn ? (a.limitedUntil ? 'no limite' : '') : 'sem login',
-                disabled: !a.loggedIn || active,
-                run: this.switchClaude('account', { account: a.id }, `a conta ${a.name}`, onDone),
-            };
-        }), { anchor, label: 'Trocar de conta' });
+    /** Troca a conta desta conversa. Agente que separa as conversas por conta: vale para a nova. */
+    useAccount(account, { fresh = false } = {}) {
+        if (fresh) return this.startConversation({ account: account.id });
+        return this.switchClaude('account', { account: account.id }, `a conta ${account.name}`)();
     }
 
     /** Whether this agent can list its past conversations (ACP session/list). */
@@ -1039,6 +1066,8 @@ export default class AgentSession {
         this.disposed = true;
         this.logResize?.disconnect();
         this.logFade?.destroy();
+        clearInterval(this.probeEvery);
+        clearTimeout(this.probeTimer);
         this.timers.forEach(clearTimeout);
         this.timers.clear();
         this.mediaQuery?.removeEventListener('change', this.onMedia);

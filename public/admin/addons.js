@@ -113,7 +113,8 @@ export function mountAddonsSection(section) {
                     <span class="setting-help">No Modo UI, a conversa continua pela próxima opção da lista abaixo (outra conta do Claude Code ou um modelo do OmniRoute), na mesma conversa, e a mensagem é reenviada.</span></span>
                 <input type="checkbox" class="switch" data-fallback ${state.fallback?.enabled ? 'checked' : ''}>
             </label>
-            <div data-claude-box><p class="setting-help">Carregando contas…</p></div>`;
+            <div data-claude-box><p class="setting-help">Carregando contas…</p></div>
+            <div data-agent-accounts></div>`;
     }
 
     const CHAIN_LABEL = (item, accounts, models) => {
@@ -124,6 +125,24 @@ export function mountAddonsSection(section) {
         const m = models.find(x => x.id === item.slice(7));
         return { icon: 'bot', text: m ? `${m.provider} · ${m.name}` : item.slice(7) };
     };
+
+    /** Contas dos outros agentes (a do Claude Code tem caixa própria, com a troca automática). */
+    async function loadOtherAccounts() {
+        const box = section.querySelector('[data-agent-accounts]');
+        if (!box) return;
+        const agents = [['codex', 'Codex'], ['opencode', 'OpenCode'], ['agy', 'Antigravity']];
+        const all = await Promise.all(agents.map(([id]) => api('GET', `/api/agent-accounts?agent=${id}`).catch(() => ({ accounts: [] }))));
+        box.innerHTML = agents.map(([id, label], i) => `
+            <p class="setting-text cc-title">Contas do ${esc(label)} neste servidor</p>
+            <ul class="cc-list">${all[i].accounts.map(a => `
+                <li class="cc-row"><span class="cc-name">${esc(a.id ? a.name : a.email || a.name)}
+                    <small>${a.loggedIn ? 'logada' : 'sem login'}${a.id && a.email ? ` · ${esc(a.email)}` : ''}</small></span>
+                    ${a.loggedIn ? '' : `<button type="button" class="btn btn-sm" data-ag-login="${esc(id)}" data-ag-id="${esc(a.id)}">Entrar</button>`}
+                    ${a.id ? `<button type="button" class="btn btn-ghost btn-sm" data-ag-remove="${esc(id)}" data-ag-id="${esc(a.id)}">Remover</button>` : ''}
+                </li>`).join('')}</ul>
+            <button type="button" class="btn btn-sm cc-add" data-ag-add="${esc(id)}">${icon('plus', 15)} Adicionar conta</button>
+            ${all[i].shared === false ? '<p class="setting-help">Neste agente cada conta tem as próprias conversas: a troca abre uma conversa nova.</p>' : ''}`).join('');
+    }
 
     /** Contas do Claude Code + ordem da troca automática (carregados depois da tela). */
     async function loadClaudeBox() {
@@ -171,6 +190,36 @@ export function mountAddonsSection(section) {
             ${options.length ? `<label class="setting setting-stack"><span class="setting-text">Adicionar à lista</span>
                 <select data-chain-add><option value="">Escolha…</option>${options.join('')}</select></label>`
                 : `<p class="setting-help">${omniOn ? '' : 'Ligue o OmniRoute para incluir modelos de outros provedores.'}</p>`}` : ''}`;
+    }
+
+    async function onOtherAccounts(e) {
+        const add = e.target.closest('[data-ag-add]');
+        const login = e.target.closest('[data-ag-login]');
+        const rm = e.target.closest('[data-ag-remove]');
+        if (!add && !login && !rm) return false;
+        try {
+            if (rm) {
+                if (!await askConfirm({ title: 'Remover conta', message: `Remover a conta "${rm.dataset.agId}" deste servidor?`, confirm: 'Remover', danger: true })) return true;
+                await api('DELETE', `/api/agent-accounts/${encodeURIComponent(rm.dataset.agRemove)}/${encodeURIComponent(rm.dataset.agId)}`);
+                toast('Conta removida.');
+                await loadOtherAccounts();
+                return true;
+            }
+            let body;
+            if (add) {
+                const name = await askText({ title: 'Nova conta', label: 'Nome da conta', placeholder: 'ex.: trabalho', confirm: 'Continuar' });
+                if (name == null) return true;
+                body = { agent: add.dataset.agAdd, name };
+            } else {
+                body = { agent: login.dataset.agLogin, id: login.dataset.agId };
+            }
+            const r = await api('POST', '/api/agent-accounts', body);
+            toast(`Abri a aba "${r.tab.name}": faça o login nela e volte aqui.`, { duration: 9000 });
+            await loadOtherAccounts();
+        } catch (err) {
+            toast(err.message, { tone: 'error' });
+        }
+        return true;
     }
 
     function saveChain(chain, msg) {
@@ -259,7 +308,7 @@ export function mountAddonsSection(section) {
             return;
         }
         if (open) renderApp();
-        else { renderGrid(); loadClaudeBox(); }
+        else { renderGrid(); loadClaudeBox(); loadOtherAccounts(); }
     }
 
     section.addEventListener('change', e => {
@@ -278,6 +327,7 @@ export function mountAddonsSection(section) {
     });
 
     section.addEventListener('click', async e => {
+        if (await onOtherAccounts(e)) return;
         const chain = [...(state.fallback?.chain || [])];
         const up = e.target.closest('[data-chain-up]');
         const down = e.target.closest('[data-chain-down]');
