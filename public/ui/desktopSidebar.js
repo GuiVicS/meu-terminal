@@ -7,6 +7,7 @@
  */
 import { icon } from './icons.js';
 import { agentIconName } from './agent-logos.js';
+import { fetchConversations, conversationRows, deleteConversation } from '../agent/conversations.js';
 import { showMenu } from './contextMenu.js';
 import { askConfirm } from './prompt.js';
 import { toast } from './toast.js';
@@ -14,12 +15,12 @@ import { haptic } from './haptics.js';
 
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const WORKING = new Set(['thinking', 'waiting_permission', 'starting']);
 const BUBBLE = `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M7.5 19.2 4 20.5l1.1-3.4A8 8 0 1 1 7.5 19.2Z"/></svg>`;
 const COLLAPSED_KEY = 'meuterminal-sidebar-recolhida';
 const AGENT_KEY = 'meuterminal-sidebar-agente';
+const FOLDER_KEY = 'meuterminal-sidebar-so-pasta';
 const APPS = [
     { kind: 'terminal', label: 'Terminal', icon: 'terminal', color: 'green' },
     { kind: 'files', label: 'Arquivos', icon: 'folder', color: 'orange', flag: 'filesAvailable' },
@@ -60,13 +61,13 @@ export default class DesktopSidebar {
         this.openSettings = openSettings;
         this.agents = [];
         this.agent = localStorage.getItem(AGENT_KEY) || 'claude';
-        this.open = [];
         this.history = null;
         this.historyFolder = null;
+        this.onlyFolder = localStorage.getItem(FOLDER_KEY) === '1';
+        this.error = null;
         this.pins = [];
         this.query = '';
         this.sig = '';
-        this.canDelete = false;
 
         this.el = document.createElement('aside');
         this.el.className = 'dk-side';
@@ -105,7 +106,7 @@ export default class DesktopSidebar {
         this.bind();
         this.loadAgents();
         this.refresh();
-        this.timer = setInterval(() => { if (document.visibilityState === 'visible' && !this.collapsed) this.refreshOpen(); }, 3000);
+        this.timer = setInterval(() => { if (document.visibilityState === 'visible' && !this.collapsed) this.refresh(); }, 3000);
     }
 
     // ---------- estado ----------
@@ -129,13 +130,9 @@ export default class DesktopSidebar {
     /** O agente da aba ativa (se for de agente) manda na lista. */
     syncActive() {
         const s = this.ws.active;
-        if (s && s.kind === 'agent' && s.session?.agent && s.session.agent !== this.agent) {
-            this.setAgent(s.session.agent);
-            return;
-        }
-        const folder = this.ws.currentFolder();
-        if (folder !== this.historyFolder) this.loadHistory();
-        else this.render();
+        if (s && s.kind === 'agent' && s.session?.agent && s.session.agent !== this.agent) return this.setAgent(s.session.agent);
+        if (this.onlyFolder && this.ws.currentFolder() !== this.historyFolder) return this.refresh();
+        this.render();
     }
 
     setAgent(id) {
@@ -156,37 +153,24 @@ export default class DesktopSidebar {
         this.renderAgents();
     }
 
-    refresh() {
-        this.refreshOpen();
-        this.loadHistory();
-        api('GET', 'agent-pins').then(p => { this.pins = Array.isArray(p) ? p : p.pins || []; this.render(); }).catch(() => {});
-    }
-
-    async refreshOpen() {
-        try {
-            const r = await api('GET', `agent-sessions?agent=${encodeURIComponent(this.agent)}`);
-            const sig = JSON.stringify([r.sessions, r.canDelete]);
-            if (sig === this.sig) return;
-            this.sig = sig;
-            this.open = (r.sessions || []).filter(s => s.status !== 'closed');
-            this.canDelete = !!r.canDelete;
-            this.render();
-        } catch { /* tenta no próximo ciclo */ }
-    }
-
-    async loadHistory() {
-        const folder = this.ws.currentFolder();
+    /** A lista vem inteira do SQL (uma consulta barata): é o que mantém tudo igual e sem sumiço. */
+    async refresh() {
         const agent = this.agent;
-        this.historyFolder = folder;
-        this.render();
+        const folder = this.onlyFolder ? this.ws.currentFolder() : null;
+        this.historyFolder = this.ws.currentFolder();
         try {
-            const r = await api('GET', `agent-history?agent=${encodeURIComponent(agent)}&cwd=${encodeURIComponent(folder)}`);
-            if (agent !== this.agent || folder !== this.historyFolder) return;
-            this.history = r.sessions || [];
-        } catch {
-            this.history = []; // sem histórico: só não lista (nada de aviso de "indisponível")
+            const [list, pins] = await Promise.all([fetchConversations(agent, { cwd: folder }), api('GET', 'agent-pins').catch(() => null)]);
+            if (agent !== this.agent) return;
+            if (pins) this.pins = pins.pins || [];
+            const sig = JSON.stringify([list, this.pins, folder]);
+            this.error = null;
+            this.history = list;
+            if (sig !== this.sig) { this.sig = sig; this.render(); }
+        } catch (e) {
+            // Mantém a lista que já estava na tela; só avisa se nunca carregou
+            this.error = e.message;
+            if (this.history === null) this.render();
         }
-        this.render();
     }
 
     // ---------- desenho ----------
@@ -199,42 +183,27 @@ export default class DesktopSidebar {
 
     render() {
         this.renderAgents();
-        const active = this.ws.active;
-        const curId = active?.kind === 'agent' ? active.agentSessionId : null;
-        const curAcp = active?.kind === 'agent' ? active.session?.acpSessionId : null;
+        const active = this.ws.active?.kind === 'agent' && this.ws.active.session?.agent === this.agent ? this.ws.active : null;
         const q = this.query.trim().toLowerCase();
-        const history = this.history || [];
-        const known = new Set(history.map(h => h.sessionId));
-        // Parada e fora do histórico (sem mensagens, ou apagada): não dá para retomar, não aparece
-        const opens = this.open.filter(o => o.id === curId || o.status !== 'stopped'
-            || (o.acpSessionId && (this.history === null || known.has(o.acpSessionId))));
-        const byAcp = new Map(opens.filter(o => o.acpSessionId).map(o => [o.acpSessionId, o]));
-        const rows = [
-            ...opens.filter(o => !o.acpSessionId || !known.has(o.acpSessionId))
-                .map(o => ({ key: `open:${o.id}`, acp: o.acpSessionId, title: o.title || 'Nova conversa', open: o, at: null })),
-            ...history.map(h => ({ key: h.sessionId, acp: h.sessionId, title: h.title, open: byAcp.get(h.sessionId) || null, at: h.updatedAt })),
-        ];
+        const rows = conversationRows(this.history || [], active);
         this.rows = new Map(rows.map(r => [r.key, r]));
-        const match = r => !q || (r.title || '').toLowerCase().includes(q);
+        const match = r => !q || `${r.title || ''} ${r.cwd || ''}`.toLowerCase().includes(q);
         const pinned = rows.filter(r => r.acp && this.pins.includes(r.acp) && match(r));
         const recent = rows.filter(r => !(r.acp && this.pins.includes(r.acp)) && match(r));
-        const row = r => {
-            const cur = (r.open && r.open.id === curId) || (r.acp && r.acp === curAcp);
-            const working = r.open && WORKING.has(r.open.status);
-            const online = r.open && r.open.status !== 'stopped';
-            return `<li><button type="button" class="dk-row dk-conv${cur ? ' is-current' : ''}" data-key="${esc(r.key)}" ${cur ? 'aria-current="true"' : ''} title="${esc(r.title || '')}">
-                <span class="dk-conv-ic">${working ? '<span class="cv-spin" aria-label="trabalhando"></span>' : BUBBLE}</span>
+        const row = r => `<li><button type="button" class="dk-row dk-conv${r.current ? ' is-current' : ''}" data-key="${esc(r.key)}" ${r.current ? 'aria-current="true"' : ''} title="${esc(r.title || '')}${r.cwd ? ` · ${esc(r.cwd)}` : ''}">
+                <span class="dk-conv-ic">${r.working ? '<span class="cv-spin" aria-label="trabalhando"></span>' : BUBBLE}</span>
                 <span class="dk-row-title">${esc(r.title || 'Sem título')}</span>
-                ${online ? '<span class="cv-online" aria-label="aberta"></span>' : `<span class="dk-when">${esc(when(r.at))}</span>`}
-                <span class="dk-more" data-more aria-label="Mais ações" role="button">${icon('more', 15)}</span>
+                ${r.online ? '<span class="cv-online" aria-label="agente ligado"></span>' : `<span class="dk-when">${esc(when(r.at))}</span>`}
+                ${r.acp ? `<span class="dk-more" data-more aria-label="Mais ações" role="button">${icon('more', 15)}</span>` : ''}
             </button></li>`;
-        };
         let html = '';
         if (pinned.length) html += `<h3 class="dk-section">Fixadas</h3><ul class="dk-ul">${pinned.map(row).join('')}</ul>`;
-        html += `<h3 class="dk-section">Recentes <span class="dk-folder" title="${esc(this.historyFolder || '')}">${esc(this.historyFolder || '')}</span></h3>`;
-        if (this.history === null && !rows.length) html += '<p class="dk-note"><span class="cv-spin"></span> Carregando…</p>';
-        else if (!recent.length) html += `<p class="dk-note">${q ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa nesta pasta ainda.'}</p>`;
-        else html += `<ul class="dk-ul">${recent.slice(0, q ? 200 : 40).map(row).join('')}</ul>`;
+        html += `<h3 class="dk-section">Recentes <button type="button" class="dk-filter" data-dk="folder" aria-pressed="${this.onlyFolder}"
+            title="${this.onlyFolder ? `Só de ${esc(this.historyFolder || '')}. Clique para ver todas` : 'Clique para ver só as desta pasta'}">${this.onlyFolder ? `só ${esc(this.historyFolder || '')}` : 'todas as pastas'}</button></h3>`;
+        if (this.history === null && !this.error) html += '<p class="dk-note"><span class="cv-spin"></span> Carregando…</p>';
+        else if (this.history === null) html += `<p class="dk-note">Não deu para carregar. <button type="button" class="ag-link" data-dk="retry">Tentar de novo</button></p>`;
+        else if (!recent.length) html += `<p class="dk-note">${q ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
+        else html += `<ul class="dk-ul">${recent.slice(0, q ? 300 : 60).map(row).join('')}</ul>`;
         this.convs.innerHTML = html;
     }
 
@@ -247,9 +216,9 @@ export default class DesktopSidebar {
 
     pick(key) {
         const r = this.rows?.get(key);
-        if (!r) return;
-        if (r.open) return this.ws.openAgentConversation(this.agent, { session: r.open });
-        return this.ws.openAgentConversation(this.agent, { acpSessionId: r.acp, title: r.title });
+        if (!r || r.current) return;
+        // Só abre para ler: o agente sobe se você enviar uma mensagem
+        return this.ws.openAgentConversation(this.agent, { acpSessionId: r.acp, title: r.title, cwd: r.cwd });
     }
 
     async togglePin(acp) {
@@ -266,9 +235,9 @@ export default class DesktopSidebar {
         if (!r?.acp) return;
         if (!await askConfirm({ title: 'Apagar conversa', message: `Apagar "${r.title || 'Sem título'}"? Ela vai para a lixeira do servidor.`, confirm: 'Apagar', danger: true })) return;
         try {
-            await api('DELETE', `agent-history/${encodeURIComponent(this.agent)}/${encodeURIComponent(r.acp)}`);
-            if (this.history) this.history = this.history.filter(h => h.sessionId !== r.acp);
-            this.open = this.open.filter(o => o.acpSessionId !== r.acp);
+            await deleteConversation(this.agent, r.acp);
+            if (this.history) this.history = this.history.filter(h => h.acpSessionId !== r.acp);
+            if (r.current) await this.newConversation();
             if (this.pins.includes(r.acp)) await this.togglePin(r.acp);
             this.render();
             toast('Conversa apagada.');
@@ -281,7 +250,7 @@ export default class DesktopSidebar {
         showMenu([
             { label: 'Abrir', icon: 'bot', run: () => this.pick(key) },
             ...(r.acp ? [{ label: this.pins.includes(r.acp) ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(r.acp) }] : []),
-            ...(r.acp ? [{ label: 'Apagar', icon: 'trash', disabled: !this.canDelete, hint: this.canDelete ? '' : 'não disponível neste agente', run: () => this.remove(key) }] : []),
+            ...(r.acp ? [{ label: 'Apagar', icon: 'trash', run: () => this.remove(key) }] : []),
         ], { anchor, label: 'Conversa' });
     }
 
@@ -319,6 +288,13 @@ export default class DesktopSidebar {
             if (act === 'toggle') this.toggle();
             else if (act === 'new') this.newConversation();
             else if (act === 'settings') this.openSettings();
+            else if (act === 'retry') this.refresh();
+            else if (act === 'folder') {
+                this.onlyFolder = !this.onlyFolder;
+                localStorage.setItem(FOLDER_KEY, this.onlyFolder ? '1' : '0');
+                this.history = null;
+                this.refresh();
+            }
         });
         this.el.addEventListener('contextmenu', e => {
             const conv = e.target.closest('.dk-conv');

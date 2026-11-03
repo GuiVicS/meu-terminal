@@ -462,35 +462,17 @@ export default class TerminalManager {
     /** Conversas do agente (abertas e anteriores nesta pasta) com "Nova conversa" no topo. */
     pickAgentConversation(agent, folder, anchor) {
         openAgentPicker({
-            agent, folder, source: anchor,
+            agent, source: anchor,
             onNew: () => this.createAgent(agent.id, folder),
-            onResume: (acpSessionId, title) => this.createAgent(agent.id, folder, undefined, { resumeAcpSessionId: acpSessionId, title }),
-            onOpen: session => this.openAgentConversation(agent.id, { session }),
+            onResume: (acpSessionId, title, cwd) => this.openAgentConversation(agent.id, { acpSessionId, title, cwd }),
         });
     }
 
-    /**
-     * Mostra uma conversa de agente: a aberta (session) vai para a aba do agente (uma aba por
-     * agente); uma anterior (acpSessionId) é retomada. Usado pela escolha do menu e pela barra
-     * lateral do desktop.
-     */
-    openAgentConversation(agentId, { session = null, acpSessionId = null, title = null, cwd = null } = {}) {
+    /** Mostra uma conversa antiga na aba do agente, só para ler: nenhum agente é ligado. */
+    openAgentConversation(agentId, { acpSessionId, title = null, cwd = null }) {
         const label = this.agentList?.find?.(a => a.id === agentId)?.label || 'o agente';
-        return withLoading(label, agentIconName(agentId), async () => {
-            const tab = [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agentId);
-            try {
-                if (session && tab) {
-                    if (tab.agentSessionId !== session.id) await this.switchAgentTab(tab.id, session.id);
-                    this.activate(tab.id, { focus: true });
-                } else {
-                    const acp = acpSessionId || session?.acpSessionId;
-                    await this.createAgentNow(agentId, cwd || session?.cwd || this.currentFolder(), undefined,
-                        acp ? { resumeAcpSessionId: acp, title: title || session?.title || null } : {});
-                }
-            } catch (e) {
-                toast(e.message, { tone: 'error' });
-            }
-        });
+        return withLoading(label, agentIconName(agentId), () => this.createAgentNow(agentId, cwd || this.currentFolder(), undefined,
+            { resumeAcpSessionId: acpSessionId, title }));
     }
 
     createAgent(agent, cwd, route, extra = {}) {
@@ -499,6 +481,9 @@ export default class TerminalManager {
     }
 
     async createAgentNow(agent, cwd, route, extra = {}) {
+        // "Nova conversa" com uma nova ainda sem uso aberta: é a mesma tela, não cria outra
+        const draft = !extra.resumeAcpSessionId && [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agent && !x.hasConversation && !x.session?.acpSessionId);
+        if (draft) return this.activate(draft.id, { focus: true });
         try {
             const r = await fetch(joinPath('api/agent-sessions'), {
                 method: 'POST',

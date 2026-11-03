@@ -379,10 +379,10 @@ export default class Composer {
         // Short texts on phones: the field is a single line there
         const narrow = window.matchMedia('(max-width: 600px)').matches;
         this.ui.input.placeholder = status === 'stopped'
-            ? 'Agente parado: toque em Retomar'
-            : busy ? (narrow ? 'Trabalhando… a próxima entra na fila' : 'O agente está trabalhando… a próxima mensagem entra na fila')
+            ? 'Mensagem… (enviar liga o agente)'
+            : status === 'starting' ? 'Iniciando o agente…' : busy ? (narrow ? 'Trabalhando… a próxima entra na fila' : 'O agente está trabalhando… a próxima mensagem entra na fila')
                 : (narrow ? 'Mensagem, / ou @' : 'Mensagem… ( / comandos · @ arquivos )');
-        this.ui.send.disabled = status === 'starting' || status === 'stopped';
+        this.ui.send.disabled = status === 'starting';
     }
 
     // ---------- queue ("modo fila") ----------

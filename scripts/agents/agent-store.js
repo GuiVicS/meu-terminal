@@ -8,7 +8,7 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 const SESSION_COLUMNS = ['title', 'status', 'mode', 'model', 'acp_session_id', 'capabilities',
-    'updated_at', 'closed_at', 'last_seq', 'route', 'route_model', 'account'];
+    'updated_at', 'closed_at', 'last_seq', 'route', 'route_model', 'account', 'pending', 'from_disk'];
 
 function parseJson(text, fallback) {
     if (text == null) return fallback;
@@ -84,6 +84,26 @@ class AgentStore {
                 SELECT agent, acp_session_id, id, cwd, title, 'ui', created_at, updated_at
                 FROM agent_sessions WHERE acp_session_id IS NOT NULL;
         `);
+        // pending: modo e opções escolhidos antes de o agente subir (aplicados ao subir)
+        if (!columns.has('pending')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN pending TEXT');
+        if (!columns.has('from_disk')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN from_disk INTEGER');
+        const conv = new Set(this.db.prepare('PRAGMA table_info(agent_conversations)').all().map(c => c.name));
+        if (!conv.has('has_messages')) {
+            // has_messages: já houve mensagem (conversa aberta e nunca usada não entra na lista)
+            // deleted_at: apagada pela pessoa (o índice do disco não traz de volta)
+            this.db.exec(`
+                ALTER TABLE agent_conversations ADD COLUMN has_messages INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE agent_conversations ADD COLUMN deleted_at INTEGER;
+                CREATE INDEX IF NOT EXISTS agent_conversations_list ON agent_conversations (agent, deleted_at, has_messages, updated_at);
+                UPDATE agent_conversations SET has_messages = 1 WHERE EXISTS (
+                    SELECT 1 FROM agent_events e JOIN agent_sessions s ON e.session_id = s.id
+                    WHERE s.acp_session_id = agent_conversations.acp_session_id AND s.agent = agent_conversations.agent AND e.type = 'message.user');
+                UPDATE agent_conversations SET title = (
+                    SELECT substr(json_extract(e.data, '$.text'), 1, 80) FROM agent_events e JOIN agent_sessions s ON e.session_id = s.id
+                    WHERE s.acp_session_id = agent_conversations.acp_session_id AND s.agent = agent_conversations.agent AND e.type = 'message.user'
+                    ORDER BY e.seq LIMIT 1) WHERE title IS NULL;
+            `);
+        }
     }
 
     // ---------- conversas iniciadas pela pessoa ----------
@@ -101,8 +121,57 @@ class AgentStore {
         return this.db.prepare('SELECT * FROM agent_conversations WHERE agent = ? AND acp_session_id = ?').get(agent, acpSessionId) || null;
     }
 
+    /** Apagada: some da lista e o índice do disco não a traz de volta. */
     deleteConversation(agent, acpSessionId) {
-        this.db.prepare('DELETE FROM agent_conversations WHERE agent = ? AND acp_session_id = ?').run(agent, acpSessionId);
+        this.db.prepare(`INSERT INTO agent_conversations (agent, acp_session_id, origin, created_at, updated_at, deleted_at)
+            VALUES (?, ?, 'ui', ?, ?, ?) ON CONFLICT (agent, acp_session_id) DO UPDATE SET deleted_at = excluded.deleted_at`)
+            .run(agent, acpSessionId, Date.now(), Date.now(), Date.now());
+    }
+
+    /** Houve mensagem: entra na lista e sobe para o topo. O título inicial é a primeira mensagem. */
+    touchConversation(agent, acpSessionId, firstText = null) {
+        this.db.prepare(`UPDATE agent_conversations SET has_messages = 1, updated_at = ?,
+            title = COALESCE(title, ?) WHERE agent = ? AND acp_session_id = ?`)
+            .run(Date.now(), firstText ? String(firstText).slice(0, 80) : null, agent, acpSessionId);
+    }
+
+    /** Veio do disco (aberta fora do app): só acrescenta; nunca revive uma apagada. */
+    indexConversation({ agent, acpSessionId, cwd = null, title = null, updatedAt = Date.now() }) {
+        this.db.prepare(`INSERT INTO agent_conversations (agent, acp_session_id, cwd, title, origin, has_messages, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'terminal', 1, ?, ?)
+            ON CONFLICT (agent, acp_session_id) DO UPDATE SET has_messages = 1, title = COALESCE(title, excluded.title),
+                updated_at = MAX(updated_at, excluded.updated_at) WHERE deleted_at IS NULL`)
+            .run(agent, acpSessionId, cwd, title, updatedAt, updatedAt);
+    }
+
+    /** A lista lateral: uma consulta só, sem depender de agente nem de pasta (a pasta é filtro opcional). */
+    listConversations({ agent, cwd = null, limit = 300 }) {
+        const rows = cwd
+            ? this.db.prepare(`SELECT * FROM agent_conversations WHERE agent = ? AND deleted_at IS NULL AND has_messages = 1 AND cwd = ? ORDER BY updated_at DESC LIMIT ?`).all(agent, cwd, limit)
+            : this.db.prepare(`SELECT * FROM agent_conversations WHERE agent = ? AND deleted_at IS NULL AND has_messages = 1 ORDER BY updated_at DESC LIMIT ?`).all(agent, limit);
+        return rows;
+    }
+
+    /** A sessão do app ligada a uma conversa do agente (a mais recente). */
+    sessionForConversation(agent, acpSessionId) {
+        const row = this.db.prepare('SELECT id FROM agent_sessions WHERE agent = ? AND acp_session_id = ? ORDER BY updated_at DESC LIMIT 1').get(agent, acpSessionId);
+        return row ? this.getSession(row.id) : null;
+    }
+
+    /** Já há mensagens guardadas nesta sessão? (senão, o conteúdo vem do arquivo do agente) */
+    hasUserMessages(sessionId) {
+        return !!this.db.prepare("SELECT 1 FROM agent_events WHERE session_id = ? AND type = 'message.user' LIMIT 1").get(sessionId);
+    }
+
+    /** Conversas registradas sem mensagem conhecida (índice confere se têm arquivo no agente). */
+    conversationsWithoutMessages() {
+        return this.db.prepare('SELECT agent, acp_session_id FROM agent_conversations WHERE has_messages = 0 AND deleted_at IS NULL').all();
+    }
+
+    /** O que o agente ofereceu da última vez: o seletor funciona antes de ele subir. */
+    lastCapabilities(agent) {
+        const row = this.db.prepare("SELECT capabilities FROM agent_sessions WHERE agent = ? AND capabilities IS NOT NULL AND capabilities != '{}' ORDER BY updated_at DESC LIMIT 1").get(agent);
+        return row ? parseJson(row.capabilities, {}) : {};
     }
 
     // ---------- sessions ----------
@@ -130,7 +199,7 @@ class AgentStore {
     updateSession(id, fields) {
         const keys = Object.keys(fields).filter(k => SESSION_COLUMNS.includes(k));
         if (!keys.length) return this.getSession(id);
-        const values = keys.map(k => (k === 'capabilities' ? JSON.stringify(fields[k]) : fields[k]));
+        const values = keys.map(k => (k === 'capabilities' || (k === 'pending' && fields[k]) ? JSON.stringify(fields[k]) : fields[k]));
         if (!keys.includes('updated_at')) {
             keys.push('updated_at');
             values.push(Date.now());

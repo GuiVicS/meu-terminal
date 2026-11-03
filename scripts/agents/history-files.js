@@ -79,6 +79,15 @@ function startedInTerminal(agent, id, home) {
     return false;
 }
 
+/** O agente tem o arquivo desta conversa? */
+function hasConversationFile(agent, id, home) {
+    try {
+        return !!(typeof id === 'string' && ID_RE.test(id) && FINDERS[agent] && FINDERS[agent](home, id));
+    } catch {
+        return false;
+    }
+}
+
 /**
  * Move a conversa para a lixeira. @returns {{ ok: true, trashed: string }}
  * @throws {Error & { status: number }}
@@ -96,4 +105,4 @@ function deleteConversation(agent, id, home) {
     return { ok: true, trashed: dest };
 }
 
-module.exports = { deleteConversation, canDelete, startedInTerminal };
+module.exports = { deleteConversation, canDelete, startedInTerminal, hasConversationFile };

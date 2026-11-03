@@ -15,6 +15,7 @@ import { esc } from '../agent/markdown.js';
 import { showMenu } from './contextMenu.js';
 import { toast } from './toast.js';
 import { agentIconName } from './agent-logos.js';
+import { fetchConversations, conversationRows, deleteConversation } from '../agent/conversations.js';
 import { askConfirm } from './prompt.js';
 import { haptic } from './haptics.js';
 
@@ -33,14 +34,6 @@ const BUBBLE_ICON = `<svg class="icon" width="20" height="20" viewBox="0 0 24 24
 
 // Trabalhando (troca o balão por um círculo girando)
 const SPINNER_ICON = '<span class="cv-spin" aria-label="trabalhando"></span>';
-const WORKING = new Set(['thinking', 'waiting_permission', 'starting']);
-
-async function agentApi(method, route) {
-    const r = await fetch(`${basePath()}/api/${route}`, { method, credentials: 'same-origin', cache: 'no-store' });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || `Erro ${r.status}`);
-    return data;
-}
 
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches || root.hasAttribute('data-reduced-motion');
 const project = v => (v / 1000) * DECELERATION / (1 - DECELERATION); // v em px/s → px a mais
@@ -98,8 +91,6 @@ export default class ConversationDrawer {
         this.getOpenAgents = getOpenAgents;
         this.activate = activate;
         this.switchTo = switchTo;
-        this.open_ = [];       // conversas abertas deste agente (servidor), com o estado de cada uma
-        this.canDelete = false;
         this.poll = null;
         this.p = 0;            // 0 = fechada, 1 = aberta
         this.stop = null;      // cancela a mola em andamento
@@ -107,7 +98,7 @@ export default class ConversationDrawer {
         this.query = '';
         this.pins = [];
         this.history = null;   // null = carregando
-        this.historyError = null;
+        this.error = null;
 
         this.el = document.createElement('aside');
         this.el.className = 'cv-drawer';
@@ -206,28 +197,12 @@ export default class ConversationDrawer {
     /** Enquanto aberta: o estado das conversas abertas (online / trabalhando) a cada 3 s. */
     startPolling() {
         this.stopPolling();
-        this.poll = setInterval(() => this.refreshOpen(), 3000);
+        this.poll = setInterval(() => this.load(), 3000);
     }
 
     stopPolling() {
         clearInterval(this.poll);
         this.poll = null;
-    }
-
-    async refreshOpen() {
-        const agent = this.getAgent();
-        if (!agent?.session?.agent) return;
-        try {
-            const r = await agentApi('GET', `agent-sessions?agent=${encodeURIComponent(agent.session.agent)}`);
-            if (this.getAgent() !== agent) return;
-            // Só redesenha se algo mudou: redesenhar a cada 3 s perdia o toque que caísse no meio
-            const sig = JSON.stringify([r.sessions, r.canDelete]);
-            if (sig === this.openSig) return;
-            this.openSig = sig;
-            this.open_ = r.sessions || [];
-            this.canDelete = !!r.canDelete;
-            this.render();
-        } catch { /* tenta de novo no próximo ciclo */ }
     }
 
     toggle() {
@@ -245,17 +220,19 @@ export default class ConversationDrawer {
 
     // ---------- dados ----------
 
+    /** A lista vem do SQL, sem ligar agente: a mesma da barra lateral do desktop. */
     async load() {
         const agent = this.getAgent();
         if (!agent) return;
-        this.historyError = null;
-        if (!agent.historyCache) this.history = null;
-        this.render();
-        const [history, pins] = await Promise.allSettled([agent.fetchHistory(), pinsApi('GET'), this.refreshOpen()]);
+        const [list, pins] = await Promise.allSettled([fetchConversations(agent.session?.agent || agent.agentId), pinsApi('GET')]);
         if (this.getAgent() !== agent) return;
         if (pins.status === 'fulfilled') this.pins = pins.value;
-        if (history.status === 'fulfilled') this.history = history.value;
-        else { this.history = []; this.historyError = history.reason?.message || 'indisponível'; }
+        if (list.status === 'fulfilled') {
+            this.history = list.value;
+            this.error = null;
+        } else if (this.history === null) {
+            this.error = list.reason?.message || 'indisponível';
+        }
         this.render();
     }
 
@@ -285,44 +262,27 @@ export default class ConversationDrawer {
         }
         if (!agent) { this.list.innerHTML = ''; return; }
         const q = this.query.trim().toLowerCase();
-        // Conversas abertas deste agente (cada uma pode estar rodando) + histórico do agente
-        const history = this.history || [];
-        const known = new Set(history.map(h => h.sessionId));
-        // Parada e fora do histórico do agente (nunca recebeu mensagem, ou foi apagada): não dá para
-        // retomar, então não aparece. A desta aba sempre aparece.
-        const opens = this.open_.filter(o => o.status !== 'closed' && (o.id === agent.agentSessionId || o.status !== 'stopped'
-            || (o.acpSessionId && (this.history === null || known.has(o.acpSessionId)))));
-        const byAcp = new Map(opens.filter(o => o.acpSessionId).map(o => [o.acpSessionId, o]));
-        const rows = [
-            ...opens.filter(o => !o.acpSessionId || !known.has(o.acpSessionId))
-                .map(o => ({ key: `open:${o.id}`, acp: o.acpSessionId, title: o.title || 'Nova conversa', open: o })),
-            ...history.map(h => ({ key: h.sessionId, acp: h.sessionId, title: h.title, open: byAcp.get(h.sessionId) || null })),
-        ];
+        const rows = conversationRows(this.history || [], agent);
         this.rowsByKey = new Map(rows.map(r => [r.key, r]));
-        const isCurrent = r => (r.open && r.open.id === agent.agentSessionId) || (r.acp && r.acp === agent.session?.acpSessionId);
-        const match = r => !q || (r.title || '').toLowerCase().includes(q);
+        const match = r => !q || `${r.title || ''} ${r.cwd || ''}`.toLowerCase().includes(q);
         const pinned = rows.filter(r => r.acp && this.pins.includes(r.acp) && match(r));
         const recent = rows.filter(r => !(r.acp && this.pins.includes(r.acp)) && match(r));
         const limit = this.showAll || q ? recent.length : RECENT_LIMIT;
-
-        const row = r => {
-            const cur = isCurrent(r);
-            const working = r.open && WORKING.has(r.open.status);
-            const online = r.open && r.open.status !== 'stopped';
-            return `
-            <li><button type="button" class="cv-row${cur ? ' is-current' : ''}" data-id="${esc(r.key)}" ${cur ? 'aria-current="true"' : ''}>
-                <span class="cv-row-icon">${working ? SPINNER_ICON : BUBBLE_ICON}</span>
+        const row = r => `
+            <li><button type="button" class="cv-row${r.current ? ' is-current' : ''}" data-id="${esc(r.key)}" ${r.current ? 'aria-current="true"' : ''}>
+                <span class="cv-row-icon">${r.working ? SPINNER_ICON : BUBBLE_ICON}</span>
                 <span class="cv-row-title">${esc(r.title || 'Sem título')}</span>
-                ${online ? '<span class="cv-online" aria-label="aberta"></span>' : ''}
+                ${r.online ? '<span class="cv-online" aria-label="agente ligado"></span>' : ''}
             </button></li>`;
-        };
         let html = '';
         if (pinned.length) html += `<h3 class="cv-section">Fixadas</h3><ul class="cv-ul">${pinned.map(row).join('')}</ul>`;
         html += `<h3 class="cv-section">Recentes</h3>`;
-        if (this.history === null && !rows.length) {
+        if (this.history === null && this.error) {
+            html += '<p class="cv-note">Não deu para carregar. <button type="button" class="ag-link" data-cv="retry">Tentar de novo</button></p>';
+        } else if (this.history === null) {
             html += '<p class="cv-note">Carregando conversas…</p>';
         } else if (!recent.length) {
-            html += `<p class="cv-note">${q ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa anterior nesta pasta.'}</p>`;
+            html += `<p class="cv-note">${q ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
         } else {
             html += `<ul class="cv-ul">${recent.slice(0, limit).map(row).join('')}</ul>`;
             if (recent.length > limit) html += `<button type="button" class="cv-more" data-cv="all">Ver tudo ${icon('chevronRight', 16)}</button>`;
@@ -335,11 +295,10 @@ export default class ConversationDrawer {
         const r = this.rowsByKey?.get(key);
         if (!agent || !r) return;
         this.close();
-        if ((r.open && r.open.id === agent.agentSessionId) || (r.acp && r.acp === agent.session?.acpSessionId)) return;
+        if (r.current) return;
         try {
-            // Aberta (rodando ou parada): só troca a conversa mostrada nesta aba
-            if (r.open) return await this.switchTo(agent.id, r.open.id);
-            await agent.startConversation({ resumeAcpSessionId: r.acp, title: r.title || null });
+            // Só abre para ler: o agente sobe se você enviar uma mensagem
+            await agent.startConversation({ resumeAcpSessionId: r.acp, title: r.title || null, cwd: r.cwd || agent.cwd });
         } catch (e) {
             toast(e.message, { tone: 'error' });
         }
@@ -349,20 +308,15 @@ export default class ConversationDrawer {
         const agent = this.getAgent();
         const r = this.rowsByKey?.get(key);
         if (!agent || !r?.acp) return;
-        const ok = await askConfirm({ title: 'Apagar conversa', message: `Apagar "${r.title || 'Sem título'}"? Ela vai para a lixeira do servidor.`, confirm: 'Apagar', danger: true });
+        const ok = await askConfirm({ title: 'Apagar conversa', message: `Apagar "${r.title || 'Sem título'}"? Ela sai da lista.`, confirm: 'Apagar', danger: true });
         if (!ok) return;
-        const wasCurrent = (r.open && r.open.id === agent.agentSessionId) || r.acp === agent.session?.acpSessionId;
         try {
-            await agentApi('DELETE', `agent-history/${encodeURIComponent(agent.session.agent)}/${encodeURIComponent(r.acp)}`);
-            // Some da lista na hora (sem esperar o agente listar de novo)
-            if (this.history) this.history = this.history.filter(h => h.sessionId !== r.acp);
-            this.open_ = this.open_.filter(o => o.acpSessionId !== r.acp);
+            await deleteConversation(agent.session?.agent || agent.agentId, r.acp);
+            if (this.history) this.history = this.history.filter(h => h.acpSessionId !== r.acp);
             this.render();
             toast('Conversa apagada.');
             if (this.pins.includes(r.acp)) await this.togglePin(r.acp);
-            agent.historyCache = null;
-            if (wasCurrent) await agent.startConversation({});
-            else this.load();
+            if (r.current) await agent.startConversation({});
         } catch (e) {
             toast(e.message, { tone: 'error', duration: 6000 });
         }
@@ -384,8 +338,7 @@ export default class ConversationDrawer {
                 const pinnedNow = this.pins.includes(r.acp);
                 showMenu([
                     { label: pinnedNow ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(r.acp) },
-                    { label: 'Apagar', icon: 'trash', disabled: !this.canDelete,
-                        hint: this.canDelete ? '' : 'não disponível neste agente', run: () => this.remove(key) },
+                    { label: 'Apagar', icon: 'trash', run: () => this.remove(key) },
                 ], { anchor: btn, label: 'Conversa' });
             }, LONG_PRESS_MS);
         });
@@ -406,6 +359,7 @@ export default class ConversationDrawer {
             const act = btn.dataset.cv;
             if (act === 'new') { this.close(); this.getAgent()?.startConversation({}); }
             else if (act === 'all') { this.showAll = true; this.render(); }
+            else if (act === 'retry') this.load();
             else if (act === 'search') {
                 this.searchBox.hidden = !this.searchBox.hidden;
                 if (!this.searchBox.hidden) this.searchInput.focus();
