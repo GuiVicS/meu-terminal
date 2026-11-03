@@ -11,6 +11,7 @@ const { AcpClient } = require('./acp-client');
 const { AcpMapper, normalizeConfigOptions } = require('./acp-mapping');
 const { validateEvent } = require('./events');
 const { loadAgents } = require('./registry');
+const { translateMode, translateCapabilities, translateName, translateDescription } = require('./i18n');
 
 const MAX_QUEUE = 20; // messages waiting while the agent works ("modo fila")
 
@@ -32,7 +33,7 @@ function deriveModes(session, configOptions) {
     const modes = session && session.modes;
     if (modes && Array.isArray(modes.availableModes) && modes.availableModes.length) {
         return {
-            modeList: modes.availableModes.map(m => ({ id: m.id, name: m.name || m.id, description: m.description || '' })),
+            modeList: modes.availableModes.map(m => translateMode({ id: m.id, name: m.name || m.id, description: m.description || '' })),
             modeSource: 'modes',
             modeConfigId: null,
             currentMode: modes.currentModeId || null,
@@ -68,7 +69,7 @@ function legacyModelOption(session) {
     return {
         id: LEGACY_MODEL_ID, name: 'Modelo', description: '', category: 'model', type: 'select',
         currentValue: m.currentModelId || m.availableModels[0].modelId,
-        options: m.availableModels.map(x => ({ value: x.modelId, name: x.name || x.modelId, description: x.description || '', group: null })),
+        options: m.availableModels.map(x => ({ value: x.modelId, name: translateName(x.name || x.modelId), description: translateDescription(x.description), group: null })),
     };
 }
 
@@ -118,10 +119,28 @@ const USAGE_LIMIT_PREFIXES = ["You've hit your", "You've reached your", "You're 
     'Your org is out of usage', "Your seat type doesn't include usage", 'Your usage allocation has been disabled',
     "Your group's usage limit is set to $0", 'requires usage credits', "You're out of extra usage",
     "Your seat type doesn't include extra usage"];
-const isUsageLimitText = text => {
-    const t = String(text || '').trimStart();
-    return USAGE_LIMIT_PREFIXES.some(p => (p.startsWith('requires') ? t.split('\n')[0].includes(p) : t.startsWith(p)));
-};
+/**
+ * O turno terminou no aviso de limite? O aviso é a última coisa do turno, curto e em uma linha, mas
+ * pode vir depois de muito trabalho (texto e ferramentas). Não basta olhar o começo do turno; e o
+ * agente citando o aviso no meio de uma frase não conta.
+ */
+const LIMIT_TAIL_MAX = 200;
+function usageLimitTail(text) {
+    const t = String(text || '').trimEnd();
+    let at = -1;
+    for (const p of USAGE_LIMIT_PREFIXES) {
+        if (p.startsWith('requires')) continue;
+        at = Math.max(at, t.lastIndexOf(p));
+    }
+    if (at === -1) {
+        const line = t.slice(t.lastIndexOf('\n') + 1);
+        return line.includes('requires usage credits') && line.length <= LIMIT_TAIL_MAX ? t.lastIndexOf(line) : -1;
+    }
+    const tail = t.slice(at);
+    const talksAboutLimit = /\b(limit|usage|credits?)\b/i.test(tail);
+    return talksAboutLimit && tail.length <= LIMIT_TAIL_MAX && !tail.includes('\n') && !/^[^·]*["”]/.test(tail) ? at : -1;
+}
+const isUsageLimitText = text => usageLimitTail(text) !== -1;
 
 class AgentGateway extends EventEmitter {
     /**
@@ -140,7 +159,7 @@ class AgentGateway extends EventEmitter {
      * Emits 'event' with every normalized event envelope ({ sessionId, seq, type, at, data }).
      */
     constructor({ store, agents = loadAgents(), env = process.env, maxSessions = 4, startTimeoutMs = 60000,
-        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, onUsageLimit = null, extraModels = null, log = () => {} }) {
+        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, onUsageLimit = null, extraModels = null, isUserStarted = null, log = () => {} }) {
         super();
         this.store = store;
         this.agents = agents;
@@ -152,6 +171,9 @@ class AgentGateway extends EventEmitter {
         // async ({ agent, route }) => [{ value, name, group, route }]: modelos de fora do agente (OmniRoute)
         // que entram no seletor; escolher um troca a rota da conversa (setRoute) para aquele modelo
         this.extraModels = extraModels;
+        // (agent, acpSessionId) => a conversa fora do banco foi aberta pela pessoa no terminal?
+        // Sem esta opção o histórico do agente é mostrado inteiro
+        this.isUserStarted = isUserStarted;
         this.maxSessions = maxSessions;
         this.startTimeoutMs = startTimeoutMs;
         this.maxText = maxText;
@@ -195,7 +217,7 @@ class AgentGateway extends EventEmitter {
             status: row.status,
             running: this.runtimes.has(row.id),
             mode: row.mode,
-            capabilities: row.capabilities,
+            capabilities: translateCapabilities(row.capabilities),
             lastSeq: row.last_seq,
             pendingPermissions: this.store.pendingPermissions(row.id),
             queue: this.queueSummary(this.runtimes.get(row.id)),
@@ -270,6 +292,14 @@ class AgentGateway extends EventEmitter {
         }
     }
 
+    /** Só conversas iniciadas pela pessoa (no banco, ou abertas no terminal: entram no banco). */
+    isConversation(agent, s, cwd) {
+        if (!this.isUserStarted || this.store.getConversation(agent, s.sessionId)) return true;
+        if (!this.isUserStarted(agent, s.sessionId)) return false;
+        this.store.saveConversation({ agent, acpSessionId: s.sessionId, cwd: s.cwd || cwd, title: s.title || null, origin: 'terminal' });
+        return true;
+    }
+
     async listHistory({ agent, cwd, maxPages = 5 }) {
         const def = this.agents[agent];
         if (!def || def.terminalOnly) throw new GatewayError(`Agente sem histórico: ${agent}`);
@@ -287,7 +317,8 @@ class AgentGateway extends EventEmitter {
             for (let page = 0; page < maxPages; page++) {
                 const result = await client.request('session/list', { cwd, ...(cursor ? { cursor } : {}) }, { timeoutMs: this.startTimeoutMs });
                 for (const s of (result && result.sessions) || []) {
-                    sessions.push({ sessionId: s.sessionId, cwd: s.cwd, title: s.title || null, updatedAt: s.updatedAt || null });
+                    if (!this.isConversation(agent, s, cwd)) continue;
+                    sessions.push({ sessionId: s.sessionId, cwd: s.cwd, title: s.title || this.store.getConversation(agent, s.sessionId)?.title || null, updatedAt: s.updatedAt || null });
                 }
                 cursor = result && result.nextCursor;
                 if (!cursor) break;
@@ -351,6 +382,7 @@ class AgentGateway extends EventEmitter {
             const session = await this.openAcpSession(runtime, row, init, resume, importHistory);
             if (session.imported) this.finishImport(sessionId, runtime);
             runtime.acpSessionId = session.sessionId;
+            this.store.saveConversation({ agent: row.agent, acpSessionId: session.sessionId, sessionId, cwd: row.cwd, title: row.title || null });
             runtime.capabilities = { ...deriveCapabilities(init, session.result), resumed: session.resumed };
             runtime.mode = runtime.capabilities.currentMode || runtime.mode;
             runtime.ready = true;
@@ -518,7 +550,9 @@ class AgentGateway extends EventEmitter {
         }
         runtime.prompting = true;
         runtime.turnText = '';
+        runtime.turnTools = 0;
         let limited = false;
+        let partial = false;
         const row = this.store.getSession(sessionId);
         if (!row.title && text.trim()) this.store.updateSession(sessionId, { title: text.trim().replace(/\s+/g, ' ').slice(0, 60) });
         // The event log keeps only the images' type and size (not the bytes)
@@ -541,6 +575,8 @@ class AgentGateway extends EventEmitter {
             this.emitEvent(sessionId, 'message.assistant.done', { stopReason });
             if (this.runtimes.has(sessionId)) this.setState(sessionId, 'idle');
             limited = isUsageLimitText(runtime.turnText);
+            // Já tinha trabalho no turno: reenviar a mensagem repetiria o que foi feito
+            partial = limited && (usageLimitTail(runtime.turnText) > 0 || !!runtime.turnTools);
             return stopReason;
         } catch (error) {
             // A dead agent is reported by onExit; only report errors of a live agent here
@@ -554,7 +590,7 @@ class AgentGateway extends EventEmitter {
             if (limited && this.onUsageLimit) {
                 // Depois deste turno: quem decide (troca automática) pode trocar a rota e reenviar
                 const after = this.store.getSession(sessionId);
-                setImmediate(() => Promise.resolve(this.onUsageLimit({ sessionId, row: after, text, images }))
+                setImmediate(() => Promise.resolve(this.onUsageLimit({ sessionId, row: after, text, images, partial }))
                     .catch(e => this.log('Troca automática:', e.message)));
             } else if ((runtime.queue || []).length) {
                 // "modo fila": the next message goes on its own (setImmediate: after this turn's events)
@@ -809,7 +845,12 @@ class AgentGateway extends EventEmitter {
                 this.applyConfigOptions(sessionId, runtime, data.options);
                 continue;
             }
-            if (type === 'session.info' && data.title) this.store.updateSession(sessionId, { title: String(data.title).slice(0, 120) });
+            if (type === 'session.info' && data.title) {
+                const title = String(data.title).slice(0, 120);
+                this.store.updateSession(sessionId, { title });
+                const row = this.store.getSession(sessionId);
+                if (row?.acp_session_id) this.store.saveConversation({ agent: row.agent, acpSessionId: row.acp_session_id, sessionId, title });
+            }
             if (type === 'commands.update') this.enableCapability(sessionId, runtime, 'slashCommands');
             if (type === 'usage.update') this.enableCapability(sessionId, runtime, 'usage');
             if (data && Array.isArray(data.media)) data.media = data.media.map(m => this.storeMedia(sessionId, m));
@@ -888,9 +929,18 @@ class AgentGateway extends EventEmitter {
     }
 
     emitEvent(sessionId, type, data) {
+        if (type === 'tool.start') {
+            const rt = this.runtimes.get(sessionId);
+            if (rt && rt.prompting) rt.turnTools = (rt.turnTools || 0) + 1;
+        }
         if (type === 'message.assistant.delta' && data && data.text) {
             const rt = this.runtimes.get(sessionId);
-            if (rt && rt.prompting && (rt.turnText || '').length < 2000) rt.turnText = (rt.turnText || '') + data.text;
+            // O fim do turno é o que importa: o aviso de limite vem por último, mesmo em turno longo
+            if (rt && rt.prompting) {
+                const all = (rt.turnText || '') + data.text;
+                if (all.length > 2000) rt.turnTools = (rt.turnTools || 0) + 1; // cortado: houve trabalho antes
+                rt.turnText = all.slice(-2000);
+            }
         }
         const event = this.store.appendEvent(sessionId, type, data);
         if (this.validate) {

@@ -12,6 +12,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const { readOpenCodeLogin } = require('./opencode-login');
+
+const OPENCODE_PROVIDER = 'opencode-zen';
+const OPENCODE_NAME = 'OpenCode (login do servidor)';
 
 class BridgeError extends Error {
     constructor(message, status = 502) {
@@ -49,9 +53,12 @@ class OmniRouteBridge {
      * @param {() => string} opts.password - senha do painel gerada pelo MeuTerminal
      * @param {string} [opts.packageDir] - onde o pacote omniroute está instalado (catálogo de provedores)
      */
-    constructor({ port = 20128, password, packageDir = '/usr/local/lib/node_modules/omniroute', fetchImpl = fetch, cacheDir = path.join(os.tmpdir(), 'mt-omniroute-catalog'), home = null }) {
+    constructor({ port = 20128, password, packageDir = '/usr/local/lib/node_modules/omniroute', fetchImpl = fetch, cacheDir = path.join(os.tmpdir(), 'mt-omniroute-catalog'), home = null, openCodeModels = null }) {
         this.base = `http://127.0.0.1:${port}`;
         this.home = home; // para ler os modelos que a conta do Codex libera
+        this.openCodeModels = openCodeModels; // async () => ids gratuitos, os que o OpenCode instalado lista sem saldo
+        this.openCodeCache = { at: 0, ids: null };
+        this.openCodeSent = null; // último token enviado (só para saber se mudou)
         this.password = password;
         this.packageDir = packageDir;
         this.fetch = fetchImpl;
@@ -152,8 +159,40 @@ class OmniRouteBridge {
     testProvider(id) { return this.api('POST', `/api/providers/${encodeURIComponent(id)}/test`); }
 
     /** Modelos de uma conexão, já no formato que o Claude Code usa (provedor/modelo). */
+    /**
+     * Modelos pagos que o login libera. Os gratuitos ficam de fora: o serviço os restringe ao
+     * próprio cliente OpenCode ("Free models work in OpenCode"), então pelo gateway só com ele
+     * se passando pelo OpenCode. Para eles existe o agente OpenCode no Modo UI. Cache de 5 min.
+     */
+    async openCodeIds() {
+        if (Date.now() - this.openCodeCache.at < 300000) return this.openCodeCache.ids;
+        let ids = null;
+        const login = this.home ? readOpenCodeLogin(this.home) : null;
+        if (login) {
+            try {
+                const r = await this.fetch('https://opencode.ai/zen/v1/models', { headers: { Authorization: `Bearer ${login.access}` } });
+                const listed = r.ok ? ((await r.json()).data || []).map(m => m.id) : null;
+                if (listed) {
+                    const free = new Set((await this.openCodeModels?.().catch(() => null)) || []);
+                    ids = listed.filter(m => !free.has(m) && !/-free$/.test(m));
+                }
+            } catch { /* sem rede: usa o catálogo */ }
+        }
+        this.openCodeCache = { at: Date.now(), ids };
+        return ids;
+    }
+
     async models(id) {
         const r = await this.api('GET', `/api/providers/${encodeURIComponent(id)}/models`);
+        // Login do OpenCode: só os modelos pagos que esta conta enxerga
+        if (r.provider === OPENCODE_PROVIDER) {
+            const conn = await this.openCodeConnection().catch(() => null);
+            const ids = conn?.id === id ? await this.openCodeIds() : null;
+            if (ids) {
+                const names = new Map((r.models || []).map(m => [m.id, m.name]));
+                return ids.map(m => ({ id: `${r.provider}/${m}`, name: names.get(m) || m }));
+            }
+        }
         const list = (r.models || []).map(m => ({ id: `${r.provider}/${m.id}`, name: m.name || m.id }));
         return this.filterFor({ provider: r.provider }, list);
     }
@@ -173,6 +212,42 @@ class OmniRouteBridge {
         return this.api('POST', '/api/providers/codex-auth/import', {
             source: { kind: 'json', json }, name: 'Codex (conta do ChatGPT)', overwriteExisting: true,
         });
+    }
+
+    async openCodeConnection() {
+        const { connections = [] } = await this.api('GET', '/api/providers');
+        return connections.find(c => c.provider === OPENCODE_PROVIDER && c.name === OPENCODE_NAME) || null;
+    }
+
+    /** Conecta o login do OpenCode do servidor; o token vai direto do disco para o OmniRoute. */
+    async importOpenCode(home) {
+        const login = readOpenCodeLogin(home);
+        if (!login) throw new BridgeError('Nenhum login do OpenCode neste servidor. Rode "opencode auth login" no terminal primeiro.', 404);
+        const conn = await this.openCodeConnection();
+        const r = conn
+            ? await this.api('PUT', `/api/providers/${encodeURIComponent(conn.id)}`, { apiKey: login.access })
+            : await this.api('POST', '/api/providers', { provider: OPENCODE_PROVIDER, name: OPENCODE_NAME, apiKey: login.access });
+        this.openCodeSent = login.access;
+        this.openCodeCache = { at: 0, ids: null };
+        return { ok: true, id: conn?.id || r?.connection?.id || r?.id || null };
+    }
+
+    /** O OpenCode renovou o token: atualiza a conexão (só se já estiver conectada e se mudou). */
+    async syncOpenCode(home) {
+        const login = readOpenCodeLogin(home);
+        if (!login || login.access === this.openCodeSent) return false;
+        const conn = await this.openCodeConnection();
+        if (!conn) return false;
+        await this.api('PUT', `/api/providers/${encodeURIComponent(conn.id)}`, { apiKey: login.access });
+        this.openCodeSent = login.access;
+        return true;
+    }
+
+    /** Situação do login para o painel: nada secreto. */
+    static openCodeLoginInfo(home) {
+        const login = readOpenCodeLogin(home);
+        if (!login) return null;
+        return { expiresInDays: login.expires ? Math.floor((login.expires - Date.now()) / 86400000) : null };
     }
 
     /** Se existe um login do Codex no servidor (para mostrar o botão). */

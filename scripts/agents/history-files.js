@@ -46,6 +46,39 @@ const FINDERS = {
 
 const canDelete = agent => !!FINDERS[agent];
 
+/** Primeiras linhas (JSON) do arquivo da conversa. */
+function firstLines(file, max = 65536) {
+    const fd = fs.openSync(file, 'r');
+    try {
+        const buf = Buffer.alloc(max);
+        const n = fs.readSync(fd, buf, 0, max, 0);
+        return buf.subarray(0, n).toString('utf8').split('\n').slice(0, -1)
+            .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
+/**
+ * A conversa foi aberta pela pessoa no terminal? Na dúvida, não: o que o agente dispara sozinho
+ * (subagentes, "claude -p", plugins) não pode aparecer na lista.
+ *  - Claude Code: entrypoint "cli" (a sessão interativa); o resto é "sdk-*".
+ *  - Codex: origem "codex-tui", fora de subagente.
+ */
+function startedInTerminal(agent, id, home) {
+    try {
+        const file = typeof id === 'string' && ID_RE.test(id) && FINDERS[agent] ? FINDERS[agent](home, id) : null;
+        if (!file) return false;
+        const lines = firstLines(file);
+        if (agent === 'claude') return lines.find(l => l.entrypoint)?.entrypoint === 'cli';
+        if (agent === 'codex') {
+            const meta = lines.find(l => l.payload?.originator)?.payload;
+            return meta?.originator === 'codex-tui' && typeof meta.source === 'string';
+        }
+    } catch { /* sem o arquivo: não é */ }
+    return false;
+}
+
 /**
  * Move a conversa para a lixeira. @returns {{ ok: true, trashed: string }}
  * @throws {Error & { status: number }}
@@ -63,4 +96,4 @@ function deleteConversation(agent, id, home) {
     return { ok: true, trashed: dest };
 }
 
-module.exports = { deleteConversation, canDelete };
+module.exports = { deleteConversation, canDelete, startedInTerminal };
