@@ -61,15 +61,17 @@ function browseFolders(start, onPick) {
  * @param {object} o
  * @param {string} o.current - pasta atual
  * @param {string} [o.agent]
+ * @param {boolean} [o.startsNew] - conversa em andamento: a escolha abre uma nova
  * @param {(path: string) => void} o.onPick
  */
-export async function openFolderMenu(anchor, { current, agent = '', onPick }) {
+export async function openFolderMenu(anchor, { current, agent = '', startsNew = false, onPick }) {
     const { folders = [] } = await getJson(`agent-folders?${new URLSearchParams({ agent })}`).catch(() => ({}));
     const list = [...new Set([current, ...folders].filter(Boolean))].slice(0, 8);
     showMenu([
+        ...(startsNew ? [{ label: 'Abrir nova conversa em:', disabled: true }] : []),
         ...list.map(path => ({
             label: baseName(path), hint: path === current ? '' : path.replace(/^\/root(?=\/|$)/, '~'),
-            icon: path === current ? 'check' : 'folder', disabled: path === current,
+            icon: path === current ? 'check' : 'folder', disabled: path === current && !startsNew,
             run: () => onPick(path),
         })),
         ...(list.length ? ['separator'] : []),
