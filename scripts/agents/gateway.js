@@ -159,7 +159,7 @@ class AgentGateway extends EventEmitter {
      * Emits 'event' with every normalized event envelope ({ sessionId, seq, type, at, data }).
      */
     constructor({ store, agents = loadAgents(), env = process.env, maxSessions = 4, startTimeoutMs = 60000,
-        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, onUsageLimit = null, extraModels = null, isUserStarted = null, log = () => {} }) {
+        maxText, validate = false, mcpServers = [], mediaDir = null, routeEnv = null, onUsageLimit = null, extraModels = null, isUserStarted = null, idleMs = 0, log = () => {} }) {
         super();
         this.store = store;
         this.agents = agents;
@@ -175,6 +175,11 @@ class AgentGateway extends EventEmitter {
         // Sem esta opção o histórico do agente é mostrado inteiro
         this.isUserStarted = isUserStarted;
         this.maxSessions = maxSessions;
+        this.starting = new Map(); // sessionId -> promessa do agente subindo
+        // Agente sem nada para fazer é desligado depois deste tempo; a conversa continua na lista
+        this.idleMs = idleMs;
+        if (idleMs > 0) this.idleTimer = setInterval(() => this.stopIdleAgents(), Math.min(idleMs, 60000));
+        this.idleTimer?.unref?.();
         this.startTimeoutMs = startTimeoutMs;
         this.maxText = maxText;
         this.validate = validate;
@@ -266,6 +271,107 @@ class AgentGateway extends EventEmitter {
         // A conversation from the terminal (or another app): its history is not in our log yet
         await this.spawnAgent(id, { resume: !!resumeAcpSessionId, importHistory: !!resumeAcpSessionId });
         return this.get(id);
+    }
+
+    /**
+     * Abre uma conversa só para ver: nenhum processo sobe. O agente inicia ao enviar a primeira
+     * mensagem (ensureRuntime). Conversa conhecida reaproveita a sessão, com o histórico dela; conversa
+     * nova é só uma linha interna, que não aparece na lista até haver mensagem.
+     */
+    async openSession({ agent, cwd, title = null, resumeAcpSessionId = null, route = null }) {
+        const def = this.agents[agent];
+        if (!def) throw new GatewayError(`Agente desconhecido: ${agent}`);
+        if (def.terminalOnly) throw new GatewayError(`${def.label} só funciona no terminal.`);
+        if (typeof cwd !== 'string' || !cwd) throw new GatewayError('Pasta inválida.');
+        if (resumeAcpSessionId) {
+            const known = this.store.sessionForConversation(agent, String(resumeAcpSessionId));
+            if (known) {
+                if (known.status === 'closed') this.store.updateSession(known.id, { status: 'stopped', closed_at: null });
+                return this.get(known.id);
+            }
+        }
+        const id = crypto.randomUUID();
+        this.store.insertSession({ id, agent, cwd, title, route, status: 'stopped' });
+        const capabilities = await this.previewCapabilities(agent, route);
+        this.store.updateSession(id, {
+            capabilities,
+            mode: capabilities.currentMode || null,
+            // Conversa de fora do app: o texto dela continua vindo do arquivo do agente
+            ...(resumeAcpSessionId ? { acp_session_id: String(resumeAcpSessionId), from_disk: 1 } : {}),
+        });
+        return this.get(id);
+    }
+
+    /** O seletor antes de o agente subir: a última oferta dele, mais os modelos de fora. */
+    async previewCapabilities(agent, route) {
+        const caps = this.store.lastCapabilities(agent);
+        const { resumed, ...rest } = caps;
+        if (!this.extraModels) return rest;
+        const extras = await Promise.resolve(this.extraModels({ agent, route: route || null })).catch(() => []);
+        if (!extras?.length) return rest;
+        return { ...rest, configOptions: this.withExtras({ extras, sessionId: null }, rest.configOptions || []) };
+    }
+
+    /** Liga o agente da sessão, se ainda não estiver ligado. Várias chamadas juntas esperam a mesma subida. */
+    ensureRuntime(sessionId) {
+        if (this.runtimes.has(sessionId) && this.runtimes.get(sessionId).ready) return Promise.resolve(this.runtimes.get(sessionId));
+        if (this.starting.has(sessionId)) return this.starting.get(sessionId);
+        const row = this.requireSession(sessionId);
+        if (row.status === 'closed') throw new GatewayError('Sessão encerrada.', 409);
+        const up = (async () => {
+            await this.makeRoom();
+            await this.spawnAgent(sessionId, { resume: !!row.acp_session_id });
+            await this.applyPending(sessionId);
+            return this.runtimes.get(sessionId);
+        })().finally(() => this.starting.delete(sessionId));
+        this.starting.set(sessionId, up);
+        return up;
+    }
+
+    /** Sem lugar: desliga o agente ocioso mais antigo; só recusa se todos estiverem trabalhando. */
+    async makeRoom() {
+        if (this.runtimes.size < this.maxSessions) return;
+        const idle = [...this.runtimes.entries()].filter(([, r]) => this.isIdle(r))
+            .sort(([, a], [, b]) => (a.lastActive || 0) - (b.lastActive || 0));
+        if (idle.length) await this.stopAgent(idle[0][0]);
+        this.checkCapacity();
+    }
+
+    isIdle(runtime) {
+        return runtime.ready && !runtime.prompting && !runtime.permissions.size && !(runtime.queue || []).length;
+    }
+
+    stopIdleAgents(now = Date.now()) {
+        for (const [id, runtime] of this.runtimes) {
+            if (this.isIdle(runtime) && now - (runtime.lastActive || 0) >= this.idleMs) this.stopAgent(id).catch(() => {});
+        }
+    }
+
+    /** Aplica o que foi escolhido no seletor antes de o agente subir. */
+    async applyPending(sessionId) {
+        const row = this.store.getSession(sessionId);
+        const pending = row?.pending ? JSON.parse(row.pending) : null;
+        if (!pending) return;
+        this.store.updateSession(sessionId, { pending: null });
+        for (const [configId, value] of Object.entries(pending.config || {})) {
+            await this.setConfigOption(sessionId, configId, value).catch(e => this.log('Opção pendente:', e.message));
+        }
+        if (pending.mode) await this.setMode(sessionId, pending.mode).catch(e => this.log('Modo pendente:', e.message));
+    }
+
+    /** Escolha no seletor sem agente ligado: guarda e mostra; vale quando ele subir. */
+    setPending(sessionId, change) {
+        const row = this.requireSession(sessionId);
+        const pending = row.pending ? JSON.parse(row.pending) : {};
+        const caps = row.capabilities || {};
+        if (change.mode) {
+            pending.mode = change.mode;
+            this.store.updateSession(sessionId, { pending, mode: change.mode, capabilities: { ...caps, currentMode: change.mode } });
+        } else {
+            pending.config = { ...(pending.config || {}), [change.configId]: change.value };
+            const configOptions = (caps.configOptions || []).map(o => (o.id === change.configId ? { ...o, currentValue: change.value } : o));
+            this.store.updateSession(sessionId, { pending, capabilities: { ...caps, configOptions } });
+        }
     }
 
     /** Restarts the agent of a stopped session, resuming its conversation when the agent can. */
@@ -491,6 +597,7 @@ class AgentGateway extends EventEmitter {
         const model = next ? routeModel || null : null;
         await this.envFor({ agent: row.agent, route: next, routeModel: model, account }); // falha aqui, sem parar nada
         this.store.updateSession(sessionId, { route: next, route_model: model, account });
+        if (!runtime) return this.get(sessionId); // sem agente ligado: vale quando ele subir
         await this.stopAgent(sessionId);
         await this.spawnAgent(sessionId, { resume: true });
         const where = next ? `${next}${model ? ` (${model})` : ''}` : 'direto';
@@ -659,6 +766,7 @@ class AgentGateway extends EventEmitter {
     }
 
     async setMode(sessionId, modeId) {
+        if (!this.runtimes.has(sessionId)) return this.setPending(sessionId, { mode: modeId });
         const runtime = this.requireRuntime(sessionId);
         const modes = runtime.capabilities.modeList || [];
         if (!modes.some(m => m.id === modeId)) throw new GatewayError(`Modo desconhecido: ${modeId}`);
@@ -689,7 +797,7 @@ class AgentGateway extends EventEmitter {
             clean.push(model);
         }
         const have = new Set(model.options.map(o => o.value));
-        const row = this.store.getSession(runtime.sessionId) || {};
+        const row = (runtime.sessionId && this.store.getSession(runtime.sessionId)) || {};
         const add = extras.filter(x => !have.has(x.value))
             .map(x => ({ value: x.value, name: x.name, description: x.description || '', group: x.group || 'Outros modelos', extra: true }));
         model.options = [...model.options, ...add];
@@ -718,6 +826,22 @@ class AgentGateway extends EventEmitter {
 
     /** Changes a session config option (model, reasoning effort, mode...). */
     async setConfigOption(sessionId, configId, value) {
+        if (!this.runtimes.has(sessionId)) {
+            const row = this.requireSession(sessionId);
+            const option = (row.capabilities?.configOptions || []).find(o => o.id === configId);
+            if (!option) throw new GatewayError(`Opção desconhecida: ${configId}`);
+            const extra = option.category === 'model' && option.options.find(o => o.value === value && o.extra);
+            if (extra) { // modelo de fora: "omniroute:codex/x" -> rota + modelo
+                const at = String(value).indexOf(':');
+                const caps = row.capabilities || {};
+                this.store.updateSession(sessionId, {
+                    route: value.slice(0, at), route_model: value.slice(at + 1),
+                    capabilities: { ...caps, configOptions: caps.configOptions.map(o => (o.id === configId ? { ...o, currentValue: value } : o)) },
+                });
+                return;
+            }
+            return this.setPending(sessionId, { configId, value });
+        }
         const runtime = this.requireRuntime(sessionId);
         const option = (runtime.capabilities.configOptions || []).find(o => o.id === configId);
         if (!option) throw new GatewayError(`Opção desconhecida: ${configId}`);
@@ -929,6 +1053,12 @@ class AgentGateway extends EventEmitter {
     }
 
     emitEvent(sessionId, type, data) {
+        const live = this.runtimes.get(sessionId);
+        if (live) live.lastActive = Date.now();
+        if (type === 'message.user' || type === 'message.assistant.done') {
+            const r = this.store.getSession(sessionId);
+            if (r?.acp_session_id) this.store.touchConversation(r.agent, r.acp_session_id, type === 'message.user' ? data?.text : null);
+        }
         if (type === 'tool.start') {
             const rt = this.runtimes.get(sessionId);
             if (rt && rt.prompting) rt.turnTools = (rt.turnTools || 0) + 1;

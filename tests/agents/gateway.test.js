@@ -437,3 +437,108 @@ test('limite no meio do trabalho: chama a troca marcando que já havia trabalho 
     assert.equal(calls[0].partial, false);
     await gateway.shutdown();
 });
+
+function lazyGateway(extra = {}) {
+    const store = new AgentStore(':memory:');
+    const gateway = new AgentGateway({ store, env: { ...process.env }, log: () => {},
+        agents: { fake: { label: 'Fake', command: process.execPath, args: [FAKE], install: 'n/a' } }, ...extra });
+    return { store, gateway };
+}
+
+test('abrir não liga agente: nem conversa nova nem antiga; nada entra na lista', async () => {
+    const { store, gateway } = lazyGateway();
+    const draft = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    const old = await gateway.openSession({ agent: 'fake', cwd: process.cwd(), resumeAcpSessionId: 'antiga-1' });
+    assert.equal(gateway.runtimes.size, 0);
+    assert.equal(draft.status, 'stopped');
+    assert.equal(old.acpSessionId, 'antiga-1');
+    assert.deepEqual(store.listConversations({ agent: 'fake' }), []);
+    // abrir de novo a mesma conversa reaproveita a sessão, com o histórico dela
+    const again = await gateway.openSession({ agent: 'fake', cwd: process.cwd(), resumeAcpSessionId: 'antiga-1' });
+    assert.equal(again.id, old.id);
+    assert.equal(gateway.runtimes.size, 0);
+});
+
+test('o agente sobe ao enviar a primeira mensagem, e só então a conversa entra na lista', async () => {
+    const { store, gateway } = lazyGateway();
+    const s = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    await Promise.all([gateway.ensureRuntime(s.id), gateway.ensureRuntime(s.id)]); // duas subidas juntas: uma só
+    assert.equal(gateway.runtimes.size, 1);
+    const acp = gateway.get(s.id).acpSessionId;
+    assert.deepEqual(store.listConversations({ agent: 'fake' }), []); // ligou, mas sem mensagem ainda
+    await gateway.prompt(s.id, 'markdown primeira mensagem');
+    const [c] = store.listConversations({ agent: 'fake' });
+    assert.equal(c.acp_session_id, acp);
+    assert.equal(c.title, 'markdown primeira mensagem');
+    await gateway.shutdown();
+});
+
+test('escolhas no seletor sem agente ligado valem quando ele sobe', async () => {
+    const { store, gateway } = lazyGateway();
+    const first = await gateway.startSession({ agent: 'fake', cwd: process.cwd() }); // grava o que o agente oferece
+    await gateway.shutdown();
+    const s = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    const option = gateway.get(s.id).capabilities.configOptions.find(o => o.category === 'model');
+    assert.ok(option, 'o seletor funciona antes de o agente subir');
+    const other = option.options.find(o => o.value !== option.currentValue);
+    await gateway.setConfigOption(s.id, option.id, other.value);
+    assert.equal(gateway.runtimes.size, 0);
+    assert.equal(gateway.get(s.id).capabilities.configOptions.find(o => o.id === option.id).currentValue, other.value);
+    await gateway.ensureRuntime(s.id);
+    assert.equal(gateway.get(s.id).capabilities.configOptions.find(o => o.id === option.id).currentValue, other.value);
+    assert.equal(store.getSession(s.id).pending, null);
+    assert.ok(first.id);
+    await gateway.shutdown();
+});
+
+test('trocar rota sem agente ligado não liga nada; vale ao subir', async () => {
+    const seen = [];
+    const { store, gateway } = lazyGateway({ routeEnv: async ({ route }) => { seen.push(route); return {}; } });
+    const s = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.setRoute(s.id, 'economia');
+    assert.equal(gateway.runtimes.size, 0);
+    assert.equal(store.getSession(s.id).route, 'economia');
+    await gateway.ensureRuntime(s.id);
+    assert.equal(seen.at(-1), 'economia');
+    await gateway.shutdown();
+});
+
+test('sem lugar: desliga o agente ocioso mais antigo; todos trabalhando: recusa', async () => {
+    const { gateway } = lazyGateway({ maxSessions: 1 });
+    const a = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    const b = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.ensureRuntime(a.id);
+    await gateway.ensureRuntime(b.id);
+    assert.deepEqual([...gateway.runtimes.keys()], [b.id]);
+    gateway.runtimes.get(b.id).prompting = true;
+    await assert.rejects(gateway.ensureRuntime(a.id), /Limite/);
+    gateway.runtimes.get(b.id).prompting = false;
+    await gateway.shutdown();
+});
+
+test('agente ocioso além do tempo é desligado; a conversa continua', async () => {
+    const { gateway } = lazyGateway({ idleMs: 1000 });
+    clearInterval(gateway.idleTimer);
+    const s = await gateway.openSession({ agent: 'fake', cwd: process.cwd() });
+    await gateway.ensureRuntime(s.id);
+    gateway.stopIdleAgents(Date.now()); // acabou de subir: fica
+    assert.equal(gateway.runtimes.size, 1);
+    gateway.stopIdleAgents(Date.now() + 5000);
+    for (let i = 0; i < 50 && gateway.runtimes.size; i++) await new Promise(r => setTimeout(r, 20));
+    assert.equal(gateway.runtimes.size, 0);
+    assert.equal(gateway.get(s.id).status, 'stopped');
+    await gateway.shutdown();
+});
+
+test('lista: apagada não volta pelo índice; pasta é filtro opcional; a mais recente vem primeiro', () => {
+    const store = new AgentStore(':memory:');
+    store.indexConversation({ agent: 'a', acpSessionId: 'x1', cwd: '/p1', title: 'Um', updatedAt: 100 });
+    store.indexConversation({ agent: 'a', acpSessionId: 'x2', cwd: '/p2', title: 'Dois', updatedAt: 200 });
+    assert.deepEqual(store.listConversations({ agent: 'a' }).map(c => c.acp_session_id), ['x2', 'x1']);
+    assert.deepEqual(store.listConversations({ agent: 'a', cwd: '/p1' }).map(c => c.acp_session_id), ['x1']);
+    store.deleteConversation('a', 'x2');
+    store.indexConversation({ agent: 'a', acpSessionId: 'x2', cwd: '/p2', title: 'Dois', updatedAt: 300 });
+    assert.deepEqual(store.listConversations({ agent: 'a' }).map(c => c.acp_session_id), ['x1']);
+    store.indexConversation({ agent: 'a', acpSessionId: 'x1', title: 'Outro', updatedAt: 400 });
+    assert.equal(store.listConversations({ agent: 'a' })[0].title, 'Um'); // título já existente fica
+});

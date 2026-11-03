@@ -42,10 +42,11 @@ const { AgentLauncher } = require('./scripts/agents/launch');
 const { writeShims, writeRcFile } = require('./scripts/agents/shims');
 const { execFile } = require('child_process');
 const { Addons, SERVICES } = require('./scripts/addons');
-const { deleteConversation, canDelete: canDeleteConversation, startedInTerminal } = require('./scripts/agents/history-files');
+const { deleteConversation, canDelete: canDeleteConversation, startedInTerminal, hasConversationFile } = require('./scripts/agents/history-files');
 const { detectAgents, searchDirs } = require('./scripts/agents/detect');
 const { ClaudeAccounts } = require('./scripts/claude-accounts');
 const { listOpenCodeModels } = require('./scripts/opencode-login');
+const { readTranscript, listOnDisk } = require('./scripts/agents/transcript');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
@@ -914,6 +915,7 @@ const agentGateway = new AgentGateway({
     onUsageLimit: usageLimitFallback,
     extraModels: extraAgentModels,
     isUserStarted: (agent, id) => startedInTerminal(agent, id, HOME_DIR),
+    idleMs: 15 * 60 * 1000, // agente sem trabalho há 15 min é desligado (volta ao enviar)
     log: debugLog,
 });
 // Os agentes acham os programas instalados nas pastas do usuário (~/.local/bin, ~/.opencode/bin...)
@@ -1308,9 +1310,14 @@ app.get(BASE_PATH + '/api/agent-media/:session/:file', (req, res) => {
 app.post(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
     const { agent, cwd, resumeAcpSessionId, title, afterId, route, intoTab } = req.body || {};
     if (typeof cwd !== 'string' || !cwd.trim()) return res.status(400).json({ error: 'Pasta inválida.' });
-    const folder = path.resolve(HOME_DIR, cwd.replace(/^~(?=$|[\\/])/, HOME_DIR));
-    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return res.status(400).json({ error: 'Pasta não encontrada.' });
-    const session = await agentGateway.startSession({
+    let folder = path.resolve(HOME_DIR, cwd.replace(/^~(?=$|[\\/])/, HOME_DIR));
+    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
+        // Conversa antiga de uma pasta que não existe mais: ainda dá para ler
+        if (!resumeAcpSessionId) return res.status(400).json({ error: 'Pasta não encontrada.' });
+        folder = HOME_DIR;
+    }
+    // Só abre para ver: o agente sobe ao enviar a primeira mensagem
+    const session = await agentGateway.openSession({
         agent: String(agent || ''),
         cwd: folder,
         title: typeof title === 'string' ? title.slice(0, 120) : null,
@@ -1341,19 +1348,58 @@ app.get(BASE_PATH + '/api/agent-sessions', agentRoute(async (req, res) => {
     });
 }));
 
+// A lista de conversas vem do SQL: uma consulta, sem ligar agente. O índice do disco acrescenta o que
+// foi aberto fora do app (no máximo a cada 30 s; só relê arquivo que mudou).
+const conversationIndex = { at: 0, seen: new Map() };
+function refreshConversationIndex() {
+    if (Date.now() - conversationIndex.at < 30000) return;
+    conversationIndex.at = Date.now();
+    for (const c of listOnDisk(HOME_DIR, conversationIndex.seen)) agentGateway.store.indexConversation(c);
+    if (!conversationIndex.checked) { // só na primeira vez: as antigas, de antes deste índice
+        conversationIndex.checked = true;
+        for (const c of agentGateway.store.conversationsWithoutMessages()) {
+            if (!hasConversationFile(c.agent, c.acp_session_id, HOME_DIR)) continue;
+            const first = readTranscript(c.agent, c.acp_session_id, HOME_DIR, { limit: 100000 }).find(e => e.type === 'message.user');
+            if (first) agentGateway.store.touchConversation(c.agent, c.acp_session_id, first.data.text);
+        }
+    }
+}
+
+function historyRows(agent, cwd) {
+    refreshConversationIndex();
+    return agentGateway.store.listConversations({ agent, cwd }).map(c => ({ sessionId: c.acp_session_id, cwd: c.cwd, title: c.title, updatedAt: c.updated_at }));
+}
+
+app.get(BASE_PATH + '/api/conversations', agentRoute(async (req, res) => {
+    refreshConversationIndex();
+    const agent = String(req.query.agent || '');
+    const cwd = req.query.cwd ? path.resolve(HOME_DIR, String(req.query.cwd).replace(/^~(?=$|[\\/])/, HOME_DIR)) : null;
+    const open = new Map(agentGateway.list().filter(s => s.agent === agent && s.acpSessionId).map(s => [s.acpSessionId, s]));
+    res.json({
+        conversations: agentGateway.store.listConversations({ agent, cwd }).map(c => {
+            const s = open.get(c.acp_session_id);
+            return { acpSessionId: c.acp_session_id, title: c.title, cwd: c.cwd, updatedAt: c.updated_at, origin: c.origin,
+                sessionId: s?.id || null, status: s && s.status !== 'stopped' ? s.status : null };
+        }),
+    });
+}));
+
 // Apagar uma conversa do histórico do agente (vai para a lixeira); fecha se estiver aberta
 app.delete(BASE_PATH + '/api/agent-history/:agent/:acpId', agentRoute(async (req, res) => {
     const { agent, acpId } = req.params;
     for (const s of agentGateway.list().filter(x => x.agent === agent && x.acpSessionId === acpId)) {
         await agentGateway.closeSession(s.id).catch(() => {});
     }
+    // Some da lista para qualquer agente; o arquivo vai para a lixeira quando o agente usa arquivos
+    if (!/^[\w-]{4,120}$/.test(acpId)) return res.status(400).json({ error: 'Conversa inválida.' });
+    agentGateway.store.deleteConversation(agent, acpId);
+    let trashed = null;
     try {
-        const trashed = deleteConversation(agent, acpId, HOME_DIR);
-        agentGateway.store.deleteConversation(agent, acpId);
-        res.json(trashed);
+        trashed = deleteConversation(agent, acpId, HOME_DIR).trashed;
     } catch (e) {
-        res.status(e.status || 500).json({ error: e.message });
+        if (e.status !== 404 && e.status !== 501 && e.status !== 400) return res.status(e.status || 500).json({ error: e.message });
     }
+    res.json({ ok: true, trashed });
 }));
 
 app.get(BASE_PATH + '/api/agent-sessions/:id', agentRoute(async (req, res) => {
@@ -1371,13 +1417,13 @@ app.get(BASE_PATH + '/api/agent-history', agentRoute(async (req, res) => {
     let isDir = false;
     try { isDir = fs.statSync(cwd).isDirectory(); } catch { /* não existe */ }
     if (!isDir) return res.status(400).json({ error: 'Pasta não encontrada.' });
-    res.json({ sessions: await agentGateway.listHistory({ agent, cwd }) });
+    res.json({ sessions: historyRows(agent, cwd) });
 }));
 
 app.get(BASE_PATH + '/api/agent-sessions/:id/history', agentRoute(async (req, res) => {
     const session = agentGateway.get(req.params.id);
     if (!session) return res.status(404).json({ error: 'Sessão não encontrada.' });
-    res.json({ sessions: await agentGateway.listHistory({ agent: session.agent, cwd: session.cwd }) });
+    res.json({ sessions: historyRows(session.agent, session.cwd) });
 }));
 
 // The turn runs in the background: its progress arrives as events on the tab's socket
@@ -1386,8 +1432,8 @@ app.post(BASE_PATH + '/api/agent-sessions/:id/prompt', agentRoute(async (req, re
     const text = String(body.text || '');
     // Pasted/attached images (base64); the body of this route may have up to 40 MB
     const images = Array.isArray(body.images) ? body.images.slice(0, 5).map(i => ({ mimeType: String(i && i.mimeType), data: String(i && i.data) })) : [];
-    agentGateway.requireRuntime(req.params.id);
     if (!text.trim() && !images.length) return res.status(400).json({ error: 'Mensagem vazia.' });
+    await agentGateway.ensureRuntime(req.params.id); // é aqui que o agente sobe
     // Agent busy: the message waits in the session queue (sent when the turn ends)
     const result = agentGateway.enqueue(req.params.id, text, { images });
     res.status(202).json({ success: true, ...result });
@@ -1438,6 +1484,8 @@ app.post(BASE_PATH + '/api/agent-sessions/:id/resume', agentRoute(async (req, re
  * Agent tab socket: replays the session's events after ?since=<seq>, then streams new ones.
  * Actions (prompt, permission...) go through the REST routes above.
  */
+const CONVERSATION_EVENT = /^(message\.|tool\.|thought\.|plan\.|permission\.|subagent\.)/;
+
 function attachAgentTab(ws, row, since) {
     sessions.sockets.add(ws);
     const send = message => {
@@ -1457,7 +1505,18 @@ function attachAgentTab(ws, row, since) {
         return;
     }
     send({ type: 'agent-session', session });
-    for (const event of agentGateway.events(row.url, since)) send({ type: 'agent-event', event });
+    const replay = agentGateway.events(row.url, since);
+    // Conversa de fora do app: o texto vem do arquivo do agente, só para mostrar, sem ligar nada.
+    // O agente escreve no mesmo arquivo ao continuar, então ele é a fonte da conversa inteira
+    const stored = agentGateway.store.getSession(row.url);
+    const transcript = session.acpSessionId && !since && (stored.from_disk || !agentGateway.store.hasUserMessages(row.url))
+        ? readTranscript(session.agent, session.acpSessionId, HOME_DIR) : [];
+    if (transcript.length) {
+        for (const event of replay) if (!CONVERSATION_EVENT.test(event.type)) send({ type: 'agent-event', event });
+        send({ type: 'agent-transcript', events: transcript, lastSeq: replay.length ? replay[replay.length - 1].seq : 0 });
+    } else {
+        for (const event of replay) send({ type: 'agent-event', event });
+    }
     send({ type: 'ready' });
 }
 

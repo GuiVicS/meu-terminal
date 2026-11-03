@@ -36,7 +36,7 @@ const STATUS = {
     thinking: { label: 'Trabalhando', tone: 'busy' },
     waiting_permission: { label: 'Aguardando você', tone: 'warn' },
     error: { label: 'Erro', tone: 'bad' },
-    stopped: { label: 'Parado', tone: 'bad' },
+    stopped: { label: 'Offline', tone: '' }, // normal: o agente só sobe ao enviar uma mensagem
     closed: { label: 'Encerrado', tone: 'bad' },
 };
 
@@ -426,6 +426,7 @@ export default class AgentSession {
             }
             if (m.type === 'agent-session') this.applySession(m.session);
             else if (m.type === 'agent-event') this.applyEvent(m.event);
+            else if (m.type === 'agent-transcript') this.applyTranscript(m);
             else if (m.type === 'ready') this.onReady();
             else if (m.type === 'agent-missing') this.showMissing();
             else if (m.type === 'workspace') this.hooks.onWorkspaceChanged();
@@ -514,6 +515,22 @@ export default class AgentSession {
         this.renderBanner();
         this.renderPending();
         this.hooks.onInfo?.(this);
+    }
+
+    /** Conversa lida do arquivo do agente (nenhum agente ligado para isso). */
+    applyTranscript({ events, lastSeq = 0 }) {
+        if (this.lastSeq < lastSeq) this.lastSeq = lastSeq;
+        if (this.transcriptShown) return;
+        this.transcriptShown = true;
+        this.hasConversation = true;
+        this.el.log.querySelector('.ag-empty')?.remove();
+        this.panel.classList.remove('ag-is-empty');
+        for (const e of events) {
+            this.conversation.apply(e);
+            this.side.apply(e);
+        }
+        this.side.render();
+        this.el.log.scrollTop = this.el.log.scrollHeight;
     }
 
     applyEvent(event) {
@@ -627,9 +644,7 @@ export default class AgentSession {
         } else if (this.state === STATE.DISCONNECTED) {
             parts.push(`<div class="ag-banner-row bad">Conexão perdida. <button type="button" class="ag-link" data-reconnect>Tentar de novo</button></div>`);
         }
-        if (this.status === 'stopped') {
-            parts.push(`<div class="ag-banner-row bad">O agente está parado (servidor reiniciado, erro ou aba reaberta). <button type="button" class="btn btn-primary" data-resume>Retomar conversa</button></div>`);
-        }
+        if (this.status === 'starting') parts.push(`<div class="ag-banner-row info">${icon('loader', 14)} Iniciando o agente…</div>`);
         // Permanent warning while the agent may act without asking
         if (this.session && this.session.mode === 'bypassPermissions') {
             parts.push(`<div class="ag-banner-row bad">${icon('shield', 14)} Modo sem permissões: o agente executa e altera arquivos sem perguntar.</div>`);
@@ -843,7 +858,7 @@ export default class AgentSession {
 
     /** Whether this agent can list its past conversations (ACP session/list). */
     get hasHistory() {
-        return !!(this.session && this.session.capabilities && this.session.capabilities.history);
+        return true; // a lista vem do banco do app, não do agente
     }
 
     /**
