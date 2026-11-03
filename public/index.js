@@ -183,9 +183,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     let blurTimer;
     const updateShortcutBar = () => {
         const mode = settings.get('shortcutBar');
-        // File and notes tabs have their own buttons: the terminal keys bar isn't useful there
-        const kind = workspace?.active?.kind;
-        const visible = kind !== 'files' && kind !== 'notes' && (mode === 'always'
+        // ESC, TAB, setas...: só no celular e só em aba de terminal. No computador há o teclado de
+        // verdade, e as outras abas têm os próprios botões
+        const phone = document.documentElement.hasAttribute('data-iphone') || isHandset();
+        const visible = phone && workspace?.active?.kind === 'terminal' && (mode === 'always'
             || (mode === 'auto' && viewport.keyboardOpen && terminalFocused));
         shortcutBar.setVisible(visible);
     };
