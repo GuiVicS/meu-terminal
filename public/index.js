@@ -24,7 +24,7 @@ import { openCommandPalette } from './ui/commandPalette.js';
 import VibeForm from './ui/vibeForm.js';
 import { autoEnhanceSelects } from './ui/select.js';
 import AgentLaunch from './ui/agentLaunch.js';
-import { isHandset, isIphonePortrait } from './ui/device.js';
+import { isHandset, isIphonePortrait, isPhoneScreen } from './ui/device.js';
 import { openSettingsSheet } from './ui/settingsSheet.js';
 import { toast } from './ui/toast.js';
 import { haptic } from './ui/haptics.js';
@@ -517,7 +517,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             { label: 'Nova sessão com opções…', icon: 'terminal', run: () => workspace.openNewSessionPage({ advanced: true }) },
             { label: 'Nova conversa com agente', icon: 'bot', run: () => workspace.openAgentMenu(menuBtn) },
             { label: 'Novo projeto (vibecoding)', icon: 'zap', run: () => vibeForm.open() },
-            ...(workspace.activeId ? [workspace.split && workspace.visiblePair()
+            ...(workspace.activeId && !isPhoneScreen() ? [workspace.split && workspace.visiblePair()
                 ? { label: 'Desfazer divisão da tela', icon: 'panelLeft', run: () => workspace.clearSplit({ keep: workspace.activeId }) }
                 : { label: 'Dividir tela…', icon: 'panelLeft', run: () => workspace.openSplitMenu(workspace.activeId, { anchor: menuBtn }) }] : []),
             { label: 'Reabrir sessão fechada', icon: 'restore', disabled: workspace.recents.length === 0,

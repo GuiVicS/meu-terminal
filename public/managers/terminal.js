@@ -18,7 +18,7 @@ import { askText } from '../ui/prompt.js';
 import { openSessionSheet, sessionIcon } from '../ui/sessionSheet.js';
 import { toast } from '../ui/toast.js';
 import { playChime } from '../ui/sound.js';
-import { isHandset } from '../ui/device.js';
+import { isHandset, isPhoneScreen } from '../ui/device.js';
 import { withLoading, KIND_LABEL } from '../ui/loading.js';
 import { openAgentPicker } from '../ui/agentPicker.js';
 import { agentIconName } from '../ui/agent-logos.js';
@@ -259,6 +259,7 @@ export default class TerminalManager {
 
     /** The pair shown right now: the saved split when the active tab is part of it. */
     visiblePair() {
+        if (isPhoneScreen()) return null; // celular: uma aba por vez, mesmo com divisão salva ou pedida
         const s = this.split;
         if (!s || !this.sessions.has(s.a) || !this.sessions.has(s.b)) return null;
         return s.a === this.activeId || s.b === this.activeId ? [s.a, s.b] : null;
@@ -312,6 +313,11 @@ export default class TerminalManager {
     /** Pairs two tabs (a = usually the terminal) and shows them. */
     setSplit(a, b, { focus = a, ratio } = {}) {
         if (!this.sessions.has(a) || !this.sessions.has(b) || a === b) return;
+        // Celular não divide (o vibecoding pede a divisão a todas as janelas): só abre a aba principal
+        if (isPhoneScreen()) {
+            this.activate(focus, { focus: false });
+            return;
+        }
         this.split = { a, b, ratio: ratio || this.split?.ratio || 0.5 };
         this.storage.set('split', this.split);
         // Keep the pair next to each other in the tab bar
@@ -333,7 +339,7 @@ export default class TerminalManager {
     setupSplit() {
         this.panelsEl = this.workspaceEl.querySelector('.terminal-panels');
         const saved = this.storage.get('split');
-        this.split = saved && saved.a && saved.b ? saved : null;
+        this.split = saved && saved.a && saved.b && !isPhoneScreen() ? saved : null;
 
         const divider = document.createElement('div');
         divider.className = 'split-divider';
@@ -778,7 +784,7 @@ export default class TerminalManager {
             ...(window.appConfig?.notesAvailable ? [{ label: 'Nova aba de anotações', icon: 'notes', hint: hint(`${k.mod}+O`), run: () => this.createNotes() }] : []),
             ...(s.kind === 'terminal' ? [{ label: 'Abrir pasta atual nos Arquivos', icon: 'folderOpen',
                 run: () => this.createFiles(s.cwd || s.startCwd || undefined) }] : []),
-            ...(this.split && (this.split.a === id || this.split.b === id)
+            ...(isPhoneScreen() ? [] : this.split && (this.split.a === id || this.split.b === id)
                 ? [{ label: 'Desfazer divisão', icon: 'panelLeft', run: () => this.clearSplit({ keep: id }) }]
                 : [{ label: 'Dividir tela com…', icon: 'panelLeft', run: () => this.openSplitMenu(id, { x, y, anchor }) }]),
             { label: 'Duplicar', icon: 'copy', run: () => this.duplicate(id) },

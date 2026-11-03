@@ -25,3 +25,6 @@ export const isIphone = () => document.documentElement.hasAttribute('data-iphone
 
 /** The iPhone layout only applies in portrait; in landscape it is the regular phone layout. */
 export const isIphonePortrait = () => isIphone() && window.matchMedia('(orientation: portrait)').matches;
+
+/** Tela de celular (em pé ou deitado), com o mesmo critério do tema: sem espaço para duas abas lado a lado. */
+export const isPhoneScreen = () => isIphone() || isHandset();
