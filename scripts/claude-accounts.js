@@ -60,10 +60,13 @@ class ClaudeAccounts {
         for (const name of ['projects', 'plugins', 'skills', 'agents', 'commands', 'todos', 'settings.json']) {
             const src = path.join(this.main, name);
             const target = path.join(dir, name);
-            if (fs.existsSync(target) || fs.existsSync(src)) continue;
-            if (name.endsWith('.json')) fs.writeFileSync(src, '{}\n');
-            else fs.mkdirSync(src, { recursive: true });
-            fs.symlinkSync(src, target);
+            // O Claude Code pode apagar a pasta vazia no principal: o link da conta continua lá, quebrado
+            // (existsSync o vê como inexistente). Recriar o destino basta para ele voltar a valer
+            if (!fs.existsSync(src)) {
+                if (name.endsWith('.json')) fs.writeFileSync(src, '{}\n');
+                else fs.mkdirSync(src, { recursive: true });
+            }
+            try { fs.lstatSync(target); } catch { fs.symlinkSync(src, target); }
         }
         return dir;
     }

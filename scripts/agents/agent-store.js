@@ -88,6 +88,15 @@ class AgentStore {
         if (!columns.has('pending')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN pending TEXT');
         if (!columns.has('from_disk')) this.db.exec('ALTER TABLE agent_sessions ADD COLUMN from_disk INTEGER');
         const conv = new Set(this.db.prepare('PRAGMA table_info(agent_conversations)').all().map(c => c.name));
+        // custom_title: nome dado pela pessoa (o agente não troca); archived_at: fora da lista principal;
+        // unread: o agente terminou ou pediu algo e a pessoa ainda não viu
+        if (!conv.has('custom_title')) {
+            this.db.exec(`
+                ALTER TABLE agent_conversations ADD COLUMN custom_title TEXT;
+                ALTER TABLE agent_conversations ADD COLUMN archived_at INTEGER;
+                ALTER TABLE agent_conversations ADD COLUMN unread INTEGER NOT NULL DEFAULT 0;
+            `);
+        }
         if (!conv.has('has_messages')) {
             // has_messages: já houve mensagem (conversa aberta e nunca usada não entra na lista)
             // deleted_at: apagada pela pessoa (o índice do disco não traz de volta)
@@ -130,9 +139,15 @@ class AgentStore {
 
     /** Houve mensagem: entra na lista e sobe para o topo. O título inicial é a primeira mensagem. */
     touchConversation(agent, acpSessionId, firstText = null) {
-        this.db.prepare(`UPDATE agent_conversations SET has_messages = 1, updated_at = ?,
+        // Mandar mensagem numa conversa arquivada a traz de volta
+        this.db.prepare(`UPDATE agent_conversations SET has_messages = 1, updated_at = ?, archived_at = NULL, unread = 0,
             title = COALESCE(title, ?) WHERE agent = ? AND acp_session_id = ?`)
             .run(Date.now(), firstText ? String(firstText).slice(0, 80) : null, agent, acpSessionId);
+    }
+
+    /** O agente terminou ou pediu permissão: fica não lida até a pessoa olhar. */
+    markUnread(agent, acpSessionId) {
+        this.db.prepare('UPDATE agent_conversations SET unread = 1, updated_at = ? WHERE agent = ? AND acp_session_id = ?').run(Date.now(), agent, acpSessionId);
     }
 
     /** Veio do disco (aberta fora do app): só acrescenta; nunca revive uma apagada. */
@@ -145,11 +160,28 @@ class AgentStore {
     }
 
     /** A lista lateral: uma consulta só, sem depender de agente nem de pasta (a pasta é filtro opcional). */
-    listConversations({ agent, cwd = null, limit = 300 }) {
+    listConversations({ agent, cwd = null, archived = false, limit = 300 }) {
+        const where = `agent = ? AND deleted_at IS NULL AND has_messages = 1 AND archived_at IS ${archived ? 'NOT NULL' : 'NULL'}`;
         const rows = cwd
-            ? this.db.prepare(`SELECT * FROM agent_conversations WHERE agent = ? AND deleted_at IS NULL AND has_messages = 1 AND cwd = ? ORDER BY updated_at DESC LIMIT ?`).all(agent, cwd, limit)
-            : this.db.prepare(`SELECT * FROM agent_conversations WHERE agent = ? AND deleted_at IS NULL AND has_messages = 1 ORDER BY updated_at DESC LIMIT ?`).all(agent, limit);
-        return rows;
+            ? this.db.prepare(`SELECT * FROM agent_conversations WHERE ${where} AND cwd = ? ORDER BY updated_at DESC LIMIT ?`).all(agent, cwd, limit)
+            : this.db.prepare(`SELECT * FROM agent_conversations WHERE ${where} ORDER BY updated_at DESC LIMIT ?`).all(agent, limit);
+        return rows.map(r => ({ ...r, title: r.custom_title || r.title }));
+    }
+
+    /** Nome, arquivar, lida/não lida. Conversa conhecida só de nome (índice) também vale. */
+    updateConversation(agent, acpSessionId, { title, archived, unread }) {
+        const set = [];
+        const values = [];
+        if (title !== undefined) { set.push('custom_title = ?'); values.push(title); }
+        if (archived !== undefined) { set.push('archived_at = ?'); values.push(archived ? Date.now() : null); }
+        if (unread !== undefined) { set.push('unread = ?'); values.push(unread ? 1 : 0); }
+        if (!set.length) return;
+        this.db.prepare(`UPDATE agent_conversations SET ${set.join(', ')} WHERE agent = ? AND acp_session_id = ?`).run(...values, agent, acpSessionId);
+    }
+
+    /** Sessões do app ligadas a uma conversa. */
+    sessionIdsForConversation(agent, acpSessionId) {
+        return this.db.prepare('SELECT id FROM agent_sessions WHERE agent = ? AND acp_session_id = ?').all(agent, acpSessionId).map(r => r.id);
     }
 
     /** A sessão do app ligada a uma conversa do agente (a mais recente). */

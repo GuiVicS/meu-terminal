@@ -1376,12 +1376,37 @@ app.get(BASE_PATH + '/api/conversations', agentRoute(async (req, res) => {
     const cwd = req.query.cwd ? path.resolve(HOME_DIR, String(req.query.cwd).replace(/^~(?=$|[\\/])/, HOME_DIR)) : null;
     const open = new Map(agentGateway.list().filter(s => s.agent === agent && s.acpSessionId).map(s => [s.acpSessionId, s]));
     res.json({
-        conversations: agentGateway.store.listConversations({ agent, cwd }).map(c => {
+        conversations: agentGateway.store.listConversations({ agent, cwd, archived: req.query.archived === '1' }).map(c => {
             const s = open.get(c.acp_session_id);
             return { acpSessionId: c.acp_session_id, title: c.title, cwd: c.cwd, updatedAt: c.updated_at, origin: c.origin,
+                unread: !!c.unread, archived: !!c.archived_at,
                 sessionId: s?.id || null, status: s && s.status !== 'stopped' ? s.status : null };
         }),
     });
+}));
+
+// Mudar o nome, arquivar, marcar como lida ou não lida
+app.patch(BASE_PATH + '/api/conversations/:agent/:acp', agentRoute(async (req, res) => {
+    const { agent, acp } = req.params;
+    if (!agentGateway.store.getConversation(agent, acp)) return res.status(404).json({ error: 'Conversa não encontrada.' });
+    const { title, archived, unread } = req.body || {};
+    if (typeof title === 'string') {
+        const clean = title.trim().slice(0, 120);
+        if (!clean) return res.status(400).json({ error: 'Nome vazio.' });
+        agentGateway.renameConversation(agent, acp, clean);
+    }
+    agentGateway.store.updateConversation(agent, acp, {
+        ...(typeof archived === 'boolean' ? { archived } : {}),
+        ...(typeof unread === 'boolean' ? { unread } : {}),
+    });
+    res.json({ ok: true });
+}));
+
+// Desligar o agente; a conversa continua na lista e sobe de novo ao enviar
+app.post(BASE_PATH + '/api/agent-sessions/:id/stop', agentRoute(async (req, res) => {
+    agentGateway.requireSession(req.params.id);
+    await agentGateway.stopAgent(req.params.id);
+    res.json({ ok: true });
 }));
 
 // Apagar uma conversa do histórico do agente (vai para a lixeira); fecha se estiver aberta

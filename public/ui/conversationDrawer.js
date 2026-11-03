@@ -15,8 +15,8 @@ import { esc } from '../agent/markdown.js';
 import { showMenu } from './contextMenu.js';
 import { toast } from './toast.js';
 import { agentIconName } from './agent-logos.js';
-import { fetchConversations, conversationRows, deleteConversation } from '../agent/conversations.js';
-import { askConfirm } from './prompt.js';
+import { fetchConversations, conversationRows, updateConversation } from '../agent/conversations.js';
+import { conversationMenuItems } from '../agent/conversationMenu.js';
 import { haptic } from './haptics.js';
 
 const root = document.documentElement;
@@ -224,11 +224,22 @@ export default class ConversationDrawer {
     async load() {
         const agent = this.getAgent();
         if (!agent) return;
-        const [list, pins] = await Promise.allSettled([fetchConversations(agent.session?.agent || agent.agentId), pinsApi('GET')]);
+        const id = agent.session?.agent || agent.agentId;
+        const [list, pins, archived] = await Promise.allSettled([fetchConversations(id), pinsApi('GET'),
+            this.archived ? fetchConversations(id, { archived: true }) : Promise.resolve(null)]);
         if (this.getAgent() !== agent) return;
         if (pins.status === 'fulfilled') this.pins = pins.value;
+        if (archived.status === 'fulfilled' && archived.value) this.archived = archived.value;
         if (list.status === 'fulfilled') {
             this.history = list.value;
+            // Você está olhando a conversa: deixa de ser não lida
+            const open = agent.session?.acpSessionId;
+            const seen = open && list.value.find(c => c.acpSessionId === open);
+            if (this.keepUnread && this.keepUnread !== open) this.keepUnread = null;
+            if (seen?.unread && this.keepUnread !== open && document.visibilityState === 'visible') {
+                seen.unread = false;
+                updateConversation(id, open, { unread: false }).catch(() => {});
+            }
             this.error = null;
         } else if (this.history === null) {
             this.error = list.reason?.message || 'indisponível';
@@ -269,9 +280,10 @@ export default class ConversationDrawer {
         const recent = rows.filter(r => !(r.acp && this.pins.includes(r.acp)) && match(r));
         const limit = this.showAll || q ? recent.length : RECENT_LIMIT;
         const row = r => `
-            <li><button type="button" class="cv-row${r.current ? ' is-current' : ''}" data-id="${esc(r.key)}" ${r.current ? 'aria-current="true"' : ''}>
+            <li><button type="button" class="cv-row${r.current ? ' is-current' : ''}${r.unread ? ' is-unread' : ''}" data-id="${esc(r.key)}" ${r.current ? 'aria-current="true"' : ''}>
                 <span class="cv-row-icon">${r.working ? SPINNER_ICON : BUBBLE_ICON}</span>
                 <span class="cv-row-title">${esc(r.title || 'Sem título')}</span>
+                ${r.unread || r.waiting ? `<span class="conv-unread${r.waiting ? ' is-waiting' : ''}" aria-label="${r.waiting ? 'esperando você' : 'não lida'}"></span>` : ''}
                 ${r.online ? '<span class="cv-online" aria-label="agente ligado"></span>' : ''}
             </button></li>`;
         let html = '';
@@ -287,6 +299,12 @@ export default class ConversationDrawer {
             html += `<ul class="cv-ul">${recent.slice(0, limit).map(row).join('')}</ul>`;
             if (recent.length > limit) html += `<button type="button" class="cv-more" data-cv="all">Ver tudo ${icon('chevronRight', 16)}</button>`;
         }
+        if (this.archived) {
+            const rowsA = conversationRows(this.archived, null).map(r => ({ ...r, archived: true }));
+            rowsA.forEach(r => this.rowsByKey.set(r.key, r));
+            html += `<h3 class="cv-section">Arquivadas</h3>${rowsA.length ? `<ul class="cv-ul">${rowsA.filter(match).map(row).join('')}</ul>` : '<p class="cv-note">Nenhuma conversa arquivada.</p>'}`;
+        }
+        html += `<button type="button" class="cv-more" data-cv="archived">${this.archived ? 'Ocultar arquivadas' : 'Ver arquivadas'}</button>`;
         this.list.innerHTML = html;
     }
 
@@ -304,24 +322,6 @@ export default class ConversationDrawer {
         }
     }
 
-    async remove(key) {
-        const agent = this.getAgent();
-        const r = this.rowsByKey?.get(key);
-        if (!agent || !r?.acp) return;
-        const ok = await askConfirm({ title: 'Apagar conversa', message: `Apagar "${r.title || 'Sem título'}"? Ela sai da lista.`, confirm: 'Apagar', danger: true });
-        if (!ok) return;
-        try {
-            await deleteConversation(agent.session?.agent || agent.agentId, r.acp);
-            if (this.history) this.history = this.history.filter(h => h.acpSessionId !== r.acp);
-            this.render();
-            toast('Conversa apagada.');
-            if (this.pins.includes(r.acp)) await this.togglePin(r.acp);
-            if (r.current) await agent.startConversation({});
-        } catch (e) {
-            toast(e.message, { tone: 'error', duration: 6000 });
-        }
-    }
-
     bindUi() {
         let pressTimer = null;
         let pressed = null;
@@ -334,12 +334,16 @@ export default class ConversationDrawer {
                 pressed = null;
                 const key = btn.dataset.id;
                 const r = this.rowsByKey?.get(key);
-                if (!r?.acp) return;
-                const pinnedNow = this.pins.includes(r.acp);
-                showMenu([
-                    { label: pinnedNow ? 'Desafixar' : 'Fixar', icon: 'pin', run: () => this.togglePin(r.acp) },
-                    { label: 'Apagar', icon: 'trash', run: () => this.remove(key) },
-                ], { anchor: btn, label: 'Conversa' });
+                const agent = this.getAgent();
+                if (!r?.acp || !agent) return;
+                showMenu(conversationMenuItems({
+                    agent: agent.session?.agent || agent.agentId, row: r, pins: this.pins,
+                    togglePin: acp => this.togglePin(acp),
+                    openTab: opts => { this.close(); return agent.hooks.openTab(opts); },
+                    refresh: () => this.load(),
+                    afterDeleteCurrent: () => agent.startConversation({}),
+                    keepUnread: acp => { if (r.current) this.keepUnread = acp; },
+                }), { anchor: btn, label: 'Conversa' });
             }, LONG_PRESS_MS);
         });
         const cancelPress = () => clearTimeout(pressTimer);
@@ -360,6 +364,7 @@ export default class ConversationDrawer {
             if (act === 'new') { this.close(); this.getAgent()?.startConversation({}); }
             else if (act === 'all') { this.showAll = true; this.render(); }
             else if (act === 'retry') this.load();
+            else if (act === 'archived') { this.archived = this.archived ? null : []; this.load(); this.render(); }
             else if (act === 'search') {
                 this.searchBox.hidden = !this.searchBox.hidden;
                 if (!this.searchBox.hidden) this.searchInput.focus();

@@ -128,7 +128,6 @@ export default class AgentSession {
                 </div>
                 <span class="ag-status" role="status"></span>
                 <button type="button" class="btn btn-ghost btn-sm ag-publish" data-act="vibe-publish" aria-label="Publicar no Vercel" title="Publicar no Vercel" hidden>${icon('cloudUpload', 16)} <span class="ag-publish-label">Publicar</span></button>
-                <button type="button" class="icon-btn" data-act="vibe-agent" aria-label="Trocar agente" title="Trocar agente (vibecoding)" hidden>${icon('swap', 18)}</button>
                 <button type="button" class="btn btn-ghost btn-sm ag-route" data-act="route" aria-haspopup="menu" title="Rota do Claude Code" hidden></button>
                 <button type="button" class="icon-btn" data-act="history" aria-label="Conversas">${icon('history', 18)}</button>
                 <button type="button" class="icon-btn" data-act="terminal" aria-label="Abrir terminal nesta pasta">${icon('terminal', 18)}</button>
@@ -154,7 +153,7 @@ export default class AgentSession {
             banner: q('.ag-banner'), body: q('.ag-body'), log: q('.ag-log'), jump: q('.ag-jump'),
             pending: q('.ag-pending'), side: q('.ag-side'), panelBtn: q('[data-act="panel"]'),
             scrim: q('.ag-side-scrim'),
-            vibeBtn: q('[data-act="vibe-agent"]'), publishBtn: q('[data-act="vibe-publish"]'),
+            publishBtn: q('[data-act="vibe-publish"]'),
         };
         // On the iPhone the panel is a sheet: tapping outside closes it, like every other sheet
         this.el.scrim.addEventListener('click', () => {
@@ -196,7 +195,6 @@ export default class AgentSession {
             else if (btn.dataset.act === 'files') this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id });
             else if (btn.dataset.act === 'history') this.openHistory(btn);
             else if (btn.dataset.act === 'route') this.openRouteMenu(btn);
-            else if (btn.dataset.act === 'vibe-agent') this.openVibeAgentMenu(btn);
             else if (btn.dataset.act === 'vibe-publish') this.publishVibeProject();
         });
         this.el.banner.addEventListener('click', e => {
@@ -278,46 +276,14 @@ export default class AgentSession {
     /** ⌘⇧C: copia a última resposta do agente. */
     lastAnswerText() { return this.conversation.lastAnswerText(); }
 
-    /** Only vibecoding tabs get the agent switcher and "Publicar" - a plain agent conversation has no project. */
+    /** Only vibecoding tabs get "Publicar" - a plain agent conversation has no project. */
     async checkVibeProject() {
         try {
             this.vibeProject = await api('GET', `vibe/tab/${encodeURIComponent(this.id)}`);
             if (!this.vibeProject) return;
-            this.el.vibeBtn.hidden = false;
             this.el.publishBtn.hidden = !this.vibeProject.can_publish;
         } catch {
             this.vibeProject = null;
-        }
-    }
-
-    async openVibeAgentMenu(anchor) {
-        if (!this.vibeProject) return;
-        let agentOptions = [];
-        try {
-            ({ agents: agentOptions } = await api('GET', 'vibe/kinds'));
-        } catch (e) {
-            toast(e.message, { tone: 'error' });
-            return;
-        }
-        const used = new Map(this.vibeProject.agents.map(a => [a.agent, a]));
-        const items = agentOptions.filter(a => a.installed || used.has(a.id)).map(a => ({
-            label: used.has(a.id) ? a.label : `${a.label} (nova conversa)`,
-            icon: a.id === this.session?.agent ? 'check' : agentIconName(a.id),
-            run: () => this.switchVibeAgent(a.id),
-        }));
-        if (!items.length) {
-            toast('Nenhum outro agente instalado para trocar.');
-            return;
-        }
-        showMenu(items, { anchor, label: 'Trocar agente' });
-    }
-
-    async switchVibeAgent(agent) {
-        if (agent === this.session?.agent) return;
-        try {
-            await api('POST', `vibe/${encodeURIComponent(this.vibeProject.id)}/open`, { agent });
-        } catch (e) {
-            toast(e.message, { tone: 'error' });
         }
     }
 
@@ -371,7 +337,6 @@ export default class AgentSession {
      * exist in a vibecoding project. Popovers open anchored to `anchor` (the ⋮ button).
      */
     menuActions(anchor) {
-        const vibe = !this.el.vibeBtn.hidden;
         const route = this.session?.agent === 'claude'
             ? [{ label: `Rota: ${ROUTE_LABELS[this.session.route || 'direto'] || this.session.route}`, icon: 'swap', run: () => this.openRouteMenu(anchor) }] : [];
         return [
@@ -379,7 +344,6 @@ export default class AgentSession {
             { label: 'Abrir terminal na pasta', icon: 'terminal', run: () => this.hooks.openTab({ cwd: this.cwd || undefined, afterId: this.id }) },
             { label: 'Abrir arquivos da pasta', icon: 'folder',
                 run: () => this.hooks.openTab({ kind: 'files', url: 'local', cwd: this.cwd || undefined, afterId: this.id }) },
-            ...(vibe ? [{ label: 'Trocar agente', icon: 'swap', run: () => this.openVibeAgentMenu(anchor) }] : []),
             ...(!this.el.publishBtn.hidden ? [{ label: this.el.publishBtn.textContent.trim() || 'Publicar', icon: 'cloudUpload',
                 disabled: this.el.publishBtn.disabled, run: () => this.publishVibeProject() }] : []),
             { label: 'Painel do agente', icon: 'panelLeft', checked: this.isPanelOpen(), run: () => this.togglePanel() },

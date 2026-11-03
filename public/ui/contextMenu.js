@@ -26,7 +26,7 @@ export function closeMenu() {
 
 /**
  * Opens a menu.
- * @param {Array<{label:string, icon?:string, hint?:string, run?:Function, disabled?:boolean,
+ * @param {Array<{label:string, icon?:string, hint?:string, key?:string, run?:Function, disabled?:boolean,
  *   danger?:boolean, checked?:boolean} | 'separator'>} items
  * @param {{ x?: number, y?: number, anchor?: Element, label?: string, restoreFocus?: Element }} opts
  */
@@ -47,6 +47,8 @@ export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', r
             el.appendChild(sep);
             return;
         }
+        // Atalho de letra (com o menu aberto) só faz sentido com teclado
+        const hint = item.hint || (item.key && document.documentElement.hasAttribute('data-desktop') ? item.key.toUpperCase() : '');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'menu-item' + (item.danger ? ' danger' : '');
@@ -56,9 +58,10 @@ export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', r
         btn.disabled = !!item.disabled;
         btn.innerHTML = `<span class="menu-icon">${item.icon ? icon(item.icon, 15) : ''}</span>`
             + `<span class="menu-label"></span>`
-            + (item.hint ? `<kbd class="menu-hint"></kbd>` : '');
+            + (hint ? `<kbd class="menu-hint"></kbd>` : '');
         btn.querySelector('.menu-label').textContent = item.label;
-        if (item.hint) btn.querySelector('.menu-hint').textContent = item.hint;
+        if (hint) btn.querySelector('.menu-hint').textContent = hint;
+        if (item.key) btn.dataset.key = item.key;
         btn.addEventListener('click', () => {
             closeMenu();
             haptic('select');
@@ -106,6 +109,10 @@ export function showMenu(items, { x = 0, y = 0, anchor = null, label = 'Menu', r
         else if (e.key === 'Home') { e.preventDefault(); focusAt(0); }
         else if (e.key === 'End') { e.preventDefault(); focusAt(-1); }
         else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeMenu(); }
+        else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const hit = list.find(b => b.dataset.key === e.key.toLowerCase());
+            if (hit) { e.preventDefault(); hit.click(); }
+        }
     };
     const onPointer = e => {
         if (!el.contains(e.target)) closeMenu();

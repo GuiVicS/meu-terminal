@@ -4499,3 +4499,9 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] body:has(.agent-panel.active):has(.tab-list .tab:only-child) .tabstrip { display: none; }
 :root[data-desktop] body:has(.agent-panel.active):has(.tab-list .tab:only-child) .topbar { position: absolute; top: 6px; right: 8px; z-index: 7; padding: 0; }
 :root[data-desktop] body:has(.agent-panel.active):has(.tab-list .tab:only-child) .ag-head { padding-right: 96px; }
+
+/* conversa não lida: bolinha roxa e título em destaque; pedindo permissão, laranja */
+.conv-unread { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
+.conv-unread.is-waiting { background: var(--warning); }
+.is-unread .dk-row-title, .is-unread .cv-row-title { font-weight: 600; }
+.dk-archived { margin: 10px 12px; }
