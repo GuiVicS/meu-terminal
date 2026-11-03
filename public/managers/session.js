@@ -6,6 +6,7 @@
  */
 import { attachTouchScroll } from '../ui/touchScroll.js';
 import { icon } from '../ui/icons.js';
+import { attachEdgeFade } from '../ui/edgeFade.js';
 
 // Connection states shown in tabs and in the status bar
 export const STATE = {
@@ -119,10 +120,25 @@ export default class TerminalSession {
             const b = term.buffer.active;
             btn.hidden = b.baseY - b.viewportY < LINES;
         };
-        term.onScroll(sync);
-        term.onWriteParsed?.(sync);
+        const viewport = this.panel.querySelector('.xterm-viewport');
+        // Bordas esmaecidas só onde há histórico além delas: programas de tela cheia (vim, Claude Code)
+        // não têm histórico, e a linha do prompt nunca fica apagada
+        const fade = attachEdgeFade(this.panel.querySelector('.xterm'), {
+            scroller: viewport || this.panel,
+            observe: false,
+            read: () => {
+                const b = term.buffer.active;
+                return { top: b.viewportY > 0, bottom: b.viewportY < b.baseY };
+            },
+        });
+        const update = () => {
+            sync();
+            fade.schedule();
+        };
+        term.onScroll(update);
+        term.onWriteParsed?.(update);
         // O xterm só avisa da rolagem por conteúdo novo: a roda do mouse vem do elemento
-        this.panel.querySelector('.xterm-viewport')?.addEventListener('scroll', sync, { passive: true });
+        viewport?.addEventListener('scroll', sync, { passive: true });
     }
 
     mount(parent) {
@@ -295,8 +311,13 @@ export default class TerminalSession {
             } else if (message.type === 'snapshot') {
                 // Full current screen from the server (first connect or re-attach):
                 // replaces whatever this view showed, so nothing is duplicated
+                // Ao reconectar, a tela é reescrita: quem estava lendo o histórico continua no mesmo ponto
+                const place = this.readPlace();
                 this.terminal.reset();
-                this.terminal.write(message.data, () => this.terminal.scrollToBottom());
+                this.terminal.write(message.data, () => {
+                    if (place) this.scrollToPlace(place);
+                    else this.terminal.scrollToBottom();
+                });
                 if (this.state === STATE.EXITED) this.setState(STATE.CONNECTED);
             } else if (message.type === 'exit') {
                 this.process = null;
@@ -427,17 +448,80 @@ export default class TerminalSession {
         // Hidden or zero-sized panels would make fit() compute 0 columns
         if (!this.terminal || this.panel.clientWidth === 0 || this.panel.clientHeight === 0) return;
         try {
+            // Mudar de tamanho (lista lateral, teclado do celular) não pode tirar a pessoa do ponto de leitura
+            const marker = this.markPlace();
             this.addons.fit.fit();
+            if (marker) {
+                if (marker.line >= 0) this.terminal.scrollToLine(marker.line);
+                marker.dispose();
+            }
         } catch { /* terminal not ready yet */ }
     }
 
+    /** Marca a primeira linha na tela, se a pessoa subiu no histórico (a marca acompanha quebra de linha). */
+    markPlace() {
+        const t = this.terminal;
+        const b = t?.buffer.active;
+        if (!b || b.viewportY >= b.baseY) return null;
+        return t.registerMarker(b.viewportY - (b.baseY + b.cursorY)) || null;
+    }
+
+    /** Onde a pessoa está lendo, para reencontrar depois de reescrever a tela. null = no fim. */
+    readPlace() {
+        const b = this.terminal?.buffer.active;
+        if (!b || b.viewportY >= b.baseY) return null;
+        const text = i => b.getLine(i)?.translateToString(true) ?? '';
+        return { y: b.viewportY, lines: [text(b.viewportY), text(b.viewportY + 1), text(b.viewportY + 2)] };
+    }
+
+    /** Volta ao trecho salvo; se o histórico mudou de começo, procura o trecho mais perto. */
+    scrollToPlace({ y, lines }) {
+        const b = this.terminal.buffer.active;
+        const text = i => b.getLine(i)?.translateToString(true) ?? '';
+        const same = i => lines.every((l, k) => text(i + k) === l);
+        const last = b.length - 1;
+        for (let d = 0; d <= last; d++) {
+            if (y - d >= 0 && same(y - d)) return this.terminal.scrollToLine(y - d);
+            if (y + d <= last && same(y + d)) return this.terminal.scrollToLine(y + d);
+        }
+        return this.terminal.scrollToLine(Math.min(y, b.baseY));
+    }
+
+    /** Ao sair da aba: guarda o ponto de leitura (aba escondida perde a rolagem, e o terminal vai junto). */
+    savePlace() {
+        this.savedPlace?.marker?.dispose();
+        this.savedPlace = this.terminal ? { marker: this.markPlace(), place: this.readPlace() } : null;
+    }
+
+    /** Ao voltar: exatamente onde a pessoa deixou. Quem estava no fim continua acompanhando o fim. */
+    restorePlace() {
+        const saved = this.savedPlace;
+        if (!saved || !this.terminal) return;
+        const go = () => {
+            if (!saved.place) this.terminal.scrollToBottom();
+            else if (saved.line >= 0) this.terminal.scrollToLine(saved.line);
+            else this.scrollToPlace(saved.place);
+        };
+        saved.line = saved.marker ? saved.marker.line : -1;
+        saved.marker?.dispose();
+        this.savedPlace = null;
+        go();
+        // A rolagem da aba que reapareceu ainda pode chegar atrasada
+        requestAnimationFrame(() => {
+            go();
+            requestAnimationFrame(go);
+        });
+    }
+
     setActive(active) {
+        if (!active && this.panel.classList.contains('active')) this.savePlace();
         this.panel.classList.toggle('active', active);
         this.panel.hidden = false;
         this.panel.setAttribute('aria-hidden', String(!active));
         if (active) {
             this.hasActivity = false;
             this.safeFit();
+            this.restorePlace();
             this.requestProcessInfoSoon(0);
         } else {
             this.addons?.search.clearDecorations();

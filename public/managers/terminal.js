@@ -469,7 +469,7 @@ export default class TerminalManager {
     pickAgentConversation(agent, folder, anchor) {
         openAgentPicker({
             agent, source: anchor,
-            onNew: () => this.createAgent(agent.id, folder),
+            onNew: () => this.createAgent(agent.id, this.settings.get('defaultCwd') || folder),
             onResume: (acpSessionId, title, cwd) => this.openAgentConversation(agent.id, { acpSessionId, title, cwd }),
         });
     }

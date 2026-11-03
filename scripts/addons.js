@@ -304,6 +304,10 @@ class Addons {
                 if (id === 'omniroute') {
                     if (typeof p.apiKey === 'string') cur.apiKey = p.apiKey.trim().slice(0, 300) || undefined;
                     if (typeof p.model === 'string') cur.model = p.model.trim().slice(0, 200) || undefined;
+                    // Provedores ligados ou desligados pela pessoa (valem mais que o padrão)
+                    for (const key of ['providersOn', 'providersOff']) {
+                        if (Array.isArray(p[key])) cur[key] = [...new Set(p[key].filter(x => typeof x === 'string' && /^[\w.-]{1,100}$/.test(x)))].slice(0, 300);
+                    }
                 }
                 st.services[id] = cur;
             }

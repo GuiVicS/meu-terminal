@@ -49,7 +49,7 @@ const { listOpenCodeModels } = require('./scripts/opencode-login');
 const { readTranscript, listOnDisk, transcriptStamp } = require('./scripts/agents/transcript');
 const { turnRange, compactEvents, sideSummary, STATE_ONLY } = require('./scripts/agents/history');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
-const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
+const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError, DEFAULT_ON } = require('./scripts/addon-bridges');
 
 const app = express();
 const server = http.createServer(app);
@@ -1093,6 +1093,7 @@ app.put(BASE_PATH + '/api/addons', async (req, res) => {
     try {
         await addonServices.apply(prefs);
         await ensureOmniKey();
+        enforceOmniPolicy().catch(e => debugLog(`OmniRoute: política de provedores: ${e.message}`));
     } catch (e) {
         return res.status(e.status || 500).json({ error: e.message });
     }
@@ -1109,11 +1110,41 @@ const bridges = {
 };
 
 /** Com o OmniRoute ligado e sem chave salva, cria a chave da rota "Outros modelos". */
-// O OpenCode renova o próprio token: a conexão do OmniRoute acompanha (só lê, a cada hora)
+// O OpenCode renova o próprio token: a conexão do OmniRoute acompanha (só lê, a cada hora).
+// A política vai junto: atualizar o OmniRoute não pode religar o que está desligado
+const omniChoices = () => {
+    const o = addons.prefs().services.omniroute || {};
+    return { on: o.providersOn || [], off: o.providersOff || [] };
+};
+async function enforceOmniPolicy() {
+    if (!addons.prefs().services.omniroute?.enabled) return false;
+    await bridges.omniroute.applyPolicy(HOME_DIR, omniChoices());
+    return true;
+}
+/** Salva a escolha da pessoa, que vale mais que o padrão, e aplica. */
+async function chooseProvider(id, on) {
+    if (!/^[\w.-]{1,100}$/.test(id)) throw new BridgeError('Provedor inválido.', 400);
+    const c = omniChoices();
+    const providersOn = c.on.filter(x => x !== id);
+    const providersOff = c.off.filter(x => x !== id);
+    (on ? providersOn : providersOff).push(id);
+    addons.setPrefs({ services: { omniroute: { providersOn, providersOff } } });
+    await enforceOmniPolicy();
+}
 setInterval(() => {
     if (!addons.prefs().services.omniroute?.enabled) return;
     bridges.omniroute.syncOpenCode(HOME_DIR).catch(() => { /* OmniRoute parado: tenta na próxima */ });
+    enforceOmniPolicy().catch(e => debugLog(`OmniRoute: política de provedores: ${e.message}`));
 }, 60 * 60 * 1000).unref?.();
+// Logo ao subir: o OmniRoute leva um tempo para responder, então tenta algumas vezes
+(function enforceAtStart(left = 12) {
+    setTimeout(() => {
+        enforceOmniPolicy().catch(e => {
+            debugLog(`OmniRoute: política de provedores: ${e.message}`);
+            if (left > 1) enforceAtStart(left - 1);
+        });
+    }, 15000).unref?.();
+})();
 
 async function ensureOmniKey() {
     const omni = addons.prefs().services.omniroute || {};
@@ -1195,13 +1226,28 @@ async function attachAddonPanel(ws, id, params) {
 const BRIDGE_ACTIONS = {
     omniroute: {
         catalog: b => b.catalog(),
-        addProvider: (b, a) => b.addProvider(a),
+        // Colar a chave é pedir para usar: já entra ligado
+        addProvider: async (b, a) => {
+            const r = await b.addProvider(a);
+            await chooseProvider(String(a.provider || ''), true);
+            return r;
+        },
         removeProvider: (b, a) => b.removeProvider(String(a.id || '')),
         testProvider: (b, a) => b.testProvider(String(a.id || '')),
         models: (b, a) => b.models(String(a.id || '')),
         allModels: b => b.allModels(),
-        importCodex: b => b.importCodex(HOME_DIR),
-        importOpenCode: b => b.importOpenCode(HOME_DIR),
+        importCodex: async b => { const r = await b.importCodex(HOME_DIR); await chooseProvider('codex', true); return r; },
+        importOpenCode: async b => { const r = await b.importOpenCode(HOME_DIR); await chooseProvider('opencode-zen', true); return r; },
+        // Ligar e desligar um provedor (a escolha fica salva e vale mais que o padrão)
+        providers: b => {
+            const { on, off } = omniChoices();
+            const allowed = id => !off.includes(id) && (on.includes(id) || DEFAULT_ON.has(id));
+            return { noAuth: b.noAuthProviders().map(p => ({ ...p, on: allowed(p.id) })), off, on };
+        },
+        setProvider: async (b, a) => {
+            await chooseProvider(String(a.id || ''), !!a.on);
+            return { ok: true };
+        },
         setModel: (b, a) => {
             const model = typeof a.model === 'string' ? a.model : '';
             addons.setPrefs({ services: { omniroute: { model } } });
@@ -1370,6 +1416,14 @@ function historyRows(agent, cwd) {
     refreshConversationIndex();
     return agentGateway.store.listConversations({ agent, cwd }).map(c => ({ sessionId: c.acp_session_id, cwd: c.cwd, title: c.title, updatedAt: c.updated_at }));
 }
+
+// Pastas recentes para o seletor da conversa nova (só as que ainda existem)
+app.get(BASE_PATH + '/api/agent-folders', agentRoute(async (req, res) => {
+    refreshConversationIndex();
+    const folders = agentGateway.store.recentFolders({ agent: String(req.query.agent || '') })
+        .filter(f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
+    res.json({ folders: folders.slice(0, 8) });
+}));
 
 app.get(BASE_PATH + '/api/conversations', agentRoute(async (req, res) => {
     refreshConversationIndex();

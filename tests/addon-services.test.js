@@ -126,3 +126,25 @@ test('OmniRoute: panel password and secrets are generated once, kept, and passed
     await m.ensure('omniroute');
     assert.strictEqual(w.spawned[0].opts.env.INITIAL_PASSWORD, first.INITIAL_PASSWORD);
 });
+
+test('OmniRoute: só ficam ligadas as ferramentas instaladas; o resto, só se a pessoa pedir', () => {
+    const { providerPolicy } = require('../scripts/addon-bridges');
+    const base = {
+        connections: [
+            { id: '1', provider: 'codex', active: true },
+            { id: '2', provider: 'opencode-zen', active: false },
+            { id: '3', provider: 'groq', active: true },
+        ],
+        noAuthIds: ['duckduckgo-web', 'auggie'],
+        anonymousIds: ['opencode-zen', 'opencode-go'],
+        currentBlocked: ['outro'],
+    };
+    const p = providerPolicy(base);
+    assert.deepEqual(p.blockedProviders, ['auggie', 'duckduckgo-web', 'outro']); // não mexe no que não é daqui
+    assert.deepEqual(p.noAuthFallbackDisabledProviders, ['opencode-go', 'opencode-zen']); // uso anônimo sempre fora
+    assert.deepEqual(p.toggles, [{ id: '2', isActive: true }, { id: '3', isActive: false }]);
+
+    const q = providerPolicy({ ...base, on: ['groq', 'auggie'], off: ['codex'] });
+    assert.deepEqual(q.blockedProviders, ['duckduckgo-web', 'outro']);
+    assert.deepEqual(q.toggles, [{ id: '1', isActive: false }, { id: '2', isActive: true }]);
+});
