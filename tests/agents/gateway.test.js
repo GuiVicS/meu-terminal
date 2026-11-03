@@ -588,3 +588,18 @@ test('cópia no SQL: guarda, atualiza e some ao apagar', () => {
     assert.equal(store.getTranscript('a', 'x1'), null);
     assert.equal(store.conversationsToArchive().length, 0);
 });
+
+test('pastas recentes: da mais nova para a mais antiga, sem repetir nem apagadas', () => {
+    const store = new AgentStore(':memory:');
+    const conv = (id, cwd, at) => {
+        store.indexConversation({ agent: 'a', acpSessionId: id, title: id, cwd, updatedAt: at });
+        store.db.prepare('UPDATE agent_conversations SET has_messages = 1, updated_at = ? WHERE acp_session_id = ?').run(at, id);
+    };
+    conv('c1', '/velha', '2026-01-01T00:00:00Z');
+    conv('c2', '/nova', '2026-03-01T00:00:00Z');
+    conv('c3', '/velha', '2026-02-01T00:00:00Z');
+    conv('c4', '/apagada', '2026-04-01T00:00:00Z');
+    store.deleteConversation('a', 'c4');
+    assert.deepEqual(store.recentFolders({ agent: 'a' }), ['/nova', '/velha']);
+    assert.deepEqual(store.recentFolders({ agent: 'b' }), []);
+});

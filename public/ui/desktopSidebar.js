@@ -2,10 +2,12 @@
  * desktopSidebar.js
  * Barra lateral do desktop (como a do Claude Desktop), com os mesmos hábitos da lista lateral do
  * celular: Nova conversa, busca, agentes, conversas abertas (bolinha online / círculo girando), Fixadas
- * e Recentes, menu da conversa (clique direito ou "⋯"). Só aparece nas abas de agente.
+ * e Recentes, menu da conversa (clique direito ou "⋯"), e a conta no pé. Só aparece nas abas de agente.
  * Só existe no layout de desktop ([data-desktop]); recolhe com ⌘B / Ctrl+B.
  */
 import { icon } from './icons.js';
+import { attachEdgeFade } from './edgeFade.js';
+import { createAccountRow } from './accountRow.js';
 import { agentIconName } from './agent-logos.js';
 import { fetchConversations, conversationRows, updateConversation } from '../agent/conversations.js';
 import { conversationMenuItems } from '../agent/conversationMenu.js';
@@ -84,7 +86,10 @@ export default class DesktopSidebar {
                 <button type="button" class="dk-new dk-row" data-dk="new">${icon('plus', 18)}<span class="dk-row-title">Nova conversa</span></button>
                 <label class="dk-search dk-row">${icon('search', 18)}<input type="search" placeholder="Buscar" aria-label="Buscar conversas" spellcheck="false"></label>
             </div>
-            <nav class="dk-scroll"><div class="dk-convs"></div></nav>`;
+            <nav class="dk-scroll"><div class="dk-convs"></div></nav>
+            <div class="dk-side-foot"></div>`;
+        this.account = createAccountRow(() => (this.ws.active?.kind === 'agent' ? this.ws.active : null), 'dk-row');
+        this.el.querySelector('.dk-side-foot').appendChild(this.account.el);
         document.body.appendChild(this.el);
         this.reopen = document.createElement('button');
         this.reopen.type = 'button';
@@ -94,6 +99,7 @@ export default class DesktopSidebar {
         this.reopen.innerHTML = icon('panelLeft', 18);
         document.body.appendChild(this.reopen);
         this.convs = this.el.querySelector('.dk-convs');
+        attachEdgeFade(this.el.querySelector('.dk-scroll'));
         this.agentsEl = this.el.querySelector('.dk-agents');
         this.input = this.el.querySelector('.dk-search input');
         this.setCollapsed(localStorage.getItem(COLLAPSED_KEY) === '1', false);
@@ -131,6 +137,7 @@ export default class DesktopSidebar {
             setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
         }
         if (!inChat) return;
+        void this.account.sync();
         if (s && s.kind === 'agent' && s.session?.agent && s.session.agent !== this.agent) return this.setAgent(s.session.agent);
         if (this.onlyFolder && this.ws.currentFolder() !== this.historyFolder) return this.refresh();
         this.render();
@@ -235,7 +242,7 @@ export default class DesktopSidebar {
 
     newConversation() {
         haptic('light');
-        return this.ws.createAgent(this.agent, this.ws.currentFolder());
+        return this.ws.createAgent(this.agent, this.ws.settings?.get('defaultCwd') || this.ws.currentFolder());
     }
 
     pick(key) {

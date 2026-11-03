@@ -18,6 +18,8 @@ import { agentIconName } from './agent-logos.js';
 import { fetchConversations, conversationRows, updateConversation } from '../agent/conversations.js';
 import { conversationMenuItems } from '../agent/conversationMenu.js';
 import { haptic } from './haptics.js';
+import { attachEdgeFade } from './edgeFade.js';
+import { createAccountRow } from './accountRow.js';
 
 const root = document.documentElement;
 const RECENT_LIMIT = 15;
@@ -122,6 +124,9 @@ export default class ConversationDrawer {
         this.dim.hidden = true;
         app.appendChild(this.dim);
         this.list = this.el.querySelector('.cv-list');
+        attachEdgeFade(this.list);
+        this.account = createAccountRow(() => this.getAgent(), 'cv-account');
+        this.list.after(this.account.el);
         this.searchBox = this.el.querySelector('.cv-search');
         this.searchInput = this.searchBox.querySelector('input');
 
@@ -265,6 +270,7 @@ export default class ConversationDrawer {
 
     render() {
         const agent = this.getAgent();
+        void this.account?.sync();
         const titleEl = this.el.querySelector('.cv-title');
         const titleKey = `${agent?.agentId || ''}|${agent?.session?.agentLabel || ''}`;
         if (titleEl.dataset.key !== titleKey) { // logo do agente + nome

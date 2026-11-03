@@ -31,10 +31,13 @@ function omniroute(el, { load, call, toast }) {
     let picked = null; // provedor escolhido para adicionar
     let query = '';
     let models = null; // { id: connId, list }
+    let noAuth = null; // provedores sem chave, com o estado de cada um
+    let noAuthOpen = false; // a lista é longa: fica fechada até a pessoa abrir
 
     async function refresh() {
         try {
             data = await load();
+            noAuth = (await call('providers').catch(() => null))?.noAuth || noAuth;
             render();
         } catch (e) {
             failed(el, e);
@@ -72,9 +75,10 @@ function omniroute(el, { load, call, toast }) {
                 const [cls, label] = STATUS[c.status] || ['', c.status];
                 return `
                 <li class="rm-row ad-row">
-                    <span class="rm-name">${esc(c.name)} <span class="ad-badge ${cls}">${esc(label)}</span>
+                    <span class="rm-name">${esc(c.name)} ${c.active ? `<span class="ad-badge ${cls}">${esc(label)}</span>` : '<span class="ad-badge">desligado</span>'}
                         <span class="rm-meta">${esc(c.provider)}${c.error ? ` · ${esc(c.error)}` : ''}</span></span>
                     <span class="rm-actions">
+                        <button type="button" class="btn ${c.active ? 'btn-ghost' : 'btn-primary'} btn-sm" data-act="power" data-provider="${esc(c.provider)}" data-on="${c.active ? '' : '1'}">${c.active ? 'Desligar' : 'Ligar'}</button>
                         <button type="button" class="btn btn-ghost btn-sm" data-act="test" data-id="${esc(c.id)}">Testar</button>
                         <button type="button" class="btn btn-ghost btn-sm" data-act="models" data-id="${esc(c.id)}">Modelos</button>
                         <button type="button" class="btn btn-ghost btn-sm" data-act="remove" data-id="${esc(c.id)}" data-name="${esc(c.name)}">Remover</button>
@@ -89,7 +93,19 @@ function omniroute(el, { load, call, toast }) {
                 </li>`;
             }).join('') : '<li class="rm-empty">Nenhum ainda. Adicione um abaixo.</li>'}</ul>
 
+            ${noAuth ? `
+            <details class="ad-noauth" ${noAuthOpen ? 'open' : ''}>
+            <summary class="section-label rm-gap">Provedores sem chave · ${noAuth.filter(p => p.on).length} de ${noAuth.length} ligados</summary>
+            <p class="setting-help">Desligados por padrão. Respondem sem nenhum cadastro, usando serviços de terceiros: ligue só o que for usar.</p>
+            <ul class="rm-list">${noAuth.map(p => `
+                <li class="rm-row ad-row">
+                    <span class="rm-name">${esc(p.name)} ${p.on ? '<span class="ad-badge ok">ligado</span>' : '<span class="ad-badge">desligado</span>'}
+                        <span class="rm-meta">${esc(p.id)}</span></span>
+                    <span class="rm-actions"><button type="button" class="btn ${p.on ? 'btn-ghost' : 'btn-primary'} btn-sm" data-act="power" data-provider="${esc(p.id)}" data-on="${p.on ? '' : '1'}">${p.on ? 'Desligar' : 'Ligar'}</button></span>
+                </li>`).join('')}</ul></details>` : ''}
+
             <h3 class="section-label rm-gap">Adicionar provedor</h3>
+            <p class="setting-help">Com chave de API: só entra em uso depois de adicionado aqui.</p>
             ${picked ? `
                 <div class="ad-add">
                     <p class="setting-help"><b>${esc(picked.name)}</b>${picked.free ? ' <span class="ad-badge ok">grátis</span>' : ''}
@@ -109,8 +125,7 @@ function omniroute(el, { load, call, toast }) {
     function catalogRows() {
         if (!catalog) return '<li class="rm-empty">Carregando a lista de provedores…</li>';
         const q = query.trim().toLowerCase();
-        const noKey = catalog.noKey.map(p => ({ ...p, noKey: true, free: true }));
-        const all = [...noKey, ...catalog.providers];
+        const all = catalog.providers; // os sem chave têm a própria lista, acima
         const found = (q ? all.filter(p => p.name.toLowerCase().includes(q) || p.id.includes(q)) : all.filter(p => p.free)).slice(0, q ? 40 : 12);
         if (!found.length) return '<li class="rm-empty">Nenhum provedor encontrado.</li>';
         return (q ? '' : '<li class="rm-empty">Grátis para começar (busque para ver todos):</li>') + found.map(p => `
@@ -149,7 +164,12 @@ function omniroute(el, { load, call, toast }) {
         btn.disabled = true;
         try {
             if (act === 'cancel-add') { picked = null; render(); }
-            else if (act === 'add') {
+            else if (act === 'power') {
+                noAuthOpen = !!btn.closest('.ad-noauth');
+                await call('setProvider', { id: btn.dataset.provider, on: !!btn.dataset.on });
+                toast(btn.dataset.on ? 'Ligado.' : 'Desligado.');
+                await refresh();
+            } else if (act === 'add') {
                 const apiKey = el.querySelector('[data-key]')?.value.trim() || '';
                 if (!picked.noKey && !apiKey) { toast('Cole a chave de API.', { tone: 'error' }); return; }
                 await call('addProvider', { provider: picked.id, name: picked.name, apiKey });

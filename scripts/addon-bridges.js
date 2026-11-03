@@ -46,6 +46,33 @@ const errorText = data => data?.error?.message || data?.error || data?.message |
 
 // ---------- OmniRoute ----------
 
+// Ligados sem precisar pedir: as ferramentas instaladas e logadas neste servidor. O resto começa desligado
+const DEFAULT_ON = new Set(['codex', 'opencode-zen', 'antigravity']);
+
+/**
+ * O que o OmniRoute deve manter ligado.
+ * @param {object} o
+ * @param {Array<{id: string, provider: string, active: boolean}>} o.connections
+ * @param {string[]} o.noAuthIds - provedores que funcionam sem cadastrar nada
+ * @param {string[]} o.anonymousIds - provedores com chave que também aceitam uso anônimo
+ * @param {string[]} o.currentBlocked - lista atual do OmniRoute
+ * @param {string[]} o.currentNoFallback
+ * @param {string[]} [o.on] - ligados pela pessoa
+ * @param {string[]} [o.off] - desligados pela pessoa
+ */
+function providerPolicy({ connections, noAuthIds, anonymousIds, currentBlocked = [], currentNoFallback = [], on = [], off = [] }) {
+    const allowed = id => !off.includes(id) && (on.includes(id) || DEFAULT_ON.has(id));
+    const blockedNow = noAuthIds.filter(id => !allowed(id));
+    return {
+        // Sem conexão nenhuma, estes já respondem: bloquear é o único jeito de desligar
+        blockedProviders: [...new Set([...currentBlocked.filter(id => !noAuthIds.includes(id)), ...blockedNow])].sort(),
+        // O uso anônimo é outra coisa que o login: só com pedido explícito, mesmo nos ligados por padrão
+        noAuthFallbackDisabledProviders: [...new Set([...currentNoFallback.filter(id => !anonymousIds.includes(id)),
+            ...anonymousIds.filter(id => !on.includes(id))])].sort(),
+        toggles: connections.filter(c => c.active !== allowed(c.provider)).map(c => ({ id: c.id, isActive: allowed(c.provider) })),
+    };
+}
+
 class OmniRouteBridge {
     /**
      * @param {object} opts
@@ -113,7 +140,7 @@ class OmniRouteBridge {
             const all = mod.APIKEY_PROVIDERS || Object.values(mod).find(v => v && typeof v === 'object' && !Array.isArray(v)) || {};
             list = Object.values(all).filter(p => p && p.id).map(p => ({
                 id: p.id, name: p.name || p.id, website: p.website || null,
-                free: !!p.hasFree, freeNote: p.freeNote || null,
+                free: !!p.hasFree, freeNote: p.freeNote || null, anonymous: p.anonymousFallback === true,
             }));
         } catch {
             list = []; // sem catálogo a tela ainda aceita o id do provedor digitado
@@ -126,6 +153,59 @@ class OmniRouteBridge {
         } catch { /* opcional */ }
         this.catalogCache = { providers: list, noKey };
         return this.catalogCache;
+    }
+
+    /** Provedores que funcionam sem cadastro, lidos do pacote instalado. */
+    noAuthProviders() {
+        const dir = path.join(this.packageDir, 'src/shared/constants/providers');
+        const out = new Map();
+        let files = [];
+        try {
+            files = fs.readdirSync(dir).filter(f => /^(noauth|web-cookie.*)\.ts$/.test(f));
+        } catch {
+            return [];
+        }
+        for (const f of files) {
+            const code = fs.readFileSync(path.join(dir, f), 'utf8');
+            for (const m of code.matchAll(/^\s+id: "([\w.-]+)",\s*(?:[\s\S]{0,240}?\bname: "([^"]+)")?/gm)) {
+                if (!out.has(m[1])) out.set(m[1], { id: m[1], name: m[2] || m[1] });
+            }
+        }
+        return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    /**
+     * Aplica a política: só o escolhido fica ligado. Conecta o login das ferramentas instaladas, a
+     * menos que a pessoa as tenha desligado.
+     * @param {string} home
+     * @param {{ on?: string[], off?: string[] }} choices
+     */
+    async applyPolicy(home, { on = [], off = [] } = {}) {
+        let { connections = [] } = await this.api('GET', '/api/providers');
+        const has = provider => connections.some(c => c.provider === provider);
+        const logins = [];
+        if (!off.includes('codex') && !has('codex') && OmniRouteBridge.hasCodexLogin(home)) logins.push(this.importCodex(home));
+        if (!off.includes('opencode-zen') && !has('opencode-zen') && OmniRouteBridge.openCodeLoginInfo(home)) logins.push(this.importOpenCode(home));
+        if (logins.length) {
+            await Promise.allSettled(logins);
+            ({ connections = [] } = await this.api('GET', '/api/providers'));
+        }
+        const catalog = await this.catalog();
+        const settings = await this.api('GET', '/api/settings');
+        const plan = providerPolicy({
+            connections: connections.map(c => ({ id: c.id, provider: c.provider, active: !!c.isActive })),
+            noAuthIds: this.noAuthProviders().map(p => p.id),
+            anonymousIds: catalog.providers.filter(p => p.anonymous).map(p => p.id),
+            currentBlocked: settings.blockedProviders || [],
+            currentNoFallback: settings.noAuthFallbackDisabledProviders || [],
+            on, off,
+        });
+        await this.api('PATCH', '/api/settings', {
+            blockedProviders: plan.blockedProviders,
+            noAuthFallbackDisabledProviders: plan.noAuthFallbackDisabledProviders,
+        });
+        for (const t of plan.toggles) await this.api('PUT', `/api/providers/${encodeURIComponent(t.id)}`, { isActive: t.isActive });
+        return plan;
     }
 
     async panel() {
@@ -393,4 +473,4 @@ class HeadroomBridge {
     }
 }
 
-module.exports = { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError };
+module.exports = { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError, providerPolicy, DEFAULT_ON };

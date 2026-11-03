@@ -325,6 +325,10 @@ export default class Composer {
         });
         stop.addEventListener('click', () => this.opts.onCancel());
         selectors.addEventListener('change', e => this.onSelector(e));
+        selectors.addEventListener('click', e => {
+            const btn = e.target.closest('[data-folder]');
+            if (btn) this.opts.onFolder?.(btn);
+        });
         suggest.addEventListener('mousedown', e => e.preventDefault()); // keep focus in the textarea
         suggest.addEventListener('click', e => {
             const item = e.target.closest('[data-index]');
@@ -474,7 +478,15 @@ export default class Composer {
         }
         // Pasta da conversa, à esquerda da linha (desktop)
         const folder = String(this.opts.cwd?.() || '');
-        if (folder) parts.unshift(`<span class="ag-folder" title="${esc(folder)}">${icon('folder', 15)}<span>${esc(folder.split('/').filter(Boolean).pop() || folder)}</span></span>`);
+        if (folder) {
+            // Conversa nova: escolhe a pasta. Com mensagens, a pasta já é a dela
+            const can = !!this.opts.canChangeFolder?.();
+            const name = esc(folder.split('/').filter(Boolean).pop() || folder);
+            const inner = `${icon('folder', 15)}<span>${name}</span>${can ? icon('chevronDown', 14) : ''}`;
+            parts.unshift(can
+                ? `<button type="button" class="ag-folder ag-folder-btn" data-folder title="${esc(folder)}" aria-label="Escolher a pasta da conversa">${inner}</button>`
+                : `<span class="ag-folder" title="${esc(folder)}">${inner}</span>`);
+        }
         this.ui.selectors.innerHTML = parts.join('');
         this.ui.selectors.hidden = !parts.length;
         // iPhone: the selectors live in the sheet; the button shows what's selected

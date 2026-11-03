@@ -17,6 +17,9 @@ import { esc } from '../agent/markdown.js';
 /** Eventos que são conversa (tiram a tela vazia); o resto é aviso de sistema. */
 const CONVERSATION_EVENT = /^(message\.|tool\.|thought\.|plan\.|permission\.|subagent\.|media)/;
 import { isIphonePortrait } from '../ui/device.js';
+import { attachEdgeFade } from '../ui/edgeFade.js';
+import { fetchAccounts } from '../ui/accountRow.js';
+import { openFolderMenu } from '../ui/folderPicker.js';
 import { haptic } from '../ui/haptics.js';
 import { keepScreenOn } from '../ui/permissions.js';
 import { serverFileUrl } from '../ui/filePicker.js';
@@ -171,6 +174,8 @@ export default class AgentSession {
         });
         this.composer = new Composer(q('.ag-composer'), {
             cwd: () => this.cwd,
+            canChangeFolder: () => !this.hasConversation && !this.vibeProject,
+            onFolder: anchor => this.chooseFolder(anchor),
             onSend: msg => this.sendPrompt(msg),
             onCancel: () => this.action('cancel').catch(e => toast(e.message, { tone: 'error' })),
             onMode: modeId => this.action('mode', { modeId }).then(s => this.applySession(s)).catch((e) => { toast(e.message, { tone: 'error' }); throw e; }),
@@ -251,6 +256,7 @@ export default class AgentSession {
         this.el.jump.addEventListener('click', () => {
             this.el.log.scrollTop = this.el.log.scrollHeight;
         });
+        this.logFade = attachEdgeFade(this.el.log);
         // A área mudou de tamanho (painel abriu, campo cresceu): quem estava no fim continua no fim
         this.logResize = new ResizeObserver(() => {
             if (this.conversation.nearBottom()) this.el.log.scrollTop = this.el.log.scrollHeight;
@@ -516,6 +522,7 @@ export default class AgentSession {
             this.panel.classList.remove('ag-is-empty');
         }
         this.renderHead();
+        if (this.session) this.composer.setSession(this.session); // a pasta deixa de ser escolhível
         this.setOlder(firstTurn);
         this.pinToEnd();
     }
@@ -597,6 +604,10 @@ export default class AgentSession {
         // A tela vazia (saudação) só sai quando aparece conversa de verdade; avisos de sistema
         // ("Sessão iniciada em…", comandos, modelo) não contam
         if (CONVERSATION_EVENT.test(event.type)) {
+            if (!this.hasConversation && !this.conversation.batching && this.session) {
+                this.hasConversation = true;
+                this.composer.setSession(this.session); // a pasta deixa de ser escolhível
+            }
             this.hasConversation = true;
             this.el.log.querySelector('.ag-empty')?.remove();
             this.panel.classList.remove('ag-is-empty');
@@ -889,43 +900,50 @@ export default class AgentSession {
         }
     }
 
-    /** Rota da conversa do Claude Code: troca e retoma a mesma conversa (POST .../route). */
-    async openRouteMenu(anchor) {
-        let routes = [];
-        let accounts = [];
-        try {
-            [routes, accounts] = await Promise.all([
-                api('GET', 'agents').then(r => r.claudeRoutes || []),
-                api('GET', 'claude-accounts').then(r => r.accounts || []).catch(() => []),
-            ]);
-        } catch (e) {
-            return toast(e.message, { tone: 'error' });
-        }
-        const current = this.session?.route || 'direto';
-        const switchTo = (path, body, label) => async () => {
+    /** Troca a rota ou a conta da conversa e retoma a mesma conversa. */
+    switchClaude(path, body, label, onDone) {
+        return async () => {
             toast(`Trocando para ${label}…`);
             try {
                 this.session = await api('POST', `agent-sessions/${encodeURIComponent(this.agentSessionId)}/${path}`, body);
                 this.renderHead();
+                onDone?.();
             } catch (e) {
                 toast(e.message, { tone: 'error', duration: 6000 });
             }
         };
-        const items = routes.map(r => ({
-            label: r.label, icon: r.id === current ? 'check' : 'swap', disabled: r.id === current,
-            run: switchTo('route', { route: r.id }, r.label),
-        }));
-        // Várias contas do Claude Code: trocar a conta da conversa (pela rota direta)
-        if (accounts.length > 1) {
-            const cur = this.session?.account || '';
-            items.push(...accounts.map(a => ({
-                label: `Conta: ${a.email || a.name}`, icon: a.id === cur && current === 'direto' ? 'check' : 'user',
-                hint: a.loggedIn ? (a.limitedUntil ? 'no limite' : '') : 'sem login',
-                disabled: !a.loggedIn || (a.id === cur && current === 'direto'),
-                run: switchTo('account', { account: a.id }, `a conta ${a.email || a.name}`),
-            })));
+    }
+
+    /** Rota da conversa do Claude Code (a conta fica no pé da lista de conversas). */
+    async openRouteMenu(anchor) {
+        let routes = [];
+        try {
+            routes = (await api('GET', 'agents')).claudeRoutes || [];
+        } catch (e) {
+            return toast(e.message, { tone: 'error' });
         }
-        showMenu(items, { anchor, label: 'Rota e conta do Claude Code' });
+        const current = this.session?.route || 'direto';
+        showMenu(routes.map(r => ({
+            label: r.label, icon: r.id === current ? 'check' : 'swap', disabled: r.id === current,
+            run: this.switchClaude('route', { route: r.id }, r.label),
+        })), { anchor, label: 'Rota do Claude Code' });
+    }
+
+    /** Contas do Claude Code: troca a conta da conversa (pela rota direta). */
+    async openAccountMenu(anchor, onDone) {
+        const accounts = await fetchAccounts({ fresh: true });
+        const direct = (this.session?.route || 'direto') === 'direto';
+        const cur = this.session?.account || '';
+        showMenu(accounts.map(a => {
+            const active = a.id === cur && direct;
+            return {
+                label: a.email ? `${a.name} · ${a.email}` : a.name,
+                icon: active ? 'check' : 'user',
+                hint: a.loggedIn ? (a.limitedUntil ? 'no limite' : '') : 'sem login',
+                disabled: !a.loggedIn || active,
+                run: this.switchClaude('account', { account: a.id }, `a conta ${a.name}`, onDone),
+            };
+        }), { anchor, label: 'Trocar de conta' });
     }
 
     /** Whether this agent can list its past conversations (ACP session/list). */
@@ -953,9 +971,23 @@ export default class AgentSession {
         // Loading a long conversation from the terminal takes a few seconds
         if (body.resumeAcpSessionId) toast(`Abrindo "${body.title || 'conversa'}"…`);
         // Na mesma aba (uma aba por agente; a anterior segue na lista lateral)
-        return api('POST', 'agent-sessions', { agent: this.session.agent, cwd: this.cwd, afterId: this.id, intoTab: this.id, ...body })
+        // Conversa nova: na pasta padrão, se houver (projeto de vibecoding fica sempre na pasta dele)
+        const cwd = (!body.resumeAcpSessionId && !this.vibeProject && this.settings.get('defaultCwd')) || this.cwd;
+        return api('POST', 'agent-sessions', { agent: this.session.agent, cwd, afterId: this.id, intoTab: this.id, ...body })
             .then(data => this.hooks.showTab?.(data.tab.id))
             .catch(e => toast(e.message, { tone: 'error' }));
+    }
+
+    /** Pasta da conversa nova: a escolhida vira a padrão das próximas. */
+    chooseFolder(anchor) {
+        return openFolderMenu(anchor, {
+            current: this.cwd,
+            agent: this.session?.agent || '',
+            onPick: path => {
+                this.settings.set('defaultCwd', path);
+                return this.startConversation({ cwd: path });
+            },
+        });
     }
 
     /** "Conversas" (desktop header button, /resume): new conversation, or a past one, as a menu. */
@@ -1007,6 +1039,7 @@ export default class AgentSession {
     dispose() {
         this.disposed = true;
         this.logResize?.disconnect();
+        this.logFade?.destroy();
         this.timers.forEach(clearTimeout);
         this.timers.clear();
         this.mediaQuery?.removeEventListener('change', this.onMedia);

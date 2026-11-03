@@ -134,6 +134,13 @@ class AgentStore {
         return this.db.prepare('SELECT * FROM agent_conversations WHERE agent = ? AND acp_session_id = ?').get(agent, acpSessionId) || null;
     }
 
+    /** Pastas usadas por último, da mais recente para a mais antiga. */
+    recentFolders({ agent = '', limit = 30 } = {}) {
+        return this.db.prepare(`SELECT cwd, MAX(updated_at) AS at FROM agent_conversations
+            WHERE deleted_at IS NULL AND has_messages = 1 AND cwd IS NOT NULL AND cwd <> '' AND (? = '' OR agent = ?)
+            GROUP BY cwd ORDER BY at DESC LIMIT ?`).all(agent, agent, limit).map(r => r.cwd);
+    }
+
     getTranscript(agent, acpSessionId) {
         const row = this.db.prepare('SELECT stamp, events FROM agent_transcripts WHERE agent = ? AND acp_session_id = ?').get(agent, acpSessionId);
         return row ? { stamp: row.stamp, events: parseJson(row.events, []) } : null;
