@@ -21,6 +21,7 @@ import { playChime } from '../ui/sound.js';
 import { isHandset } from '../ui/device.js';
 import { withLoading, KIND_LABEL } from '../ui/loading.js';
 import { openAgentPicker } from '../ui/agentPicker.js';
+import { agentIconName } from '../ui/agent-logos.js';
 
 const RECONCILE_DELAY = 250;
 
@@ -207,8 +208,8 @@ export default class TerminalManager {
      * @param {{name?: string, cwd?: string, color?: string, afterId?: string, reopenId?: string}} opts
      */
     create(opts = {}) {
-        const [label, ico] = KIND_LABEL[opts.kind || 'terminal'] || KIND_LABEL.terminal;
-        return withLoading(label, ico, () => this.createNow(opts));
+        const [label, ico, color] = KIND_LABEL[opts.kind || 'terminal'] || KIND_LABEL.terminal;
+        return withLoading(label, ico, () => this.createNow(opts), color);
     }
 
     async createNow({ name, cwd, color, afterId, reopenId, kind, url } = {}) {
@@ -452,7 +453,7 @@ export default class TerminalManager {
         // se troca dentro da conversa (⋮ → Rota)
         // Só as IAs instaladas no servidor (detectadas sozinhas: scripts/agents/detect.js)
         // Escolher o agente mostra as conversas dele; "Nova conversa" fica no topo dessa tela
-        const items = agents.filter(a => a.installed).map(a => ({ label: a.label, icon: 'bot',
+        const items = agents.filter(a => a.installed).map(a => ({ label: a.label, icon: agentIconName(a.id),
             run: () => this.pickAgentConversation(a, folder, anchor) }));
         showMenu(items.length ? items : [{ label: 'Nenhuma IA de terminal instalada', icon: 'info', disabled: true }],
         { anchor, label: `Nova conversa em ${folder}` });
@@ -475,7 +476,7 @@ export default class TerminalManager {
      */
     openAgentConversation(agentId, { session = null, acpSessionId = null, title = null, cwd = null } = {}) {
         const label = this.agentList?.find?.(a => a.id === agentId)?.label || 'o agente';
-        return withLoading(label, 'bot', async () => {
+        return withLoading(label, agentIconName(agentId), async () => {
             const tab = [...this.sessions.values()].find(x => x.kind === 'agent' && x.session?.agent === agentId);
             try {
                 if (session && tab) {
@@ -494,7 +495,7 @@ export default class TerminalManager {
 
     createAgent(agent, cwd, route, extra = {}) {
         const label = this.agentList?.find?.(a => a.id === agent)?.label || 'o agente';
-        return withLoading(label, 'bot', () => this.createAgentNow(agent, cwd, route, extra));
+        return withLoading(label, agentIconName(agent), () => this.createAgentNow(agent, cwd, route, extra));
     }
 
     async createAgentNow(agent, cwd, route, extra = {}) {

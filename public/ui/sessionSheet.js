@@ -7,6 +7,7 @@
  * settings sheet (.ag-sheet in styles.css).
  */
 import { icon } from './icons.js';
+import { agentIconName } from './agent-logos.js';
 import { esc } from '../agent/markdown.js';
 import { relativeTime } from './newSession.js';
 import { present, dismiss } from './morph.js';
@@ -17,6 +18,7 @@ let current = null;
 /** Icon for a session kind (same mapping as the session list menu). */
 export function sessionIcon(session) {
     if (session.pinned) return 'pin';
+    if (session.kind === 'agent' && session.agentId) return agentIconName(session.agentId);
     return { browser: 'globe', files: 'folder', notes: 'notes', agent: 'bot' }[session.kind] || 'terminal';
 }
 

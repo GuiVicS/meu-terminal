@@ -20,6 +20,8 @@ import { isIphonePortrait } from '../ui/device.js';
 import { haptic } from '../ui/haptics.js';
 import { keepScreenOn } from '../ui/permissions.js';
 import { serverFileUrl } from '../ui/filePicker.js';
+import { agentIconName, agentIdFromName } from '../ui/agent-logos.js';
+import { loaderHtml } from '../ui/loading.js';
 
 const MAX_RECONNECT_ATTEMPTS = 8;
 const CLOSE_SESSION_GONE = 4404;
@@ -119,7 +121,7 @@ export default class AgentSession {
         parent.appendChild(this.panel);
         this.panel.innerHTML = `
             <header class="ag-head">
-                <span class="ag-head-icon">${icon('bot', 18)}</span>
+                <span class="ag-head-icon">${icon(agentIconName(this.agentId), 18)}</span>
                 <div class="ag-head-text">
                     <div class="ag-head-title"></div>
                     <div class="ag-head-sub"><span class="ag-agent"></span> · <span class="ag-cwd mono"></span></div>
@@ -137,7 +139,7 @@ export default class AgentSession {
             <div class="ag-body">
                 <div class="ag-main">
                     <div class="ag-log" role="log" aria-label="Conversa com o agente" tabindex="0">
-                        <div class="ag-empty">${icon('bot', 28)}<p>Conectando ao agente…</p></div>
+                        <div class="ag-empty">${loaderHtml({ iconName: agentIconName(this.agentId), title: 'Conectando ao agente…', small: true })}</div>
                     </div>
                     <button type="button" class="ag-jump" hidden aria-label="Ir para o fim">${icon('chevronDown', 18)}</button>
                     <div class="ag-pending" hidden></div>
@@ -257,6 +259,11 @@ export default class AgentSession {
         void this.checkVibeProject();
     }
 
+    /** O agente desta aba, mesmo antes de a sessão chegar. */
+    get agentId() {
+        return this.session?.agent || agentIdFromName(this.name);
+    }
+
     /** ⌘L: foco no campo de mensagem. */
     focusComposer() { this.composer.focus(); }
 
@@ -287,7 +294,7 @@ export default class AgentSession {
         const used = new Map(this.vibeProject.agents.map(a => [a.agent, a]));
         const items = agentOptions.filter(a => a.installed || used.has(a.id)).map(a => ({
             label: used.has(a.id) ? a.label : `${a.label} (nova conversa)`,
-            icon: a.id === this.session?.agent ? 'check' : 'bot',
+            icon: a.id === this.session?.agent ? 'check' : agentIconName(a.id),
             run: () => this.switchVibeAgent(a.id),
         }));
         if (!items.length) {
@@ -480,6 +487,7 @@ export default class AgentSession {
         ];
         empty.classList.add('ag-welcome');
         empty.innerHTML = `
+            <span class="ag-hello-logo">${icon(agentIconName(this.agentId), 34)}</span>
             <h2 class="ag-hello">${hello}</h2>
             <p>Em que vamos trabalhar em <span class="mono">${esc(this.displayCwd?.() || this.cwd || '~')}</span>?</p>
             <div class="ag-tips">${tips.map(([label, text]) => `<button type="button" class="ag-tip" data-tip="${esc(text)}">${esc(label)}</button>`).join('')}</div>`;
@@ -593,6 +601,11 @@ export default class AgentSession {
         this.el.agent.textContent = (s && s.agentLabel) || this.name;
         this.el.cwd.textContent = this.cwd || '';
         this.el.cwd.title = this.cwd || '';
+        const headIcon = this.panel.querySelector('.ag-head-icon');
+        if (headIcon && headIcon.dataset.agent !== this.agentId) {
+            headIcon.dataset.agent = this.agentId || '';
+            headIcon.innerHTML = icon(agentIconName(this.agentId), 18);
+        }
         const route = this.panel.querySelector('.ag-route');
         if (route) {
             route.hidden = !(s && s.agent === 'claude');

@@ -5,6 +5,7 @@
  * Holds no session logic - it only reports user intent through the handlers.
  */
 import { icon } from './icons.js';
+import { agentIconName } from './agent-logos.js';
 import { haptic } from './haptics.js';
 
 const STATE_LABELS = {
@@ -48,6 +49,7 @@ export default class TabBar {
         el.setAttribute('aria-controls', `panel-${session.id}`);
         el.tabIndex = -1;
         el.innerHTML = `
+            <span class="tab-logo" aria-hidden="true" hidden></span>
             <span class="tab-dot" aria-hidden="true"></span>
             <span class="tab-text">
                 <span class="tab-name"></span>
@@ -162,6 +164,15 @@ export default class TabBar {
         el.classList.toggle('files', session.kind === 'files');
         el.classList.toggle('notes', session.kind === 'notes');
         el.classList.toggle('agent', session.kind === 'agent');
+        if (session.kind === 'agent') {
+            // O logo do agente na aba; a bolinha de estado fica no cantinho dele
+            const logo = el.querySelector('.tab-logo');
+            if (logo.dataset.agent !== session.agentId) {
+                logo.dataset.agent = session.agentId || '';
+                logo.innerHTML = icon(agentIconName(session.agentId), 17);
+            }
+            logo.hidden = false;
+        }
         el.classList.toggle('pinned', session.pinned);
         el.classList.toggle('activity', session.hasActivity && session.id !== this.activeId);
         const stateLabel = STATE_LABELS[session.state] || session.state;

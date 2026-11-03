@@ -6,6 +6,7 @@
  * Só existe no layout de desktop ([data-desktop]); recolhe com ⌘B / Ctrl+B.
  */
 import { icon } from './icons.js';
+import { agentIconName } from './agent-logos.js';
 import { showMenu } from './contextMenu.js';
 import { askConfirm } from './prompt.js';
 import { toast } from './toast.js';
@@ -193,7 +194,7 @@ export default class DesktopSidebar {
     renderAgents() {
         this.agentsEl.hidden = this.agents.length < 2;
         this.agentsEl.innerHTML = this.agents.map(a => `<button type="button" role="tab" class="dk-agent" data-agent="${esc(a.id)}"
-            aria-selected="${a.id === this.agent}">${esc(a.label)}</button>`).join('');
+            aria-selected="${a.id === this.agent}" title="${esc(a.label)}">${icon(agentIconName(a.id), 13)}<span>${esc(a.label)}</span></button>`).join('');
     }
 
     render() {

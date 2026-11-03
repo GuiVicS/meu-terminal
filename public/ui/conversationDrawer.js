@@ -14,6 +14,7 @@ import { icon } from './icons.js';
 import { esc } from '../agent/markdown.js';
 import { showMenu } from './contextMenu.js';
 import { toast } from './toast.js';
+import { agentIconName } from './agent-logos.js';
 import { askConfirm } from './prompt.js';
 import { haptic } from './haptics.js';
 
@@ -276,7 +277,12 @@ export default class ConversationDrawer {
 
     render() {
         const agent = this.getAgent();
-        this.el.querySelector('.cv-title').textContent = agent?.session?.agentLabel || 'Conversas';
+        const titleEl = this.el.querySelector('.cv-title');
+        const titleKey = `${agent?.agentId || ''}|${agent?.session?.agentLabel || ''}`;
+        if (titleEl.dataset.key !== titleKey) { // logo do agente + nome
+            titleEl.dataset.key = titleKey;
+            titleEl.innerHTML = `${agent?.agentId ? icon(agentIconName(agent.agentId), 24) : ''}<span>${esc(agent?.session?.agentLabel || 'Conversas')}</span>`;
+        }
         if (!agent) { this.list.innerHTML = ''; return; }
         const q = this.query.trim().toLowerCase();
         // Conversas abertas deste agente (cada uma pode estar rodando) + histórico do agente
