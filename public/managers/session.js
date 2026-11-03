@@ -5,6 +5,7 @@
  * sends the current screen. Cleans up every listener it creates on dispose().
  */
 import { attachTouchScroll } from '../ui/touchScroll.js';
+import { icon } from '../ui/icons.js';
 
 // Connection states shown in tabs and in the status bar
 export const STATE = {
@@ -99,6 +100,31 @@ export default class TerminalSession {
     }
 
     /** Creates the xterm instance inside `parent` and opens the connection. */
+    /** Longe do fim da rolagem: o botão de ir para o fim, igual ao da conversa. */
+    mountJump(term) {
+        const LINES = 5;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ag-jump term-jump';
+        btn.hidden = true;
+        btn.setAttribute('aria-label', 'Ir para o fim');
+        btn.innerHTML = icon('chevronDown', 18);
+        btn.addEventListener('click', () => {
+            term.scrollToBottom();
+            btn.hidden = true;
+            term.focus();
+        });
+        this.panel.appendChild(btn);
+        const sync = () => {
+            const b = term.buffer.active;
+            btn.hidden = b.baseY - b.viewportY < LINES;
+        };
+        term.onScroll(sync);
+        term.onWriteParsed?.(sync);
+        // O xterm só avisa da rolagem por conteúdo novo: a roda do mouse vem do elemento
+        this.panel.querySelector('.xterm-viewport')?.addEventListener('scroll', sync, { passive: true });
+    }
+
     mount(parent) {
         parent.appendChild(this.panel);
         const s = this.settings;
@@ -146,6 +172,7 @@ export default class TerminalSession {
         const term = this.terminal;
 
         term.open(this.panel);
+        this.mountJump(term);
         term.loadAddon(addons.unicode11);
         term.unicode.activeVersion = '11';
 

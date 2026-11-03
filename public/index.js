@@ -99,6 +99,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Multi-line commands: each line is a line of shell input
         const text = item.command.replace(/\r?\n/g, '\r');
         session.sendInput(item.run ? text + '\r' : text);
+        session.focus?.();
     };
 
     const openCommands = async anchor => {
@@ -115,7 +116,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 badge: item.run ? 'Enter' : '',
                 onSelect: () => runCommand(item),
             })),
-            actions: [{ label: 'Gerenciar comandos', onClick: () => settingsDialog.open() }],
+            actions: [{ label: 'Gerenciar comandos', onClick: () => (document.documentElement.hasAttribute('data-desktop') ? openSettings('comandos') : settingsDialog.open()) }],
         });
     };
 
@@ -245,9 +246,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         sessionPill.setAttribute('aria-label', `Sessão atual: ${session.name}. Toque para ver as sessões abertas`);
     };
 
+    // Desktop: comandos rápidos numa bolinha flutuante (no celular ficam na barra de atalhos)
+    const quickBtn = document.createElement('button');
+    quickBtn.type = 'button';
+    quickBtn.className = 'dk-cmds';
+    quickBtn.hidden = true;
+    quickBtn.setAttribute('aria-label', 'Comandos rápidos');
+    quickBtn.title = 'Comandos rápidos';
+    quickBtn.innerHTML = icon('bolt', 20);
+    quickBtn.addEventListener('click', () => openCommands(quickBtn));
+    document.body.appendChild(quickBtn);
+
     const renderActive = session => {
         renderPill(session);
         syncConvBtn();
+        quickBtn.hidden = session?.kind !== 'terminal'; // a bolinha só faz sentido onde dá para digitar
         sidebar?.syncActive();
         statusBar.render(session);
         if (typeof updateShortcutBar === 'function') updateShortcutBar();

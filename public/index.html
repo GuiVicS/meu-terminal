@@ -47,6 +47,7 @@
             // Desktop (tela larga, mouse): barra lateral e chat como o Claude Desktop (ui/desktopSidebar.js)
             if (!isPhone && window.innerWidth >= 900 && !window.matchMedia('(pointer: coarse)').matches) {
                 document.documentElement.setAttribute('data-desktop', '');
+                document.documentElement.setAttribute('data-no-sidebar', ''); // a lista só aparece no chat
                 if (localStorage.getItem('meuterminal-sidebar-recolhida') === '1') document.documentElement.setAttribute('data-sidebar-collapsed', '');
             }
         })();

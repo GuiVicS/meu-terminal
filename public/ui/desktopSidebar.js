@@ -1,8 +1,8 @@
 /**
  * desktopSidebar.js
  * Barra lateral do desktop (como a do Claude Desktop), com os mesmos hábitos da lista lateral do
- * celular: Nova conversa, busca, agente em pílulas, conversas abertas (bolinha online / círculo
- * girando), Fixadas e Recentes da pasta, apagar e fixar (clique direito ou "⋯"), Apps e Ajustes.
+ * celular: Nova conversa, busca, agentes, conversas abertas (bolinha online / círculo girando), Fixadas
+ * e Recentes, menu da conversa (clique direito ou "⋯"). Só aparece nas abas de agente.
  * Só existe no layout de desktop ([data-desktop]); recolhe com ⌘B / Ctrl+B.
  */
 import { icon } from './icons.js';
@@ -83,14 +83,8 @@ export default class DesktopSidebar {
             <div class="dk-nav">
                 <button type="button" class="dk-new dk-row" data-dk="new">${icon('plus', 18)}<span class="dk-row-title">Nova conversa</span></button>
                 <label class="dk-search dk-row">${icon('search', 18)}<input type="search" placeholder="Buscar" aria-label="Buscar conversas" spellcheck="false"></label>
-                ${APPS.filter(a => !a.flag || window.appConfig?.[a.flag]).map(a => `
-                    <button type="button" class="dk-row" data-app="${a.kind}">${icon(a.icon, 18)}<span class="dk-row-title">${a.label}</span></button>`).join('')}
-                <button type="button" class="dk-row" data-dk="apps">${icon('grid', 18)}<span class="dk-row-title">Todos os apps</span></button>
             </div>
-            <nav class="dk-scroll"><div class="dk-convs"></div></nav>
-            <div class="dk-side-foot">
-                <button type="button" class="dk-row" data-dk="settings">${icon('settings', 18)}<span class="dk-row-title">Ajustes</span></button>
-            </div>`;
+            <nav class="dk-scroll"><div class="dk-convs"></div></nav>`;
         document.body.appendChild(this.el);
         this.reopen = document.createElement('button');
         this.reopen.type = 'button';
@@ -106,7 +100,7 @@ export default class DesktopSidebar {
         this.bind();
         this.loadAgents();
         this.refresh();
-        this.timer = setInterval(() => { if (document.visibilityState === 'visible' && !this.collapsed) this.refresh(); }, 3000);
+        this.timer = setInterval(() => { if (document.visibilityState === 'visible' && !this.collapsed && !document.documentElement.hasAttribute('data-no-sidebar')) this.refresh(); }, 3000);
     }
 
     // ---------- estado ----------
@@ -130,6 +124,13 @@ export default class DesktopSidebar {
     /** O agente da aba ativa (se for de agente) manda na lista. */
     syncActive() {
         const s = this.ws.active;
+        // A lista é da conversa: nas outras abas ela some e a tela fica inteira
+        const inChat = s?.kind === 'agent';
+        if (document.documentElement.hasAttribute('data-no-sidebar') === inChat) {
+            document.documentElement.toggleAttribute('data-no-sidebar', !inChat);
+            setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+        }
+        if (!inChat) return;
         if (s && s.kind === 'agent' && s.session?.agent && s.session.agent !== this.agent) return this.setAgent(s.session.agent);
         if (this.onlyFolder && this.ws.currentFolder() !== this.historyFolder) return this.refresh();
         this.render();
@@ -295,13 +296,9 @@ export default class DesktopSidebar {
             if (conv) return this.pick(conv.dataset.key);
             const agentBtn = e.target.closest('[data-agent]');
             if (agentBtn) return this.setAgent(agentBtn.dataset.agent);
-            const app = e.target.closest('[data-app]');
-            if (app) return this.openApp(app.dataset.app);
             const act = e.target.closest('[data-dk]')?.dataset.dk;
             if (act === 'toggle') this.toggle();
             else if (act === 'new') this.newConversation();
-            else if (act === 'settings') this.openSettings();
-            else if (act === 'apps') this.ws.openNewSessionPage();
             else if (act === 'retry') this.refresh();
             else if (act === 'archived') {
                 this.archived = this.archived ? null : [];

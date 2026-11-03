@@ -46,7 +46,7 @@ const { deleteConversation, canDelete: canDeleteConversation, startedInTerminal,
 const { detectAgents, searchDirs } = require('./scripts/agents/detect');
 const { ClaudeAccounts } = require('./scripts/claude-accounts');
 const { listOpenCodeModels } = require('./scripts/opencode-login');
-const { readTranscript, listOnDisk } = require('./scripts/agents/transcript');
+const { readTranscript, listOnDisk, transcriptStamp } = require('./scripts/agents/transcript');
 const { ServiceManager, ROUTES, DEFAULT_ROUTE, RouteError, routeEnv, normalizeRoute } = require('./scripts/addon-services');
 const { OmniRouteBridge, ClaudeMemBridge, HeadroomBridge, BridgeError } = require('./scripts/addon-bridges');
 
@@ -1509,6 +1509,41 @@ app.post(BASE_PATH + '/api/agent-sessions/:id/resume', agentRoute(async (req, re
  * Agent tab socket: replays the session's events after ?since=<seq>, then streams new ones.
  * Actions (prompt, permission...) go through the REST routes above.
  */
+/**
+ * O conteúdo de uma conversa de fora do app: a cópia no SQL enquanto o original não mudar. Se o
+ * original sumir, a cópia continua valendo: a conversa segue visível.
+ */
+function conversationContent(agent, acp) {
+    const store = agentGateway.store;
+    const saved = store.getTranscript(agent, acp);
+    const stamp = transcriptStamp(agent, acp, HOME_DIR);
+    if (saved && (stamp === null || saved.stamp === stamp)) return saved.events;
+    const events = readTranscript(agent, acp, HOME_DIR);
+    if (events.length) store.saveTranscript(agent, acp, stamp, events);
+    return events.length ? events : (saved?.events || []);
+}
+
+/** Copia para o SQL as conversas antigas da lista, uma a uma, sem travar o servidor. */
+function archiveOldConversations() {
+    refreshConversationIndex();
+    const queue = agentGateway.store.conversationsToArchive();
+    let saved = 0;
+    const next = () => {
+        const c = queue.shift();
+        if (!c) return debugLog(`Conversas antigas no SQL: ${saved} atualizadas.`);
+        const before = agentGateway.store.getTranscript(c.agent, c.acp_session_id)?.stamp;
+        try {
+            conversationContent(c.agent, c.acp_session_id);
+            if (agentGateway.store.getTranscript(c.agent, c.acp_session_id)?.stamp !== before) saved++;
+        } catch (e) {
+            debugLog(`Conversa antiga ${c.acp_session_id}: ${e.message}`);
+        }
+        setImmediate(next);
+    };
+    next();
+}
+setTimeout(archiveOldConversations, 5000).unref?.();
+
 const CONVERSATION_EVENT = /^(message\.|tool\.|thought\.|plan\.|permission\.|subagent\.)/;
 
 function attachAgentTab(ws, row, since) {
@@ -1535,7 +1570,7 @@ function attachAgentTab(ws, row, since) {
     // O agente escreve no mesmo arquivo ao continuar, então ele é a fonte da conversa inteira
     const stored = agentGateway.store.getSession(row.url);
     const transcript = session.acpSessionId && !since && (stored.from_disk || !agentGateway.store.hasUserMessages(row.url))
-        ? readTranscript(session.agent, session.acpSessionId, HOME_DIR) : [];
+        ? conversationContent(session.agent, session.acpSessionId) : [];
     if (transcript.length) {
         for (const event of replay) if (!CONVERSATION_EVENT.test(event.type)) send({ type: 'agent-event', event });
         send({ type: 'agent-transcript', events: transcript, lastSeq: replay.length ? replay[replay.length - 1].seq : 0 });
