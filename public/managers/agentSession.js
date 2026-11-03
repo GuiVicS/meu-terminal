@@ -174,7 +174,7 @@ export default class AgentSession {
         });
         this.composer = new Composer(q('.ag-composer'), {
             cwd: () => this.cwd,
-            canChangeFolder: () => !this.hasConversation && !this.vibeProject,
+            canChangeFolder: () => !this.vibeProject,
             onFolder: anchor => this.chooseFolder(anchor),
             onSend: msg => this.sendPrompt(msg),
             onCancel: () => this.action('cancel').catch(e => toast(e.message, { tone: 'error' })),
@@ -522,7 +522,6 @@ export default class AgentSession {
             this.panel.classList.remove('ag-is-empty');
         }
         this.renderHead();
-        if (this.session) this.composer.setSession(this.session); // a pasta deixa de ser escolhível
         this.setOlder(firstTurn);
         this.pinToEnd();
     }
@@ -604,10 +603,6 @@ export default class AgentSession {
         // A tela vazia (saudação) só sai quando aparece conversa de verdade; avisos de sistema
         // ("Sessão iniciada em…", comandos, modelo) não contam
         if (CONVERSATION_EVENT.test(event.type)) {
-            if (!this.hasConversation && !this.conversation.batching && this.session) {
-                this.hasConversation = true;
-                this.composer.setSession(this.session); // a pasta deixa de ser escolhível
-            }
             this.hasConversation = true;
             this.el.log.querySelector('.ag-empty')?.remove();
             this.panel.classList.remove('ag-is-empty');
@@ -978,10 +973,14 @@ export default class AgentSession {
             .catch(e => toast(e.message, { tone: 'error' }));
     }
 
-    /** Pasta da conversa nova: a escolhida vira a padrão das próximas. */
+    /**
+     * Pasta da conversa: a escolhida vira a padrão das próximas. Conversa em andamento não troca de
+     * pasta (o agente já trabalha nela): a escolha abre uma nova, e esta segue na lista.
+     */
     chooseFolder(anchor) {
         return openFolderMenu(anchor, {
             current: this.cwd,
+            startsNew: !!this.hasConversation,
             agent: this.session?.agent || '',
             onPick: path => {
                 this.settings.set('defaultCwd', path);

@@ -327,7 +327,14 @@ export default class Composer {
         selectors.addEventListener('change', e => this.onSelector(e));
         selectors.addEventListener('click', e => {
             const btn = e.target.closest('[data-folder]');
-            if (btn) this.opts.onFolder?.(btn);
+            if (!btn) return;
+            // Celular: o seletor fica na folha de ajustes, e o menu abriria atrás dela
+            if (this.ui.sheet && !this.ui.sheet.hidden) {
+                this.closeSheet();
+                this.opts.onFolder?.(this.ui.settingsBtn);
+            } else {
+                this.opts.onFolder?.(btn);
+            }
         });
         suggest.addEventListener('mousedown', e => e.preventDefault()); // keep focus in the textarea
         suggest.addEventListener('click', e => {
@@ -479,7 +486,7 @@ export default class Composer {
         // Pasta da conversa, à esquerda da linha (desktop)
         const folder = String(this.opts.cwd?.() || '');
         if (folder) {
-            // Conversa nova: escolhe a pasta. Com mensagens, a pasta já é a dela
+            // Sempre dá para escolher; só o projeto de vibecoding fica preso à pasta dele
             const can = !!this.opts.canChangeFolder?.();
             const name = esc(folder.split('/').filter(Boolean).pop() || folder);
             const inner = `${icon('folder', 15)}<span>${name}</span>${can ? icon('chevronDown', 14) : ''}`;
