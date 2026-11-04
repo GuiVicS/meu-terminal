@@ -12,7 +12,7 @@ const fs = require('fs');
 const { generatePWAManifest, generateNotesManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
 const { TotpVerifier } = require('./scripts/totp');
-const { HtmlPreview, SANDBOX: HTML_SANDBOX } = require('./scripts/html-preview');
+const { HtmlPreview, SANDBOX: HTML_SANDBOX, HTML_RE, withExternalLinks } = require('./scripts/html-preview');
 const { safeEqual, verifyPin, createTokenSigner, AttemptLimiter, isSameOrigin: isSameOriginWith, isPublicPath } = require('./scripts/auth');
 const { childEnv } = require('./scripts/child-env');
 const SessionStore = require('./scripts/session-store');
@@ -1899,6 +1899,11 @@ app.get(BASE_PATH + '/preview/:token/{*rest}', (req, res) => {
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('Referrer-Policy', 'no-referrer');
     res.set('Cache-Control', 'no-store');
+    if (HTML_RE.test(found.rel)) {
+        return fs.promises.readFile(path.join(found.root, found.rel), 'utf8')
+            .then(html => res.type('html').send(withExternalLinks(html)))
+            .catch(() => res.status(404).end());
+    }
     res.sendFile(found.rel, { root: found.root, dotfiles: 'allow' }, err => {
         if (err && !res.headersSent) res.status(404).end();
     });

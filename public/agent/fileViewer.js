@@ -9,6 +9,7 @@ import { renderMarkdown, esc } from './markdown.js';
 import { highlightIn, onCodeClick, copyText, flashCopied } from './codeblock.js';
 import { serverFileUrl } from '../ui/filePicker.js';
 import { toast } from '../ui/toast.js';
+import { linkifyFiles } from './fileMentions.js';
 
 const IMAGE = 'png jpg jpeg gif webp avif svg bmp ico';
 const VIDEO = 'mp4 webm mov m4v';
@@ -35,7 +36,10 @@ export function viewerKind(path) {
 const base = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
 
 /** Same permissions as the server's page address (scripts/html-preview.js): never the app's origin. */
-const SANDBOX_ATTR = 'allow-scripts allow-forms allow-modals allow-popups allow-downloads';
+const SANDBOX_ATTR = 'allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads';
+
+/** Same as scripts/html-preview.js: links to other sites leave the frame (most refuse to open inside one). */
+const EXTERNAL_LINKS = '<script>addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[href]");if(a&&/^https?:/i.test(a.href)&&a.host!==location.host)a.target="_blank"},true)</script>';
 
 /** A code fence that nothing inside the text can close. */
 function asCodeBlock(text, lang) {
@@ -144,7 +148,7 @@ export function openFileViewer({ path = null, text = null, name = null, kind = n
                     note('Abrindo…');
                     const url = await pageAddress(path);
                     if (!stale()) frame({ url });
-                } else frame({ html: source });
+                } else frame({ html: EXTERNAL_LINKS + source });
             } else if (isText) {
                 note('Abrindo…');
                 const content = await getSource();
@@ -153,6 +157,7 @@ export function openFileViewer({ path = null, text = null, name = null, kind = n
                 body.innerHTML = type === 'markdown' && view === 'preview'
                     ? `<article class="ag-viewer-doc md">${renderMarkdown(withLocalImages(content, dir))}</article>`
                     : `<div class="ag-viewer-code md">${asCodeBlock(content, lang)}</div>`;
+                if (type === 'markdown' && view === 'preview') linkifyFiles(body);
                 highlightIn(body);
             } else if (type === 'pdf') {
                 body.classList.add('is-frame');
@@ -185,6 +190,16 @@ export function openFileViewer({ path = null, text = null, name = null, kind = n
 
     box.addEventListener('click', e => {
         if (onCodeClick(e)) return;
+        const mention = e.target.closest('[data-open-file]');
+        if (mention) {
+            // A link in a document points next to the document
+            const target = mention.dataset.openFile;
+            const dir = path ? path.slice(0, path.lastIndexOf('/')) : '';
+            const full = /^[/~]/.test(target) ? target : `${dir}/${target.replace(/^\.\//, '')}`;
+            if (viewerKind(full)) openFileViewer({ path: full, onOpenInFiles });
+            else onOpenInFiles?.(full);
+            return;
+        }
         const tab = e.target.closest('[data-view]');
         if (tab) {
             view = tab.dataset.view;

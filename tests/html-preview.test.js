@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { HtmlPreview, SANDBOX } = require('../scripts/html-preview');
+const { HtmlPreview, SANDBOX, withExternalLinks } = require('../scripts/html-preview');
 
 function setup() {
     const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'preview-')));
@@ -59,4 +59,10 @@ test('o endereço expira', () => {
     assert.ok(p.resolve(token, 'index.html'));
     t += 51;
     assert.strictEqual(p.resolve(token, 'index.html'), null);
+});
+
+test('links para outros sites saem do quadro, e a janela aberta não herda o sandbox', () => {
+    assert.match(SANDBOX, /allow-popups-to-escape-sandbox/);
+    assert.ok(withExternalLinks('<h1>x</h1>').endsWith('<h1>x</h1>'));
+    assert.match(withExternalLinks(''), /target="_blank"/);
 });

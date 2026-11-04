@@ -5,12 +5,12 @@
  * Works on the rendered message, so the Markdown renderer stays shared with the notes untouched.
  */
 import { icon } from '../ui/icons.js';
-import { esc } from './markdown.js';
+import { esc, bareLinks, trimAddress, addressHref } from './markdown.js';
 import { viewerKind, fileExt } from './fileViewer.js';
 
 const PATH_CHARS = `[^\\s"'\`<>()\\[\\]{}|,;:!?]`;
 // Text: a path with a folder ("/root/PLANO.md", "docs/PLANO.md", "./a.html"), or [nome](caminho)
-const IN_TEXT = new RegExp(`\\[([^\\]\\n]+)\\]\\(((?:~|\\.{0,2}/|[\\w.-]+/)${PATH_CHARS}*\\.[a-z0-9]+)\\)|(^|[\\s(])((?:~/|\\.{0,2}/|[\\w.-]+/)${PATH_CHARS}*\\.[a-z0-9]+)(?=$|[\\s).,;:!?])`, 'gi');
+const IN_TEXT = new RegExp(`\\[([^\\]\\n]+)\\]\\(((?:~|\\.{0,2}/|[\\w.-]+[/.])${PATH_CHARS}*)\\)|(^|[\\s(])((?:~/|\\.{0,2}/|[\\w.-]+/)${PATH_CHARS}*\\.[a-z0-9]+)(?=$|[\\s).,;:!?])`, 'gi');
 // A code span may be only the name ("PLANO.md")
 const IN_CODE = new RegExp(`^(?:~/|\\.{0,2}/)?${PATH_CHARS}+\\.[a-z0-9]+$`, 'i');
 
@@ -38,7 +38,8 @@ function linkifyText(node) {
     for (; match; match = IN_TEXT.exec(text)) {
         const [whole, label, linked, lead = '', bare] = match;
         const path = linked || bare;
-        if (!looksLikeFile(path)) continue;
+        // [nome](caminho) is a link for sure, whatever the type; a bare path only when it has a preview
+        if (isUrl(path) || (!linked && !looksLikeFile(path))) continue;
         frag.append(text.slice(at, match.index), lead);
         frag.append(fileLink(path, label || path));
         at = match.index + whole.length;
@@ -67,6 +68,36 @@ export function linkifyFiles(root) {
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
     nodes.forEach(linkifyText);
+}
+
+/** Web addresses in plain text (the user's messages, tool outputs) become links. */
+export function linkifyUrls(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode: n => (n.parentElement.closest('a, button, textarea, svg, .md') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+        const text = node.nodeValue;
+        const frag = document.createDocumentFragment();
+        let at = 0;
+        for (const match of text.matchAll(bareLinks())) {
+            const [whole, lead, address] = match;
+            const [url, rest] = trimAddress(address);
+            frag.append(text.slice(at, match.index), lead);
+            const a = document.createElement('a');
+            a.className = 'ag-url';
+            a.href = addressHref(url);
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = url;
+            frag.append(a, rest);
+            at = match.index + whole.length;
+        }
+        if (!at) continue;
+        frag.append(text.slice(at));
+        node.replaceWith(frag);
+    }
 }
 
 /** Markdown and HTML files mentioned in a message, in order and without repeats. */

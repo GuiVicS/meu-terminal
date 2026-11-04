@@ -13,7 +13,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const SANDBOX = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads';
+const SANDBOX = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads';
+// Links to other sites leave the frame (most refuse to open inside one)
+const EXTERNAL_LINKS = '<script>addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[href]");if(a&&/^https?:/i.test(a.href)&&a.host!==location.host)a.target="_blank"},true)</script>';
 const ASSET_EXT = new Set([
     'html', 'htm', 'css', 'js', 'mjs', 'map', 'wasm',
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'ico', 'bmp',
@@ -102,4 +104,9 @@ class HtmlPreview {
     }
 }
 
-module.exports = { HtmlPreview, SANDBOX };
+/** The page as served: the original plus the script above, before anything else runs. */
+function withExternalLinks(html) {
+    return EXTERNAL_LINKS + html;
+}
+
+module.exports = { HtmlPreview, SANDBOX, HTML_RE, withExternalLinks };

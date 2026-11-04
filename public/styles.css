@@ -4604,6 +4604,8 @@ audio.fm-media { width: min(520px, 90%); }
 /* ---- arquivos citados na conversa e visualizador em tela cheia ---- */
 .ag-file-link { display: inline; padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; text-align: left; overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 2px; }
 .ag-file-link:hover { text-decoration-color: currentColor; }
+.ag-url { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 2px; overflow-wrap: anywhere; }
+.ag-url:hover { text-decoration-color: currentColor; }
 .ag-file-link.is-code code { color: inherit; }
 .ag-doc-row { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .ag-doc-open { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 460px; min-height: 58px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }

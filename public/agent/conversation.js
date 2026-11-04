@@ -6,7 +6,7 @@
  */
 import { icon } from '../ui/icons.js';
 import { renderMarkdown, esc } from './markdown.js';
-import { linkifyFiles, documentsIn, documentCards } from './fileMentions.js';
+import { linkifyFiles, linkifyUrls, documentsIn, documentCards } from './fileMentions.js';
 import { highlightIn, saveState, restoreState, onCodeClick, copyText, flashCopied } from './codeblock.js';
 
 const COPY_TEXT = new WeakMap(); // message actions bar -> the message's Markdown
@@ -218,6 +218,7 @@ export default class Conversation {
         const el = document.createElement('div');
         el.className = className;
         el.innerHTML = html;
+        linkifyUrls(el);
         this.keepBottom(() => (parent || this.ensureTurn()).appendChild(el));
         return el;
     }
@@ -487,6 +488,7 @@ export default class Conversation {
         }
         el.querySelector('.ag-tool-stats').innerHTML = stats;
         body.innerHTML = parts.join('');
+        linkifyUrls(body);
         body.hidden = !parts.length;
     }
 
@@ -617,7 +619,10 @@ export default class Conversation {
             const tool = this.tools.get(all.dataset.showAll);
             const prev = all.previousElementSibling;
             const pre = prev && (prev.matches('pre') ? prev : prev.querySelector('pre'));
-            if (tool && pre) pre.textContent = maskSecrets(tool.data.output);
+            if (tool && pre) {
+                pre.textContent = maskSecrets(tool.data.output);
+                linkifyUrls(pre);
+            }
             all.remove();
             return;
         }
