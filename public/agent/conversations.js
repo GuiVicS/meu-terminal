@@ -42,7 +42,8 @@ export function conversationRows(list, active) {
     const rows = list.map(c => ({ key: c.acpSessionId, acp: c.acpSessionId, title: c.title, cwd: c.cwd, at: c.updatedAt,
         working: WORKING.has(c.status), online: !!c.status, sessionId: c.sessionId || null,
         unread: !!c.unread, waiting: c.status === 'waiting_permission', archived: !!c.archived,
-        current: !!active && (c.acpSessionId === active.session?.acpSessionId) }));
+        // A aba pode ainda não saber o id da conversa, mas a sessão aberta já está ligada a ela
+        current: !!active && (c.acpSessionId === active.session?.acpSessionId || (!!c.sessionId && c.sessionId === active.agentSessionId)) }));
     if (active?.agentSessionId && !rows.some(r => r.current)) {
         rows.unshift({ key: 'atual', acp: active.session?.acpSessionId || null, title: active.session?.title || 'Nova conversa',
             cwd: active.cwd, at: null, working: WORKING.has(active.session?.status), online: false, current: true });
