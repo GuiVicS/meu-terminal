@@ -6,6 +6,7 @@
  */
 import { icon } from '../ui/icons.js';
 import { renderMarkdown, esc } from './markdown.js';
+import { linkifyFiles, linkifyUrls, documentsIn, documentCards } from './fileMentions.js';
 import { highlightIn, saveState, restoreState, onCodeClick, copyText, flashCopied } from './codeblock.js';
 
 const COPY_TEXT = new WeakMap(); // message actions bar -> the message's Markdown
@@ -93,7 +94,7 @@ function mediaHtml(list) {
         }
         return `<div class="ag-media-file">${icon('file', 18)}<span class="ag-media-name">${esc(name)}${m.bytes || m.size ? ` <small>${formatBytes(m.bytes || m.size)}</small>` : ''}</span>
             <a class="btn btn-ghost btn-sm" href="${esc(mediaSrc(m, true))}" download>${icon('download', 14)} Baixar</a>
-            ${m.path ? `<button type="button" class="btn btn-ghost btn-sm" data-open-file="${esc(m.path)}">${icon('folder', 14)} Pasta</button>` : ''}</div>`;
+            ${m.path ? `<button type="button" class="btn btn-ghost btn-sm" data-open-file="${esc(m.path)}" data-open-folder>${icon('folder', 14)} Pasta</button>` : ''}</div>`;
     }).filter(Boolean);
     return items.length ? `<div class="ag-media">${items.join('')}</div>` : '';
 }
@@ -217,6 +218,7 @@ export default class Conversation {
         const el = document.createElement('div');
         el.className = className;
         el.innerHTML = html;
+        linkifyUrls(el);
         this.keepBottom(() => (parent || this.ensureTurn()).appendChild(el));
         return el;
     }
@@ -257,6 +259,7 @@ export default class Conversation {
         // Streaming re-renders the whole message: what the user toggled in a code block stays
         const state = saveState(block.el);
         block.el.innerHTML = renderMarkdown(block.text);
+        linkifyFiles(block.el);
         restoreState(block.el, state);
         highlightIn(block.el);
     }
@@ -300,6 +303,8 @@ export default class Conversation {
                 }
                 const shown = last ? imagePathsIn(last.text) : [];
                 if (shown.length) this.add(mediaHtml(shown), 'ag-media-row');
+                const docs = last?.el ? documentsIn(last.el) : [];
+                if (docs.length) this.add(documentCards(docs), 'ag-doc-row');
                 if (d.stopReason === 'cancelled') this.note('Interrompido.');
                 else if (d.stopReason && d.stopReason !== 'end_turn') this.note(`Turno encerrado: ${d.stopReason}`);
                 break;
@@ -483,6 +488,7 @@ export default class Conversation {
         }
         el.querySelector('.ag-tool-stats').innerHTML = stats;
         body.innerHTML = parts.join('');
+        linkifyUrls(body);
         body.hidden = !parts.length;
     }
 
@@ -613,12 +619,15 @@ export default class Conversation {
             const tool = this.tools.get(all.dataset.showAll);
             const prev = all.previousElementSibling;
             const pre = prev && (prev.matches('pre') ? prev : prev.querySelector('pre'));
-            if (tool && pre) pre.textContent = maskSecrets(tool.data.output);
+            if (tool && pre) {
+                pre.textContent = maskSecrets(tool.data.output);
+                linkifyUrls(pre);
+            }
             all.remove();
             return;
         }
         const file = e.target.closest('[data-open-file]');
-        if (file && this.onOpenFile) this.onOpenFile(file.dataset.openFile);
+        if (file && this.onOpenFile) this.onOpenFile(file.dataset.openFile, { folder: 'openFolder' in file.dataset });
     }
 
     /** Fresh start (reconnect with a full replay). */

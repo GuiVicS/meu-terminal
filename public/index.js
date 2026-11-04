@@ -3,6 +3,7 @@
  * App shell: wires the workspace (tabs + terminals) to the header, status bar,
  * mobile shortcut bar, fullscreen/focus mode, menus and the service worker.
  */
+import { hasTextSelection } from './ui/textSelection.js';
 import TerminalManager from './managers/terminal.js';
 import ServiceWorkerManager from './managers/serviceWorker.js';
 import SettingsManager from './managers/settings.js';
@@ -209,7 +210,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let pillGesture = null;
     let pillSwipedAt = 0;
     sessionPill.addEventListener('pointerdown', e => {
-        if (e.pointerType === 'mouse' || !root.hasAttribute('data-iphone')) return;
+        if (e.pointerType === 'mouse' || !root.hasAttribute('data-iphone') || hasTextSelection()) return;
         pillGesture = { id: e.pointerId, x: e.clientX, y: e.clientY };
         try { sessionPill.setPointerCapture(e.pointerId); } catch { /* pointerup still bubbles */ }
     });

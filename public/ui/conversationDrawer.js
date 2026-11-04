@@ -18,6 +18,7 @@ import { agentIconName } from './agent-logos.js';
 import { fetchConversations, conversationRows, updateConversation } from '../agent/conversations.js';
 import { conversationMenuItems } from '../agent/conversationMenu.js';
 import { haptic } from './haptics.js';
+import { hasTextSelection } from './textSelection.js';
 import { attachEdgeFade } from './edgeFade.js';
 import { createAccountRow } from './accountRow.js';
 
@@ -409,6 +410,8 @@ export default class ConversationDrawer {
 
         const start = e => {
             if (e.pointerType === 'mouse' || !this.available() || g) return;
+            // Com a lista aberta o gesto só fecha, então a seleção não pode prender a lista na tela
+            if (this.p === 0 && hasTextSelection()) return;
             const inDrawer = this.el.contains(e.target);
             const inChat = this.app.contains(e.target) && !!e.target.closest?.('.ag-panel, .cv-dim, .agent-panel, [data-kind="agent"], .ag-main');
             if (!inDrawer && !inChat && !(this.p > 0 && this.app.contains(e.target))) return;
@@ -422,6 +425,8 @@ export default class ConversationDrawer {
             const dy = e.clientY - g.y;
             if (!g.decided) {
                 if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
+                // A seleção pode ter nascido depois do toque (segurar a palavra e arrastar)
+                if (g.p0 === 0 && hasTextSelection()) { g = null; return; }
                 g.decided = true;
                 // horizontal, e no sentido que muda algo (abrir se fechada, fechar se aberta)
                 g.horizontal = Math.abs(dx) > Math.abs(dy) * 1.2 && (g.p0 > 0 ? true : dx > 0);

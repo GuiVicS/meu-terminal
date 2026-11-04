@@ -22,42 +22,84 @@ export function esc(text) {
 
 /** Only http(s) and mailto links become <a>; anything else (javascript:...) stays text. */
 function safeHref(url) {
+    if (/^www\./i.test(url)) return `https://${url}`;
     return /^(https?:\/\/|mailto:)/i.test(url) ? url : null;
 }
 
-/** Images: https, or files this app serves (agent media). No data:/javascript: URLs. */
-function safeImage(url) {
-    return /^(https:\/\/|api\/agent-media\/|\/api\/agent-media\/)/i.test(url) ? url : null;
+const WEB_ADDRESS = '(?:https?:\\/\\/|www\\.)[^\\s<>]+|(?:[a-z0-9-]+\\.)+(?:com\\.br|com|org|net|io|dev|app|ai|br)(?:\\/[^\\s<>]*)?';
+const NEEDS_SCHEME = /^(?!https?:\/\/)/i;
+
+/** Finds web addresses in text (raw or escaped), with what comes right before each one. */
+export const bareLinks = () => new RegExp(`(^|[\\s(\\[{*_~:]|&quot;|&#39;|&lt;)(${WEB_ADDRESS})`, 'gi');
+
+/** Punctuation right after an address belongs to the sentence: [address, what is left over]. */
+export function trimAddress(address) {
+    let url = address;
+    let rest = '';
+    for (;;) {
+        const tail = url.match(/(?:[.,;:!?'"*_~\]}]|&quot;|&#39;|&gt;)+$/);
+        if (tail) {
+            rest = tail[0] + rest;
+            url = url.slice(0, -tail[0].length);
+        } else if (url.endsWith(')') && (url.match(/\)/g) || []).length > (url.match(/\(/g) || []).length) {
+            rest = `)${rest}`;
+            url = url.slice(0, -1);
+        } else {
+            return [url, rest];
+        }
+    }
 }
 
-/** Inline syntax on already-escaped text. Code spans are protected from other rules. */
-function inline(escaped) {
-    const codes = [];
-    let text = escaped.replace(/`([^`\n]+)`/g, (_, code) => {
-        codes.push(`<code>${code}</code>`);
-        return `\u0000${codes.length - 1}\u0000`;
-    });
-    text = text
+export const addressHref = url => (NEEDS_SCHEME.test(url) ? `https://${url}` : url);
+
+/** Images: https, or files this app serves (agent media, local files). No data:/javascript: URLs. */
+function safeImage(url) {
+    return /^(https:\/\/|\/?(?:[\w-]+\/)*api\/(?:agent-media\/|files\/raw\?))/i.test(url) ? url : null;
+}
+
+function emphasis(text) {
+    return text
         .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
         .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
         .replace(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, '$1<em>$2</em>')
         .replace(/(^|[^_\w])_([^_\n]+)_(?=[^_\w]|$)/g, '$1<em>$2</em>')
-        .replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
+        .replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+}
+
+const externalLink = (href, label) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+
+/** Inline syntax on already-escaped text. Code spans and links are protected from the other rules. */
+function inline(escaped) {
+    const held = [];
+    const hold = html => {
+        held.push(html);
+        return `\u0000${held.length - 1}\u0000`;
+    };
+    let text = escaped.replace(/`([^`\n]+)`/g, (_, code) => {
+        const isLink = new RegExp(`^(?:${WEB_ADDRESS})$`, 'i').test(code);
+        return hold(isLink ? externalLink(addressHref(code), `<code>${code}</code>`) : `<code>${code}</code>`);
+    });
+    text = text
         // ![alt](url): a picture that opens in the lightbox
         .replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, (m, alt, url) => {
             const src = safeImage(url.replace(/&amp;/g, '&'));
             if (!src) return m;
-            return `<button type="button" class="md-img" data-media-view="${esc(src)}" data-media-name="${alt}" aria-label="Ampliar imagem${alt ? `: ${alt}` : ''}">`
-                + `<img src="${esc(src)}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer"></button>`;
+            return hold(`<button type="button" class="md-img" data-media-view="${esc(src)}" data-media-name="${alt}" aria-label="Ampliar imagem${alt ? `: ${alt}` : ''}">`
+                + `<img src="${esc(src)}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer"></button>`);
         })
         // [label](url) - the URL was escaped too, so &amp; etc. are already safe inside the attribute
         .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+            if (url.startsWith('#')) return emphasis(label); // no anchors to go to: the label stays
             const href = safeHref(url.replace(/&amp;/g, '&'));
-            return href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${label}</a>` : m;
+            return href ? hold(externalLink(esc(href), emphasis(label))) : m;
         })
-        // bare links
-        .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (m, lead, url) => `${lead}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
-    return text.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)]);
+        .replace(bareLinks(), (m, lead, address) => {
+            const [url, rest] = trimAddress(address);
+            return `${lead}${hold(externalLink(addressHref(url), url))}${rest}`;
+        });
+    text = emphasis(text);
+    const restore = t => t.replace(/\u0000(\d+)\u0000/g, (_, i) => restore(held[Number(i)]));
+    return restore(text);
 }
 
 /** A fenced code block: header (language/file + actions), code, "Mostrar tudo" when long. */
@@ -78,6 +120,7 @@ function codeBlock(info, body, closed) {
         + `<span class="md-code-lang">${icon(meta.file ? 'fileCode' : 'codeXml', 14)}<span>${esc(meta.file || meta.label)}</span>${meta.file && meta.lang ? `<em>${esc(meta.label)}</em>` : ''}</span>`
         + (closed ? '' : '<span class="md-code-writing">escrevendo…</span>')
         + `<span class="md-code-actions">`
+        + (closed && meta.lang === 'html' ? `<button type="button" class="md-code-btn md-code-run" data-code-act="run" aria-label="Executar em tela cheia" title="Executar em tela cheia">${icon('play', 14)}<span>Executar</span></button>` : '')
         + `<button type="button" class="md-code-btn" data-code-act="wrap" aria-pressed="false" aria-label="Quebrar linhas" title="Quebrar linhas">${icon('wrapText', 14)}</button>`
         + `<button type="button" class="md-code-btn" data-code-act="download" aria-label="Baixar" title="Baixar como arquivo">${icon('download', 14)}</button>`
         + `<button type="button" class="md-code-btn md-code-copy" data-code-act="copy" aria-label="Copiar código">${icon('copy', 14)}<span>Copiar</span></button>`

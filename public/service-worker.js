@@ -406,7 +406,7 @@ self.addEventListener("activate", event => {
 // Dynamic routes must always hit the server. Caching them served a stale session list,
 // so every page load recreated a tab that no longer existed (a new shell each visit).
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
-const NETWORK_ONLY = ['api/', 'login', 'logout', 'auth-mode', 'verify-pin', 'pin-length'];
+const NETWORK_ONLY = ['api/', 'preview/', 'login', 'logout', 'auth-mode', 'verify-pin', 'pin-length'];
 
 function isNetworkOnly(request) {
     if (request.method !== 'GET' || request.cache === 'no-store') return true;
