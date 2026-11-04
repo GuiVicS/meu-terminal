@@ -11,6 +11,7 @@ import { mountSettingsSections } from '../ui/dialogs.js';
 import { mountWebhooksSection } from './webhooks.js';
 import { mountRemoteSection } from './remote.js';
 import { mountAddonsSection } from './addons.js';
+import { mountIntegrationsSection } from './integrations.js';
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
 
@@ -26,6 +27,7 @@ const NAV = [
     { slug: 'notificacoes', label: 'Notificações', icon: 'bell' },
     { slug: 'agentes', label: 'Agentes', icon: 'bot' },
     { slug: 'complementos', label: 'Complementos', icon: 'grid' },
+    { slug: 'integracoes', label: 'Skills e MCPs', icon: 'plug' },
 ];
 
 function basePath() {
@@ -267,6 +269,9 @@ async function main() {
 
     page.insertAdjacentHTML('beforeend', '<section class="settings-section rm-section ad-section" data-page="complementos"></section>');
     mountAddonsSection(page.querySelector('[data-page="complementos"]'));
+
+    page.insertAdjacentHTML('beforeend', '<section class="settings-section rm-section" data-page="integracoes"></section>');
+    mountIntegrationsSection(page.querySelector('[data-page="integracoes"]'));
 
     navList.addEventListener('click', e => {
         const a = e.target.closest('a[data-slug]');

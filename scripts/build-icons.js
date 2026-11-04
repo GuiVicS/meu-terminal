@@ -27,6 +27,7 @@ const ICONS = {
     pin: 'pin',
     copy: 'copy',
     play: 'play',
+    plug: 'plug',
     edit: 'pencil',
     archive: 'archive',
     power: 'power',

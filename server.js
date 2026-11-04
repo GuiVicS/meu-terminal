@@ -12,6 +12,7 @@ const fs = require('fs');
 const { generatePWAManifest, generateNotesManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
 const { TotpVerifier } = require('./scripts/totp');
+const { Integrations } = require('./scripts/integrations');
 const { HtmlPreview, SANDBOX: HTML_SANDBOX, HTML_RE, withExternalLinks } = require('./scripts/html-preview');
 const { safeEqual, verifyPin, createTokenSigner, AttemptLimiter, isSameOrigin: isSameOriginWith, isPublicPath } = require('./scripts/auth');
 const { childEnv } = require('./scripts/child-env');
@@ -809,6 +810,7 @@ const addonServices = new ServiceManager({ defs: SERVICES, home: HOME_DIR, env: 
 
 /** Env da rota para um agente; liga o serviço se precisar. Só o Claude Code fala o protocolo da Anthropic. */
 async function agentRouteEnv({ agent, route, routeModel = null, account = null }) {
+    await integrations.syncSoon(); // o agente já abre com os MCPs e skills instalados
     route = normalizeRoute(route);
     if (agent !== 'claude') return account && agentAccounts[agent] ? agentAccounts[agent].env(account) : {};
     // Conta extra do Claude Code (a rota do OmniRoute não usa a assinatura, então não precisa)
@@ -912,6 +914,10 @@ const agentAccounts = {
     opencode: new OpenCodeAccounts({ home: HOME_DIR }),
     agy: new AgyAccounts({ home: HOME_DIR, env: childEnv({ HOME: HOME_DIR }) }),
 };
+
+const integrations = new Integrations({ home: HOME_DIR, accounts: agentAccounts, env: childEnv({ HOME: HOME_DIR }) });
+integrations.env.PATH = searchDirs(integrations.env, HOME_DIR).join(path.delimiter);
+integrations.sync().catch(e => debugLog(`Skills e MCPs: ${e.message}`));
 
 const agentGateway = new AgentGateway({
     store: new AgentStore(DB_PATH),
@@ -1348,6 +1354,17 @@ const accountRoute = fn => async (req, res) => {
         res.status(e.status || 500).json({ error: e.message });
     }
 };
+// Skills e MCPs em todos os agentes e contas (scripts/integrations.js)
+const integrationRoute = accountRoute;
+app.get(BASE_PATH + '/api/integrations', integrationRoute(async (req, res) => res.json(await integrations.overview())));
+app.post(BASE_PATH + '/api/integrations/mcp', integrationRoute(async (req, res) => res.json(await integrations.addServer(req.body?.name, req.body?.spec))));
+app.post(BASE_PATH + '/api/integrations/mcp/:name/adopt', integrationRoute(async (req, res) => res.json(await integrations.adoptServer(req.params.name, req.body?.from))));
+app.post(BASE_PATH + '/api/integrations/mcp/:name/replace', integrationRoute(async (req, res) => res.json(await integrations.replaceIn(req.params.name, req.body?.target))));
+app.delete(BASE_PATH + '/api/integrations/mcp/:name', integrationRoute(async (req, res) => res.json(await integrations.removeServer(req.params.name))));
+app.post(BASE_PATH + '/api/integrations/skills/install', integrationRoute(async (req, res) => res.json(await integrations.installSkill(req.body?.path))));
+app.post(BASE_PATH + '/api/integrations/skills/:name/spread', integrationRoute(async (req, res) => res.json(await integrations.spreadSkill(req.params.name))));
+app.delete(BASE_PATH + '/api/integrations/skills/:name', integrationRoute(async (req, res) => res.json(await integrations.removeSkill(req.params.name))));
+
 app.get(BASE_PATH + '/api/agent-accounts', accountRoute(async (req, res) => {
     const agent = String(req.query.agent || '');
     const accounts = accountsOf(agent);
