@@ -4685,14 +4685,18 @@ audio.fm-media { width: min(520px, 90%); }
 /* ---- Vidro líquido (glisse): a cor continua a do app (ui/liquidGlass.js) ---- */
 .liquid-host { display: none; }
 :root[data-liquid]:is([data-desktop], [data-iphone]) {
-    --lg-glass: color-mix(in srgb, var(--surface) 58%, transparent);
-    --lg-blur: 5px;
+    --lg-glass: color-mix(in srgb, var(--surface) 32%, transparent);
+    --lg-blur: 6px;
     --lg-drop: rgba(0, 0, 0, 0.28);
 }
-:root[data-liquid][data-iphone] { --lg-blur: 14px; } /* sem a lente, o texto atrás precisa de mais desfoque */
-/* Onde se lê ou escreve, o fundo não pode competir com o texto (como --glass-bg-dense) */
-:root[data-liquid]:is([data-desktop], [data-iphone]) .menu { --lg-glass: color-mix(in srgb, var(--surface) 90%, transparent); }
-:root[data-liquid][data-iphone] .ag-composer { --lg-glass: color-mix(in srgb, var(--surface) 88%, transparent); }
+:root[data-liquid][data-iphone] { --lg-blur: 10px; } /* sem a lente, o texto atrás precisa de mais desfoque */
+/* Onde se lê ou escreve, o vidro continua vendo o fundo: quem separa o texto é o desfoque */
+:root[data-liquid]:is([data-desktop], [data-iphone]) .menu { --lg-glass: color-mix(in srgb, var(--surface) 58%, transparent); --lg-blur: 22px; }
+:root[data-liquid][data-desktop] .ag-composer { --lg-glass: color-mix(in srgb, var(--surface) 30%, transparent); --lg-blur: 5px; }
+:root[data-liquid][data-iphone] .ag-composer { --lg-glass: color-mix(in srgb, var(--surface) 38%, transparent); --lg-blur: 8px; }
+/* O vidro precisa ter o que mostrar: a conversa não some antes de passar atrás do campo */
+:root[data-liquid][data-iphone] .ag-main::after { background: none; }
+:root[data-liquid]:is([data-desktop], [data-iphone]) .ag-log.edge-fade[data-fade-bottom] { --fade-bottom: 12px; }
 :root[data-liquid]:is([data-desktop], [data-iphone]) .liquid-host { display: contents; border-radius: inherit; }
 :root[data-liquid]:is([data-desktop], [data-iphone]) .liquid-host > .lg-glass { position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; }
 :root[data-liquid][data-desktop] :is(.tabstrip, .topbar-actions .icon-btn, .menu),
