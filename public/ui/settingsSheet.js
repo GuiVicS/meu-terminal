@@ -22,6 +22,7 @@ const SECTIONS = [
     { slug: 'agentes', label: 'Agentes', icon: 'bot', color: 'purple' },
     // Same modules as /admin, loaded on first open (they talk to the server)
     { slug: 'complementos', label: 'Complementos', icon: 'grid', color: 'cyan', mount: async el => (await import('../admin/addons.js')).mountAddonsSection(el) },
+    { slug: 'integracoes', label: 'Skills e MCPs', icon: 'plug', color: 'purple', mount: async el => (await import('../admin/integrations.js')).mountIntegrationsSection(el) },
     { slug: 'ponte', label: 'Ponte com o Claude', icon: 'link', color: 'orange', mount: async el => (await import('../admin/remote.js')).mountRemoteSection(el) },
 ];
 
