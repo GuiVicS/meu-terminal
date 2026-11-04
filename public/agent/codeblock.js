@@ -218,7 +218,11 @@ export function onCodeClick(e) {
     const block = btn.closest('.md-code, .md-table, .pre-box');
     if (!block) return false;
     const act = btn.dataset.codeAct;
-    if (act === 'copy') {
+    if (act === 'run') {
+        // Loaded on demand: the viewer itself renders code blocks
+        const text = block.querySelector('pre').textContent;
+        import('./fileViewer.js').then(m => m.openFileViewer({ text, kind: 'html', name: block.dataset.file || 'Página HTML' }));
+    } else if (act === 'copy') {
         const text = block.matches('.md-table') ? tableText(block.querySelector('table')) : block.querySelector('pre').textContent;
         copyText(text.replace(/\n$/, '')).then(ok => flashCopied(btn, ok));
     } else if (act === 'wrap') {

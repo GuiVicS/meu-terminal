@@ -6,6 +6,7 @@
  * from the session pill at the top and from the status bar's list button. Same look as the agent
  * settings sheet (.ag-sheet in styles.css).
  */
+import { hasTextSelection } from './textSelection.js';
 import { icon } from './icons.js';
 import { agentIconName } from './agent-logos.js';
 import { esc } from '../agent/markdown.js';
@@ -163,10 +164,11 @@ export function openSessionSheet({ getItems, onPick, onClose, onNew, onMenu, get
     // Drag the sheet down to close it
     let startY = null;
     sheet.addEventListener('touchstart', e => {
-        startY = sheet.scrollTop > 0 ? null : e.touches[0].clientY;
+        startY = sheet.scrollTop > 0 || hasTextSelection() ? null : e.touches[0].clientY;
     }, { passive: true });
     sheet.addEventListener('touchmove', e => {
         if (startY === null) return;
+        if (hasTextSelection()) { startY = null; sheet.style.transition = ''; sheet.style.transform = ''; return; }
         const dy = Math.max(0, e.touches[0].clientY - startY);
         if (dy > 8) clearTimeout(pressTimer);
         sheet.style.transition = 'none';

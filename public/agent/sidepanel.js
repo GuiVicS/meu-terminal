@@ -21,12 +21,9 @@ export default class SidePanel {
      * @param {(path: string) => void} opts.onOpenFile
      * @param {(command: string) => void} opts.onCommand - insert "/command " in the composer
      * @param {(toolId: string) => void} opts.onShowTool - scroll the conversation to a tool card
-     * @param {(path: string) => void} [opts.onOpenInFiles] - a prévia manda abrir nos Arquivos
      */
-    constructor(el, { cwd, onOpenFile, onCommand, onShowTool, onOpenInFiles }) {
+    constructor(el, { cwd, onOpenFile, onCommand, onShowTool }) {
         this.el = el;
-        this.onOpenInFiles = onOpenInFiles;
-        this.preview = null; // desktop: { path, text, note } do arquivo clicado
         this.cwd = cwd;
         this.onOpenFile = onOpenFile;
         this.onCommand = onCommand;
@@ -96,24 +93,10 @@ export default class SidePanel {
     }
 
     /** Re-renders if something changed (called once per batch of events). */
-    /** Desktop: mostra o arquivo clicado no topo do painel. */
-    setPreview(preview) {
-        this.preview = preview;
-        this.dirty = true;
-        this.render();
-    }
-
     render() {
         if (!this.dirty) return;
         this.dirty = false;
         const sections = [];
-        if (this.preview) {
-            const pv = this.preview;
-            sections.push(`<section class="sp-preview"><h3>${icon('fileText', 14)} <em title="${esc(pv.path)}">${esc(shortPath(pv.path, this.cwd()))}</em>
-                <button type="button" class="icon-btn" data-preview-files aria-label="Abrir nos Arquivos" title="Abrir nos Arquivos">${icon('folder', 14)}</button>
-                <button type="button" class="icon-btn" data-preview-close aria-label="Fechar a prévia" title="Fechar">${icon('x', 14)}</button></h3>
-                ${pv.note ? `<p class="sp-preview-note">${esc(pv.note)}</p>` : ''}${pv.text != null ? `<pre class="sp-preview-text">${esc(pv.text)}</pre>` : ''}</section>`);
-        }
         if (this.plan.length) {
             const done = this.plan.filter(s => s.status === 'completed').length;
             sections.push(`<section><h3>${icon('clipboardList', 14)} Plano <span>${done}/${this.plan.length}</span></h3><ol class="sp-plan">${this.plan.map(s => `<li class="${esc(s.status)}">${esc(s.content)}</li>`).join('')}</ol></section>`);
@@ -159,8 +142,6 @@ export default class SidePanel {
     }
 
     onClick(e) {
-        if (e.target.closest('[data-preview-close]')) return this.setPreview(null);
-        if (e.target.closest('[data-preview-files]')) return this.onOpenInFiles?.(this.preview?.path);
         const file = e.target.closest('[data-file]');
         if (file) return this.onOpenFile(file.dataset.file);
         const command = e.target.closest('[data-command]');

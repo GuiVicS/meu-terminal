@@ -25,9 +25,9 @@ function safeHref(url) {
     return /^(https?:\/\/|mailto:)/i.test(url) ? url : null;
 }
 
-/** Images: https, or files this app serves (agent media). No data:/javascript: URLs. */
+/** Images: https, or files this app serves (agent media, local files). No data:/javascript: URLs. */
 function safeImage(url) {
-    return /^(https:\/\/|api\/agent-media\/|\/api\/agent-media\/)/i.test(url) ? url : null;
+    return /^(https:\/\/|\/?(?:[\w-]+\/)*api\/(?:agent-media\/|files\/raw\?))/i.test(url) ? url : null;
 }
 
 /** Inline syntax on already-escaped text. Code spans are protected from other rules. */
@@ -78,6 +78,7 @@ function codeBlock(info, body, closed) {
         + `<span class="md-code-lang">${icon(meta.file ? 'fileCode' : 'codeXml', 14)}<span>${esc(meta.file || meta.label)}</span>${meta.file && meta.lang ? `<em>${esc(meta.label)}</em>` : ''}</span>`
         + (closed ? '' : '<span class="md-code-writing">escrevendo…</span>')
         + `<span class="md-code-actions">`
+        + (closed && meta.lang === 'html' ? `<button type="button" class="md-code-btn md-code-run" data-code-act="run" aria-label="Executar em tela cheia" title="Executar em tela cheia">${icon('play', 14)}<span>Executar</span></button>` : '')
         + `<button type="button" class="md-code-btn" data-code-act="wrap" aria-pressed="false" aria-label="Quebrar linhas" title="Quebrar linhas">${icon('wrapText', 14)}</button>`
         + `<button type="button" class="md-code-btn" data-code-act="download" aria-label="Baixar" title="Baixar como arquivo">${icon('download', 14)}</button>`
         + `<button type="button" class="md-code-btn md-code-copy" data-code-act="copy" aria-label="Copiar código">${icon('copy', 14)}<span>Copiar</span></button>`

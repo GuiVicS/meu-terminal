@@ -5,6 +5,7 @@
  * The paperclip attaches files from this server (picker) or from the device (uploaded next to
  * the session); images go to the agent as images when it accepts them, the rest as paths.
  */
+import { hasTextSelection } from '../ui/textSelection.js';
 import { icon } from '../ui/icons.js';
 import { askConfirm } from '../ui/prompt.js';
 import { showMenu } from '../ui/contextMenu.js';
@@ -132,6 +133,7 @@ export default class Composer {
         };
         this.bind();
         if (IPHONE) this.setupIphone();
+        this.trackHeight();
     }
 
     // ---------- iPhone layout ----------
@@ -169,7 +171,7 @@ export default class Composer {
         const sheet = backdrop.querySelector('.ag-sheet');
         let startY = null;
         sheet.addEventListener('touchstart', e => {
-            startY = e.target.closest('.ui-select, select, input') || sheet.scrollTop > 0 ? null : e.touches[0].clientY;
+            startY = e.target.closest('.ui-select, select, input') || sheet.scrollTop > 0 || hasTextSelection() ? null : e.touches[0].clientY;
         }, { passive: true });
         sheet.addEventListener('touchmove', e => {
             if (startY === null) return;
@@ -189,8 +191,13 @@ export default class Composer {
         // phrase per tap; the words land in the box so the user reviews before sending.
         this.setupDictation();
 
-        // The conversation scrolls under the floating box: its height goes into --ag-composer-h on
-        // the parent, so the last message, the pending bar and the "jump" button stay clear of it.
+    }
+
+    /**
+     * The conversation scrolls under the floating box: its height goes into --ag-composer-h on the
+     * parent, so the last message, the pending bar and the "jump" button stay clear of it.
+     */
+    trackHeight() {
         const host = this.el.parentElement;
         if (host && typeof ResizeObserver !== 'undefined') {
             this.resizeObserver = new ResizeObserver(() => host.style.setProperty('--ag-composer-h', `${this.el.offsetHeight}px`));
@@ -636,9 +643,13 @@ export default class Composer {
     autosize() {
         const input = this.ui.input;
         input.style.height = 'auto';
+        // Measures the text alone: the minimum belongs to the CSS and changes with the page (taller
+        // on a new conversation), so it must not stay written on the box once the chat has messages
+        input.style.minHeight = '0';
         // scrollHeight leaves out the border: add it back, or a scrollbar shows on one line
         const border = input.offsetHeight - input.clientHeight;
         const height = input.scrollHeight + border;
+        input.style.minHeight = '';
         input.style.height = `${Math.min(height, 200)}px`;
         input.style.overflowY = height > 200 ? 'auto' : 'hidden';
     }

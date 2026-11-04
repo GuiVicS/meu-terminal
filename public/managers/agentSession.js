@@ -21,7 +21,7 @@ import { attachEdgeFade } from '../ui/edgeFade.js';
 import { openFolderMenu } from '../ui/folderPicker.js';
 import { haptic } from '../ui/haptics.js';
 import { keepScreenOn } from '../ui/permissions.js';
-import { serverFileUrl } from '../ui/filePicker.js';
+import { openFileViewer, viewerKind } from '../agent/fileViewer.js';
 import { agentIconName, agentIdFromName } from '../ui/agent-logos.js';
 import { loaderHtml } from '../ui/loading.js';
 
@@ -31,7 +31,6 @@ const CLOSE_SESSION_GONE = 4404;
 const OLDER_MARGIN = 1200;
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
 const PANEL_KEY = 'meuterminal-painel-agente';
-const PREVIEW_MAX = 200000; // bytes mostrados na prévia de arquivo do painel
 const wide = () => window.matchMedia('(min-width: 1100px)').matches;
 
 const STATUS = {
@@ -168,7 +167,7 @@ export default class AgentSession {
         this.conversation = new Conversation(this.el.log, {
             cwd: () => this.cwd,
             onPermission: (permissionId, optionId) => this.answerPermission(permissionId, optionId),
-            onOpenFile: path => this.openFile(path),
+            onOpenFile: (path, opts) => this.openFile(path, opts),
             onRetry: text => this.sendPrompt({ text, images: [] }),
         });
         this.composer = new Composer(q('.ag-composer'), {
@@ -189,7 +188,6 @@ export default class AgentSession {
             onOpenFile: path => this.openFile(path),
             onCommand: name => this.composer.insert(`/${name} `),
             onShowTool: toolId => this.showTool(toolId),
-            onOpenInFiles: path => this.openInFiles(path),
         });
         this.side.render();
 
@@ -812,34 +810,20 @@ export default class AgentSession {
         return (await r.json()).results || [];
     }
 
-    /** Opens the file's folder in an "Arquivos" tab. */
-    /** Desktop: o arquivo abre numa prévia no painel; o celular segue indo para os Arquivos. */
-    openFile(path) {
-        if (!document.documentElement.hasAttribute('data-desktop')) return this.openInFiles(path);
-        return this.previewFile(path);
-    }
-
-    async previewFile(path) {
+    /** O caminho como o agente escreveu -> caminho completo no servidor. */
+    fullPath(path) {
         const norm = String(path).replace(/\\/g, '/');
-        const full = norm.startsWith('/') || norm.startsWith('~') ? norm : `${String(this.cwd || '').replace(/\/+$/, '')}/${norm}`;
-        this.panelOpen = true;
-        this.applyPanel();
-        this.side.setPreview({ path: full, text: null, note: 'Carregando…' });
-        try {
-            const r = await fetch(serverFileUrl(full), { credentials: 'same-origin', headers: { Range: `bytes=0-${PREVIEW_MAX - 1}` } });
-            if (!r.ok) throw new Error(`Erro ${r.status}`);
-            const type = r.headers.get('content-type') || '';
-            if (/^(image|video|audio)\/|octet-stream|pdf|zip/.test(type)) {
-                this.side.setPreview({ path: full, text: null, note: 'Sem prévia para este tipo de arquivo. Abra nos Arquivos.' });
-                return;
-            }
-            const text = (await r.text()).slice(0, PREVIEW_MAX); // o servidor pode ignorar o Range
-            this.side.setPreview({ path: full, text, note: text.length >= PREVIEW_MAX ? 'Mostrando o começo do arquivo.' : '' });
-        } catch (e) {
-            this.side.setPreview({ path: full, text: null, note: `Não deu para abrir: ${e.message}` });
-        }
+        return norm.startsWith('/') || norm.startsWith('~') ? norm : `${String(this.cwd || '').replace(/\/+$/, '')}/${norm.replace(/^\.\//, '')}`;
     }
 
+    /** Arquivo citado na conversa: abre formatado em tela cheia; o que não tem prévia vai para os Arquivos. */
+    openFile(path, { folder = false } = {}) {
+        const full = this.fullPath(path);
+        if (folder || !viewerKind(full)) return this.openInFiles(full);
+        return openFileViewer({ path: full, onOpenInFiles: p => this.openInFiles(p) });
+    }
+
+    /** Opens the file's folder in an "Arquivos" tab. */
     openInFiles(path) {
         const norm = String(path).replace(/\\/g, '/');
         const folder = norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/')) || '/' : this.cwd;

@@ -26,6 +26,7 @@ const ICONS = {
     terminal: 'square-terminal',
     pin: 'pin',
     copy: 'copy',
+    play: 'play',
     edit: 'pencil',
     archive: 'archive',
     power: 'power',

@@ -12,6 +12,7 @@ const fs = require('fs');
 const { generatePWAManifest, generateNotesManifest } = require("./scripts/pwa-manifest-generator");
 const { originValidationMiddleware, getCorsOptions, validateOrigin } = require('./scripts/cors');
 const { TotpVerifier } = require('./scripts/totp');
+const { HtmlPreview, SANDBOX: HTML_SANDBOX } = require('./scripts/html-preview');
 const { safeEqual, verifyPin, createTokenSigner, AttemptLimiter, isSameOrigin: isSameOriginWith, isPublicPath } = require('./scripts/auth');
 const { childEnv } = require('./scripts/child-env');
 const SessionStore = require('./scripts/session-store');
@@ -312,6 +313,8 @@ app.use(BASE_PATH, (req, res, next) => {
         // The browser fetches the worker script on its own to check for updates; if that
         // hits the login redirect the update fails silently and the PWA stays on old code.
         '/service-worker.js',
+        // HTML shown in the chat viewer: its own check (temporary token, scripts/html-preview.js)
+        '/preview/',
         // Agents' MCP endpoint: has its own check (local only + bearer token)
         '/mcp',
         // Public webhook triggers: own check (bearer token or HMAC signature), not the app login
@@ -1880,6 +1883,26 @@ app.get(BASE_PATH + '/api/files/raw', filesRoute(async (req, res) => {
 app.get(BASE_PATH + '/api/files/archive', filesRoute(async (req, res) => {
     await files.sendArchive(res, one(req.query.source), one(req.query.path), many(req.query.names));
 }));
+
+// Temporary address to run an HTML file in the chat viewer (sandboxed: scripts/html-preview.js)
+const htmlPreview = new HtmlPreview({ home: HOME_DIR });
+app.post(BASE_PATH + '/api/files/preview-link', filesRoute(async (req, res) => {
+    const target = files.resolve('local', String(req.body?.path || ''));
+    const { token, name } = htmlPreview.create(target);
+    res.json({ url: `${BASE_PATH}/preview/${token}/${encodeURIComponent(name)}` });
+}));
+app.get(BASE_PATH + '/preview/:token/{*rest}', (req, res) => {
+    const rest = Array.isArray(req.params.rest) ? req.params.rest.join('/') : String(req.params.rest || '');
+    const found = FILES_ENABLED ? htmlPreview.resolve(req.params.token, rest) : null;
+    if (!found) return res.status(404).end();
+    res.set('Content-Security-Policy', HTML_SANDBOX);
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Referrer-Policy', 'no-referrer');
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(found.rel, { root: found.root, dotfiles: 'allow' }, err => {
+        if (err && !res.headersSent) res.status(404).end();
+    });
+});
 
 app.get(BASE_PATH + '/api/files/text', filesRoute(async (req, res) => {
     res.json(await files.readText(one(req.query.source), one(req.query.path)));

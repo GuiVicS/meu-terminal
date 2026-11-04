@@ -5,6 +5,7 @@
  * grabber on top. Closes by tapping outside, the ✕, Esc, or dragging it down (from the top of its
  * content). The title bar can show a "‹ back" button for sheets with pages (Configurações).
  */
+import { hasTextSelection } from './textSelection.js';
 import { icon } from './icons.js';
 import { present, dismiss } from './morph.js';
 
@@ -93,10 +94,11 @@ export function openSheet({ title, className = '', onClose, source, page = false
     // Drag down to close: only when the content is scrolled to the top, so scrolling still works
     let startY = null;
     sheet.addEventListener('touchstart', e => {
-        startY = page || sheet.scrollTop > 0 ? null : e.touches[0].clientY;
+        startY = page || sheet.scrollTop > 0 || hasTextSelection() ? null : e.touches[0].clientY;
     }, { passive: true });
     sheet.addEventListener('touchmove', e => {
         if (startY === null) return;
+        if (hasTextSelection()) { startY = null; sheet.style.transition = ''; sheet.style.transform = ''; return; }
         const dy = e.touches[0].clientY - startY;
         if (dy <= 0) return;
         sheet.style.transition = 'none';
