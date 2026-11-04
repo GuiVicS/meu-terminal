@@ -438,7 +438,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const ensureSidebar = () => {
         const on = isDesktopNow();
         document.documentElement.toggleAttribute('data-desktop', on);
-        if (on) setTimeout(startLiquidGlass, 0); // depois da tela abrir
+        setTimeout(startLiquidGlass, 0); // depois da tela abrir (só vale onde há suporte)
         if (on && !sidebar) sidebar = new DesktopSidebar({ workspace, openSettings: () => openSettings() });
     };
     ensureSidebar();
