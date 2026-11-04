@@ -4681,3 +4681,20 @@ audio.fm-media { width: min(520px, 90%); }
 .ig-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; }
 .ig-chip { padding: 2px 6px; border-radius: 6px; background: var(--surface-2); color: var(--text-3); font-size: 11px; text-decoration: line-through; }
 .ig-chip.on { color: var(--text); text-decoration: none; }
+
+/* ---- Vidro líquido (glisse) no PC com Chromium: a cor continua a do app (ui/liquidGlass.js) ---- */
+.liquid-host { display: none; }
+:root[data-liquid][data-desktop] {
+    --lg-glass: color-mix(in srgb, var(--surface) 58%, transparent);
+    --lg-blur: 5px;
+    --lg-drop: rgba(0, 0, 0, 0.28);
+}
+:root[data-liquid][data-desktop] .liquid-host { display: contents; border-radius: inherit; }
+:root[data-liquid][data-desktop] .liquid-host > .lg-glass { position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; }
+:root[data-liquid][data-desktop] :is(.tabstrip, .topbar-actions .icon-btn, .menu) {
+    isolation: isolate; background: transparent; background-image: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+:root[data-liquid][data-desktop] :is(.tabstrip, .topbar-actions .icon-btn) { position: relative; }
+:root[data-liquid][data-desktop] .ag-composer::before { display: none; }
+:root[data-liquid][data-desktop] .ag-composer > .liquid-host > .lg-glass { position: relative; inset: auto; grid-column: 1 / -1; grid-row: 3 / 5; border-radius: 18px; }
+:root[data-liquid][data-desktop] .ag-is-empty .ag-composer > .liquid-host > .lg-glass { grid-row: 3 / 6; }

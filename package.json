@@ -1,6 +1,6 @@
 {
   "name": "meuterminal",
-  "version": "2.27.0",
+  "version": "2.28.0",
   "description": "A stupidly simple web-based terminal emulator, with common tools and Starship enabled (via Docker)! 🚀",
   "main": "server.js",
   "engines": {
@@ -11,6 +11,7 @@
     "dev": "npm run copy-xterm && nodemon server.js",
     "copy-xterm": "node scripts/copy-xterm.js",
     "build-tiptap": "node scripts/build-tiptap.js",
+    "build-glisse": "node scripts/build-glisse.js",
     "2fa": "node scripts/totp-setup.js",
     "icons": "node scripts/build-icons.js",
     "test": "node --test \"tests/**/*.test.js\""
@@ -51,7 +52,10 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
+    "glisse": "0.5.0",
     "lucide-static": "^1.49.0",
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   }
 }
