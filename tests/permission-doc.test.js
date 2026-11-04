@@ -30,3 +30,18 @@ test('escrita sem diff usa o conteúdo pedido', async () => {
     const doc = permissionDocument({ input: { file_path: '/root/n.md', content: 'texto' } });
     assert.deepStrictEqual(doc, { text: 'texto', name: 'n.md' });
 });
+
+test('título igual ao comando vira um nome curto', async () => {
+    const { permissionTitle } = await load();
+    const command = 'cd /root/x && ffmpeg -v error\n -y a.png';
+    assert.strictEqual(permissionTitle({ title: command, input: { command } }), 'Executar comando');
+    assert.strictEqual(permissionTitle({ title: '`cd /root/x && ffmpeg -v error -y a.png`', input: { command } }), 'Executar comando');
+    assert.strictEqual(permissionTitle({ title: 'cd /root/x && ffmpeg…', input: { command } }), 'Executar comando');
+});
+
+test('título próprio continua', async () => {
+    const { permissionTitle } = await load();
+    assert.strictEqual(permissionTitle({ title: 'Instalar dependências', input: { command: 'npm i' } }), 'Instalar dependências');
+    assert.strictEqual(permissionTitle({ title: 'Write a.md', input: { file_path: 'a.md' } }), 'Write a.md');
+    assert.strictEqual(permissionTitle({ title: 'npm', input: { command: 'npm install' } }), 'npm');
+});

@@ -11,7 +11,7 @@ import { highlightIn, saveState, restoreState, onCodeClick, copyText, flashCopie
 
 const COPY_TEXT = new WeakMap(); // message actions bar -> the message's Markdown
 import { renderDiff } from './diff.js';
-import { permissionDocument } from './permissionDoc.js';
+import { permissionDocument, permissionTitle } from './permissionDoc.js';
 import { assessRisk, maskSecrets } from './risk.js';
 
 const TOOL_META = {
@@ -545,7 +545,7 @@ export default class Conversation {
                 ? `<div class="ag-cmd"><span>$</span> ${esc(maskSecrets(input.command))}</div>`
                 : d.diffs && d.diffs.length ? d.diffs.map(x => renderDiff(x).html).join('') : '';
         const el = this.add(`
-            <div class="ag-perm-head">${icon('shield', 16)} <span>${esc(d.title)}</span></div>
+            <div class="ag-perm-head">${icon('shield', 16)} <span>${esc(permissionTitle(d))}</span></div>
             ${risks.length ? `<div class="ag-risk" role="alert">${icon('info', 14)} Atenção: ${risks.map(esc).join('; ')}</div>` : ''}
             ${detail ? `<div class="ag-perm-detail${doc ? ' is-doc' : ''}">${detail}</div>` : ''}
             ${doc ? `<button type="button" class="ag-link ag-perm-open" data-perm-doc>${icon('maximize', 14)} Abrir em tela cheia</button>` : ''}
