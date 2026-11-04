@@ -1,15 +1,19 @@
 /**
  * liquidGlass.js
- * Vidro líquido (glisse) nas peças que flutuam, só no PC com Chromium: é o único navegador que
- * deforma o que passa atrás do vidro, então nos outros o vidro de sempre continua, sem baixar nada.
+ * Vidro líquido (glisse) nas peças que flutuam. No PC com Chromium ele deforma o que passa atrás; no
+ * iPhone o Safari não deixa filtrar o fundo vivo, então ficam o desfoque e o brilho na borda. Nos
+ * outros casos o vidro de sempre continua, sem baixar nada. A conversa de propósito não é marcada
+ * como fundo do glisse: isso filtraria o chat inteiro a cada quadro enquanto ele rola.
  * O pacote (React + glisse) vem de public/vendor/glisse.bundle.js, carregado depois da tela abrir.
  */
-const TARGETS = '.ag-composer, .tabstrip, .topbar-actions .icon-btn, .menu';
+const DESKTOP_TARGETS = '.ag-composer, .tabstrip, .topbar-actions .icon-btn, .menu';
+const IPHONE_TARGETS = '.ag-composer, .session-pill, .topbar-actions .icon-btn, .ag-jump, .menu';
 const mounted = new Map(); // peça -> { host, stop }
 
 export function liquidGlassSupported() {
-    return document.documentElement.hasAttribute('data-desktop')
-        && /Chrom(?:e|ium)\//.test(navigator.userAgent)
+    const root = document.documentElement;
+    const place = root.hasAttribute('data-iphone') || (root.hasAttribute('data-desktop') && /Chrom(?:e|ium)\//.test(navigator.userAgent));
+    return place
         && !window.matchMedia('(prefers-reduced-transparency: reduce), (prefers-contrast: more)').matches;
 }
 
@@ -26,6 +30,7 @@ export async function startLiquidGlass() {
         return false; // sem o pacote, fica o vidro de sempre
     }
     document.documentElement.setAttribute('data-liquid', '');
+    const targets = document.documentElement.hasAttribute('data-iphone') ? IPHONE_TARGETS : DESKTOP_TARGETS;
 
     const scan = () => {
         for (const [el, { host, stop }] of mounted) {
@@ -34,7 +39,7 @@ export async function startLiquidGlass() {
             host.remove();
             mounted.delete(el);
         }
-        document.querySelectorAll(TARGETS).forEach(el => {
+        document.querySelectorAll(targets).forEach(el => {
             if (mounted.has(el)) return;
             const host = document.createElement('span');
             host.className = 'liquid-host';
