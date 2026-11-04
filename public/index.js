@@ -3,6 +3,7 @@
  * App shell: wires the workspace (tabs + terminals) to the header, status bar,
  * mobile shortcut bar, fullscreen/focus mode, menus and the service worker.
  */
+import { startLiquidGlass } from './ui/liquidGlass.js';
 import { hasTextSelection } from './ui/textSelection.js';
 import TerminalManager from './managers/terminal.js';
 import ServiceWorkerManager from './managers/serviceWorker.js';
@@ -437,6 +438,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const ensureSidebar = () => {
         const on = isDesktopNow();
         document.documentElement.toggleAttribute('data-desktop', on);
+        if (on) setTimeout(startLiquidGlass, 0); // depois da tela abrir
         if (on && !sidebar) sidebar = new DesktopSidebar({ workspace, openSettings: () => openSettings() });
     };
     ensureSidebar();
