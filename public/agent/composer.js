@@ -13,6 +13,7 @@ import { pickServerFiles, serverFileUrl } from '../ui/filePicker.js';
 import { toast } from '../ui/toast.js';
 import { esc } from './markdown.js';
 import Dictation from '../ui/dictation.js';
+import MicWave from '../ui/micWave.js';
 
 const coarse = () => window.matchMedia('(pointer: coarse)').matches;
 // iPhone layout: floating box + settings sheet (attribute set in index.html before first paint)
@@ -133,6 +134,9 @@ export default class Composer {
         };
         this.bind();
         if (IPHONE) this.setupIphone();
+        // Dictation, like the Claude app: a mic beside send, on every screen. It hears until the next
+        // tap, with sound waves in place of the text box; the words land in the box for review.
+        this.setupDictation();
         this.trackHeight();
     }
 
@@ -187,10 +191,6 @@ export default class Composer {
             if (dragged > 80) this.closeSheet();
         });
 
-        // Dictation, like the Claude app: a round mic between the settings pill and send. One
-        // phrase per tap; the words land in the box so the user reviews before sending.
-        this.setupDictation();
-
     }
 
     /**
@@ -217,37 +217,55 @@ export default class Composer {
         this.ui.form.insertBefore(mic, this.ui.send);
         this.ui.mic = mic;
 
+        const waveEl = document.createElement('canvas');
+        waveEl.className = 'ag-wave';
+        waveEl.hidden = true;
+        waveEl.setAttribute('role', 'img');
+        waveEl.setAttribute('aria-label', 'Ouvindo');
+        this.ui.form.insertBefore(waveEl, this.ui.input.nextSibling);
+        const wave = new MicWave(waveEl);
+        this.wave = wave;
+
         this.dictation = new Dictation({
-            // While listening the box shows "what was already written + what is being heard", so a
-            // half sentence is not lost; the text before the mic was tapped is the base.
-            onInterim: text => {
-                const input = this.ui.input;
-                input.value = (this.micBase || '') + text;
-                this.autosize();
-            },
+            onInterim: () => wave.pulse(),
             onFinal: text => {
                 const input = this.ui.input;
-                input.value = (this.micBase || '') + text;
-                this.micBase = null;
+                const before = input.value;
+                input.value = (before ? before.replace(/\s*$/, ' ') : '') + text;
+                this.heardText = true;
                 this.autosize();
                 this.saveDraftSoon();
+            },
+            onConflict: () => {
+                if (!wave.usingMic) return false;
+                wave.dropMic(); // o aparelho não deixou os dois ouvirem juntos: o texto vem primeiro
+                return true;
             },
             onStateChange: listening => {
                 mic.classList.toggle('recording', listening);
                 mic.setAttribute('aria-pressed', String(listening));
-                mic.setAttribute('aria-label', listening ? 'Parar transcrição' : 'Transcrever voz');
+                const label = listening ? 'Parar e transcrever' : 'Transcrever voz';
+                mic.setAttribute('aria-label', label);
+                mic.title = label;
                 if (listening) {
-                    const value = this.ui.input.value;
-                    this.micBase = value ? value.replace(/\s*$/, ' ') : '';
-                } else if (this.micBase !== null) {
-                    // Nothing was recognized: put the box back the way it was
-                    if (this.ui.input.value === this.micBase) this.ui.input.value = this.micBase.trimEnd();
-                    this.micBase = null;
-                    this.autosize();
+                    this.heardText = false;
+                    waveEl.style.height = `${this.ui.input.offsetHeight}px`;
+                }
+                this.el.classList.toggle('ag-recording', listening);
+                waveEl.hidden = !listening;
+                if (listening) wave.start();
+                else {
+                    wave.stop();
+                    if (!this.heardText && !this.dictationFailed) toast('Não ouvi nada para transcrever.');
+                    this.dictationFailed = false;
+                    this.ui.input.focus({ preventScroll: true });
                 }
             },
-            onError: message => toast(message, { tone: 'error' }),
-        });
+            onError: message => {
+                this.dictationFailed = true;
+                toast(message, { tone: 'error' });
+            },
+        }, { keepListening: true });
         mic.addEventListener('click', () => this.dictation.toggle());
     }
 
@@ -283,6 +301,7 @@ export default class Composer {
     /** Removes what lives outside the composer's own element (the iPhone sheet). */
     dispose() {
         this.dictation?.stop();
+        this.wave?.stop();
         this.resizeObserver?.disconnect();
         if (this.onSheetKey) document.removeEventListener('keydown', this.onSheetKey);
         this.ui.sheet?.remove();
@@ -472,7 +491,7 @@ export default class Composer {
             parts.push(`<label class="ag-select" title="Modo"><span>${icon('shield', 13)}</span><em class="ag-select-name">Modo</em><select data-mode aria-label="Modo">${modes.map(m => `<option value="${esc(m.id)}"${m.id === this.session.mode ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>`);
         }
         for (const option of caps.configOptions || []) {
-            if (option.category === 'mode' && caps.modeSource === 'config') continue; // shown as the mode select
+            if (option.category === 'mode' && modes.length) continue; // o agente manda o modo nas duas formas: um seletor só
             if (option.type === 'boolean') {
                 parts.push(`<label class="ag-toggle"><input type="checkbox" data-config="${esc(option.id)}"${option.currentValue ? ' checked' : ''}> ${esc(option.name)}</label>`);
             } else if (option.options.length) {

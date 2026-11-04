@@ -84,8 +84,9 @@ async function pageAddress(path) {
  * @param {string} [opts.name]
  * @param {string} [opts.kind]
  * @param {(path: string) => void} [opts.onOpenInFiles]
+ * @param {(path: string, dir?: string) => void} [opts.onOpenFile] - abrir um arquivo citado no documento, a partir da pasta dele
  */
-export function openFileViewer({ path = null, text = null, name = null, kind = null, onOpenInFiles = null }) {
+export function openFileViewer({ path = null, text = null, name = null, kind = null, onOpenInFiles = null, onOpenFile = null }) {
     const title = name || String(path).split('/').pop();
     const type = kind || viewerKind(path) || 'code';
     const hasTabs = type === 'markdown' || type === 'html';
@@ -195,6 +196,10 @@ export function openFileViewer({ path = null, text = null, name = null, kind = n
             // A link in a document points next to the document
             const target = mention.dataset.openFile;
             const dir = path ? path.slice(0, path.lastIndexOf('/')) : '';
+            if (onOpenFile) {
+                onOpenFile(target, dir || undefined);
+                return;
+            }
             const full = /^[/~]/.test(target) ? target : `${dir}/${target.replace(/^\.\//, '')}`;
             if (viewerKind(full)) openFileViewer({ path: full, onOpenInFiles });
             else onOpenInFiles?.(full);

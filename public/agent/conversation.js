@@ -11,6 +11,7 @@ import { highlightIn, saveState, restoreState, onCodeClick, copyText, flashCopie
 
 const COPY_TEXT = new WeakMap(); // message actions bar -> the message's Markdown
 import { renderDiff } from './diff.js';
+import { permissionDocument } from './permissionDoc.js';
 import { assessRisk, maskSecrets } from './risk.js';
 
 const TOOL_META = {
@@ -149,6 +150,7 @@ export default class Conversation {
         this.message = null;          // { el, text } assistant message being streamed
         this.thought = null;          // { el, text } reasoning block being streamed
         this.plan = null;             // plan card element (updated in place)
+        this.permissionDocs = new Map();
         this.turn = null;             // container of the current turn
         this.pendingRender = new Set();
         this.frame = 0;
@@ -535,13 +537,18 @@ export default class Conversation {
     renderPermission(d) {
         const risks = assessRisk(d, this.cwd());
         const input = d.input || {};
-        const detail = input.command
-            ? `<div class="ag-cmd"><span>$</span> ${esc(maskSecrets(input.command))}</div>`
-            : d.diffs && d.diffs.length ? d.diffs.map(x => renderDiff(x).html).join('') : '';
+        const doc = permissionDocument(d);
+        if (doc) this.permissionDocs.set(d.permissionId, doc);
+        const detail = doc
+            ? `<div class="ag-perm-doc md">${renderMarkdown(doc.text)}</div>`
+            : input.command
+                ? `<div class="ag-cmd"><span>$</span> ${esc(maskSecrets(input.command))}</div>`
+                : d.diffs && d.diffs.length ? d.diffs.map(x => renderDiff(x).html).join('') : '';
         const el = this.add(`
             <div class="ag-perm-head">${icon('shield', 16)} <span>${esc(d.title)}</span></div>
             ${risks.length ? `<div class="ag-risk" role="alert">${icon('info', 14)} Atenção: ${risks.map(esc).join('; ')}</div>` : ''}
-            ${detail ? `<div class="ag-perm-detail">${detail}</div>` : ''}
+            ${detail ? `<div class="ag-perm-detail${doc ? ' is-doc' : ''}">${detail}</div>` : ''}
+            ${doc ? `<button type="button" class="ag-link ag-perm-open" data-perm-doc>${icon('maximize', 14)} Abrir em tela cheia</button>` : ''}
             <div class="ag-perm-actions">${d.options.map(o => `<button type="button" class="btn ${o.kind === 'allow_once' ? 'btn-primary' : o.kind.startsWith('reject') ? 'btn-ghost' : ''}" data-perm="${esc(d.permissionId)}" data-option="${esc(o.id)}">${esc(o.name)}</button>`).join('')}</div>`,
         `ag-perm${risks.length ? ' risky' : ''}`);
         el.dataset.permissionId = d.permissionId;
@@ -606,6 +613,12 @@ export default class Conversation {
         const view = e.target.closest('[data-media-view]');
         if (view) {
             openLightbox(view.dataset.mediaView, view.dataset.mediaName, view.dataset.mediaDownload);
+            return;
+        }
+        const docButton = e.target.closest('[data-perm-doc]');
+        if (docButton) {
+            const doc = this.permissionDocs.get(docButton.closest('.ag-perm')?.dataset.permissionId);
+            if (doc) import('./fileViewer.js').then(m => m.openFileViewer({ text: doc.text, name: doc.name, kind: 'markdown' }));
             return;
         }
         const perm = e.target.closest('[data-perm]');

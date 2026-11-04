@@ -18,10 +18,12 @@ import { esc } from '../agent/markdown.js';
 const CONVERSATION_EVENT = /^(message\.|tool\.|thought\.|plan\.|permission\.|subagent\.|media)/;
 import { isIphonePortrait } from '../ui/device.js';
 import { attachEdgeFade } from '../ui/edgeFade.js';
+import { watchEdgeBlur } from '../ui/edgeBlur.js';
 import { openFolderMenu } from '../ui/folderPicker.js';
 import { haptic } from '../ui/haptics.js';
 import { keepScreenOn } from '../ui/permissions.js';
 import { openFileViewer, viewerKind } from '../agent/fileViewer.js';
+import { locateFile } from '../agent/locateFile.js';
 import { agentIconName, agentIdFromName } from '../ui/agent-logos.js';
 import { loaderHtml } from '../ui/loading.js';
 
@@ -120,6 +122,19 @@ export default class AgentSession {
 
     // ---------- view ----------
 
+    /** A conversa passa por trás da barra de abas e do título: a altura deles vira espaço no início dela. */
+    watchOverlayHeights() {
+        if (typeof ResizeObserver === 'undefined') return;
+        const head = this.panel.querySelector('.ag-head');
+        const topbar = document.querySelector('.topbar');
+        this.overlayHeights = new ResizeObserver(() => {
+            this.panel.style.setProperty('--ag-head-h', `${head.offsetHeight}px`);
+            document.documentElement.style.setProperty('--ag-topbar-h', `${topbar?.offsetHeight || 0}px`);
+        });
+        this.overlayHeights.observe(head);
+        if (topbar) this.overlayHeights.observe(topbar);
+    }
+
     mount(parent) {
         parent.appendChild(this.panel);
         this.panel.innerHTML = `
@@ -146,6 +161,8 @@ export default class AgentSession {
                     <button type="button" class="ag-jump" hidden aria-label="Ir para o fim">${icon('chevronDown', 18)}</button>
                     <div class="ag-pending" hidden></div>
                     <div class="ag-composer"></div>
+                    <div class="ag-edge ag-edge-top" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                    <div class="ag-edge ag-edge-bottom" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
                 </div>
                 <aside class="ag-side" aria-label="Painel do agente"></aside>
                 <div class="ag-side-scrim" hidden></div>
@@ -255,6 +272,8 @@ export default class AgentSession {
             this.el.log.scrollTop = this.el.log.scrollHeight;
         });
         this.logFade = attachEdgeFade(this.el.log);
+        this.watchOverlayHeights();
+        watchEdgeBlur();
         this.probeEvery = setInterval(() => {
             if (document.visibilityState === 'visible') this.probeConnection();
         }, 30000);
@@ -803,8 +822,8 @@ export default class AgentSession {
         }
     }
 
-    async searchFiles(query) {
-        const params = new URLSearchParams({ source: 'local', path: this.cwd || '~', q: query });
+    async searchFiles(query, folder = this.cwd) {
+        const params = new URLSearchParams({ source: 'local', path: folder || '~', q: query });
         const r = await fetch(`${basePath()}/api/files/search?${params}`, { credentials: 'same-origin', cache: 'no-store' });
         if (!r.ok) return [];
         return (await r.json()).results || [];
@@ -817,10 +836,40 @@ export default class AgentSession {
     }
 
     /** Arquivo citado na conversa: abre formatado em tela cheia; o que não tem prévia vai para os Arquivos. */
-    openFile(path, { folder = false } = {}) {
-        const full = this.fullPath(path);
-        if (folder || !viewerKind(full)) return this.openInFiles(full);
-        return openFileViewer({ path: full, onOpenInFiles: p => this.openInFiles(p) });
+    async openFile(path, { folder = false, cwd = this.cwd } = {}) {
+        const direct = this.fullPath(path);
+        if (folder) return this.openInFiles(direct);
+        const place = await locateFile(path, {
+            cwd,
+            exists: p => this.fileExists(p),
+            search: name => this.searchFiles(name, cwd),
+        });
+        if (place.status === 'found') return this.showFile(place.path);
+        if (place.status === 'missing') {
+            toast(`Não achei "${place.name}" em ${cwd || 'nesta pasta'}. Ele pode ter sido apagado ou estar em outra pasta.`, { tone: 'error' });
+            return null;
+        }
+        const folderOf = p => p.slice(0, p.lastIndexOf('/')) || '/';
+        return showMenu(place.paths.map(p => ({ label: folderOf(p), run: () => this.showFile(p) })), {
+            x: window.innerWidth / 2, y: window.innerHeight / 2, label: 'Qual destes arquivos?',
+        });
+    }
+
+    showFile(full) {
+        if (!viewerKind(full)) return this.openInFiles(full);
+        return openFileViewer({
+            path: full,
+            onOpenInFiles: p => this.openInFiles(p),
+            onOpenFile: (p, dir) => this.openFile(p, { cwd: dir }),
+        });
+    }
+
+    async fileExists(full) {
+        const params = new URLSearchParams({ source: 'local', path: full });
+        const r = await fetch(`${basePath()}/api/files/stat?${params}`, { credentials: 'same-origin', cache: 'no-store' });
+        if (!r.ok) return false;
+        const info = await r.json().catch(() => ({}));
+        return info.type !== 'dir';
     }
 
     /** Opens the file's folder in an "Arquivos" tab. */

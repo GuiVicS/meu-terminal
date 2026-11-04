@@ -193,9 +193,10 @@ export default class DesktopSidebar {
     /** Você está olhando a conversa: ela deixa de ser não lida (com a janela à vista). */
     clearCurrentUnread(list) {
         const active = this.ws.active;
-        const acp = active?.kind === 'agent' ? active.session?.acpSessionId : null;
+        const open = active?.kind === 'agent' ? active : null;
+        const row = open && list.find(c => c.acpSessionId === open.session?.acpSessionId || (c.sessionId && c.sessionId === open.agentSessionId));
+        const acp = row?.acpSessionId || open?.session?.acpSessionId || null;
         if (this.keepUnread && this.keepUnread !== acp) this.keepUnread = null;
-        const row = acp && list.find(c => c.acpSessionId === acp);
         if (!row?.unread || this.keepUnread === acp || document.visibilityState !== 'visible') return;
         row.unread = false;
         updateConversation(this.agent, acp, { unread: false }).catch(() => {});

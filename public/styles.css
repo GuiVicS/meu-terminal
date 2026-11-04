@@ -4097,8 +4097,8 @@ audio.fm-media { width: min(520px, 90%); }
     width: min(760px, calc(100% - 48px)); margin: 0 auto 18px; box-sizing: border-box;
     border: 1px solid var(--border); border-radius: 22px; background: var(--surface);
     box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 10px 10px 8px 14px;
-    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; column-gap: 6px;
-    grid-template-areas: "queue queue queue queue" "suggest suggest suggest suggest" "images images images images" "input input input input" "attach selectors stop send";
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; column-gap: 6px;
+    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "input input input input input" "attach selectors mic stop send";
 }
 :root[data-desktop] .ag-composer:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
 :root[data-desktop] .ag-composer .ag-queue { grid-area: queue; }
@@ -4443,7 +4443,7 @@ audio.fm-media { width: min(520px, 90%); }
     isolation: isolate; width: min(820px, calc(100% - 48px)); padding: 0; bottom: 12px; border: none; border-radius: 0; box-shadow: none;
     background: none; background-color: transparent; background-image: none; -webkit-backdrop-filter: none; backdrop-filter: none;
     grid-template-rows: auto auto auto auto auto auto;
-    grid-template-areas: "queue queue queue queue" "suggest suggest suggest suggest" "images images images images" "input input input input" "attach . stop send" "selectors selectors selectors selectors";
+    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "input input input input input" "attach . mic stop send" "selectors selectors selectors selectors selectors";
 }
 :root[data-desktop] .ag-composer:focus-within { box-shadow: none; border-color: transparent; }
 :root[data-desktop] .ag-composer::before {
@@ -4481,7 +4481,7 @@ audio.fm-media { width: min(520px, 90%); }
 /* com conversa: campo fino, tudo numa linha, e ele só cresce para cima conforme o texto */
 :root[data-desktop] .ag-composer {
     grid-template-rows: auto auto auto auto auto;
-    grid-template-areas: "queue queue queue queue" "suggest suggest suggest suggest" "images images images images" "attach input stop send" "selectors selectors selectors selectors";
+    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "attach input mic stop send" "selectors selectors selectors selectors selectors";
 }
 :root[data-desktop] .ag-composer::before { grid-row: 3 / 5; }
 :root[data-desktop] .ag-composer .ag-attach-btn { align-self: end; margin: 0 0 7px 7px; }
@@ -4493,7 +4493,7 @@ audio.fm-media { width: min(520px, 90%); }
 /* conversa nova: o campo grande, com os botões numa linha embaixo do texto */
 :root[data-desktop] .ag-is-empty .ag-composer {
     grid-template-rows: auto auto auto auto auto auto;
-    grid-template-areas: "queue queue queue queue" "suggest suggest suggest suggest" "images images images images" "input input input input" "attach . stop send" "selectors selectors selectors selectors";
+    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "input input input input input" "attach . mic stop send" "selectors selectors selectors selectors selectors";
 }
 :root[data-desktop] .ag-is-empty .ag-composer::before { grid-row: 3 / 6; }
 :root[data-desktop] .ag-is-empty .ag-composer textarea { min-height: 84px; padding: 16px 20px 4px; line-height: inherit; }
@@ -4708,3 +4708,84 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-liquid][data-desktop] .ag-composer::before { display: none; }
 :root[data-liquid][data-desktop] .ag-composer > .liquid-host > .lg-glass { position: relative; inset: auto; grid-column: 1 / -1; grid-row: 3 / 5; border-radius: 18px; }
 :root[data-liquid][data-desktop] .ag-is-empty .ag-composer > .liquid-host > .lg-glass { grid-row: 3 / 6; }
+
+/* ---- microfone do chat: ondas no lugar do campo enquanto ouve ---- */
+.ag-wave { flex: 1; min-width: 0; width: 100%; min-height: 40px; color: var(--text); }
+.ag-wave[hidden] { display: none; }
+.ag-recording .ag-input-row textarea { display: none; }
+.ag-recording .ag-send { opacity: 0.4; pointer-events: none; }
+.ag-mic { border-radius: 50%; color: var(--text-2); }
+.ag-mic.recording { background: var(--danger); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ag-mic.recording { animation: none; } }
+:root[data-iphone] .ag-input-row .ag-wave { grid-area: text; }
+:root[data-desktop] .ag-composer .ag-wave { grid-area: input; align-self: center; }
+:root[data-desktop] .ag-composer .ag-mic { grid-area: mic; width: 34px; height: 34px; align-self: end; margin: 0 6px 7px 0; border-radius: 10px; }
+:root[data-desktop] .ag-composer .ag-mic.recording { color: #fff; }
+:root[data-desktop] .ag-is-empty .ag-composer .ag-mic { align-self: center; margin: 0 6px 12px 0; }
+
+/* ---- pontas da conversa: desfoque progressivo, forte na borda e sumindo aos poucos, sem escurecer ---- */
+.ag-edge { display: none; position: absolute; left: 0; right: 0; z-index: 2; pointer-events: none; --edge-dir: to bottom; }
+.ag-edge i { position: absolute; inset: 0; }
+.ag-edge i:nth-child(1) { --edge-blur: 1.5px; --edge-full: 62%; --edge-end: 100%; }
+.ag-edge i:nth-child(2) { --edge-blur: 3px; --edge-full: 44%; --edge-end: 82%; }
+.ag-edge i:nth-child(3) { --edge-blur: 6px; --edge-full: 26%; --edge-end: 62%; }
+.ag-edge i:nth-child(4) { --edge-blur: 12px; --edge-full: 10%; --edge-end: 42%; }
+.ag-edge i {
+    -webkit-backdrop-filter: blur(var(--edge-blur)); backdrop-filter: blur(var(--edge-blur));
+    -webkit-mask-image: linear-gradient(var(--edge-dir), #000 var(--edge-full), transparent var(--edge-end));
+    mask-image: linear-gradient(var(--edge-dir), #000 var(--edge-full), transparent var(--edge-end));
+}
+.ag-edge-top { top: 0; height: var(--ag-edge-top, 48px); }
+.ag-edge-bottom { bottom: 0; height: calc(var(--ag-composer-h, 100px) + 40px); --edge-dir: to top; }
+.ag-is-empty .ag-edge { display: none !important; }
+/* Só no PC por enquanto: ainda sem medição de fluidez no iPhone real */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root[data-desktop] .ag-edge { display: block; }
+    :root[data-desktop] .ag-log.edge-fade { -webkit-mask-image: none; mask-image: none; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    .ag-edge { display: none !important; }
+}
+
+/* Versão leve, quando o desfoque trava o aparelho (ui/edgeBlur.js): a película fica, a conversa esmaece */
+:root[data-edge-lite] .ag-edge i { display: none; }
+:root[data-edge-lite] .ag-edge-bottom { display: none; }
+:root[data-edge-lite] .ag-log.edge-fade {
+    -webkit-mask-image: linear-gradient(to bottom, transparent var(--ag-over, 0px), #000 calc(var(--ag-over, 0px) + 24px), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
+    mask-image: linear-gradient(to bottom, transparent var(--ag-over, 0px), #000 calc(var(--ag-over, 0px) + 24px), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
+}
+
+/* Topo como o Reels (PC): a conversa vai até a borda, atrás das barras, com o desfoque crescendo em direção
+   à borda e uma película suave da cor do fundo (escura no tema escuro, clara no claro) */
+:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active {
+    --ag-over: calc(var(--ag-topbar-h, 64px) + var(--ag-head-h, 48px));
+    --ag-edge-top: calc(var(--ag-over) + 72px);
+}
+.ag-edge-top i:nth-child(1) { --edge-blur: 1.5px; --edge-full: 74%; --edge-end: 100%; }
+.ag-edge-top i:nth-child(2) { --edge-blur: 3px; --edge-full: 64%; --edge-end: 90%; }
+.ag-edge-top i:nth-child(3) { --edge-blur: 6px; --edge-full: 54%; --edge-end: 80%; }
+.ag-edge-top i:nth-child(4) { --edge-blur: 18px; --edge-full: 44%; --edge-end: 70%; }
+.ag-edge-top::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(to bottom,
+        color-mix(in srgb, var(--bg) 52%, transparent) 0%,
+        color-mix(in srgb, var(--bg) 38%, transparent) 45%,
+        color-mix(in srgb, var(--bg) 12%, transparent) 75%,
+        transparent 100%);
+}
+:root[data-desktop] body:has(.agent-panel.active):not(:has(.terminal-panels.split)) .topbar {
+    position: relative; z-index: 20; margin-bottom: calc(-1 * var(--ag-topbar-h, 64px)); background: transparent; border-bottom: none;
+}
+:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-head {
+    position: absolute; z-index: 6; top: var(--ag-topbar-h, 64px); left: 0; right: 0; background: transparent; border-bottom: none;
+}
+:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-banner {
+    position: absolute; z-index: 6; top: var(--ag-over); left: 0; right: 0;
+}
+:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-side { margin-top: var(--ag-over); }
+:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-log { padding-top: calc(var(--ag-over) + 12px); }
+:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active.ag-is-empty .ag-log { padding-top: var(--ag-over); }
+
+/* plano para aprovar: já formatado, com a opção de abrir em tela cheia */
+.ag-perm-detail.is-doc { max-height: 420px; padding: 4px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.ag-perm-open { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 2px; }
