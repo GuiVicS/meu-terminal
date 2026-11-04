@@ -18,7 +18,7 @@ import { agentIconName } from './agent-logos.js';
 import { fetchConversations, conversationRows, updateConversation } from '../agent/conversations.js';
 import { conversationMenuItems } from '../agent/conversationMenu.js';
 import { haptic } from './haptics.js';
-import { hasTextSelection } from './textSelection.js';
+import { hasTextSelection, watchTextSelection } from './textSelection.js';
 import { attachEdgeFade } from './edgeFade.js';
 import { createAccountRow } from './accountRow.js';
 
@@ -26,6 +26,7 @@ const root = document.documentElement;
 const RECENT_LIMIT = 15;
 const LONG_PRESS_MS = 500;
 const SLOP = 10;              // px antes de decidir se o gesto é horizontal
+const HOLD_MS = 300; // parado por mais que isso antes de mover: é seleção de texto, não deslize
 const DECELERATION = 0.998;   // projeção de momento (apple-design §6)
 
 // Ícones de traço próprios: o ☰ de traços decrescentes e o balão, como no app do Claude
@@ -399,6 +400,7 @@ export default class ConversationDrawer {
      * tabelas) nem de campos de texto.
      */
     bindGesture() {
+        watchTextSelection();
         let g = null; // { x, y, p0, decided, horizontal, samples }
         const ignore = t => !!t.closest?.('input, textarea, select, [contenteditable="true"], .menu, .ag-sheet, dialog')
             || (() => { // um bloco rolado na horizontal fica com o gesto
@@ -425,8 +427,8 @@ export default class ConversationDrawer {
             const dy = e.clientY - g.y;
             if (!g.decided) {
                 if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
-                // A seleção pode ter nascido depois do toque (segurar a palavra e arrastar)
-                if (g.p0 === 0 && hasTextSelection()) { g = null; return; }
+                // Segurar antes de mover é selecionar, não deslizar; e a seleção pode ter nascido depois do toque
+                if (g.p0 === 0 && (e.timeStamp - g.samples[0][1] > HOLD_MS || hasTextSelection())) { g = null; return; }
                 g.decided = true;
                 // horizontal, e no sentido que muda algo (abrir se fechada, fechar se aberta)
                 g.horizontal = Math.abs(dx) > Math.abs(dy) * 1.2 && (g.p0 > 0 ? true : dx > 0);
@@ -436,6 +438,13 @@ export default class ConversationDrawer {
                 this.el.classList.add('cv-dragging');
             }
             if (!g.horizontal) return;
+            // A seleção apareceu no meio do arrasto: a lista volta e o gesto é dela
+            if (g.p0 === 0 && hasTextSelection()) {
+                g = null;
+                this.el.classList.remove('cv-dragging');
+                this.animateTo(0, 0);
+                return;
+            }
             e.preventDefault();
             g.samples.push([e.clientX, e.timeStamp]);
             if (g.samples.length > 6) g.samples.shift();
