@@ -6,6 +6,8 @@
  * Mouse: click selects, double click opens, right click menu, drag to move, drop to upload.
  * Same interface as TerminalSession, so tabs, status bar and menus work with it.
  */
+import { openFileViewer, viewerKind } from '../agent/fileViewer.js';
+import { cleanPath, looksLikePath } from '../ui/pathInput.js';
 import { STATE, SESSION_COLORS } from './session.js';
 import StorageManager from './storage.js';
 import { icon } from '../ui/icons.js';
@@ -317,6 +319,8 @@ export default class FilesSession {
                         <button type="button" class="icon-btn fm-wide" data-act="forward" aria-label="Avançar" disabled>${icon('chevronRight', 18)}</button>
                         <button type="button" class="icon-btn" data-act="up" aria-label="Pasta acima">${icon('arrowUp', 18)}</button>
                         <nav class="fm-crumbs" aria-label="Caminho"></nav>
+                        <input type="text" class="fm-path-input" hidden aria-label="Caminho da pasta" placeholder="Cole ou digite o caminho" autocapitalize="off" autocorrect="off" spellcheck="false">
+                        <button type="button" class="icon-btn" data-act="edit-path" aria-label="Colar ou digitar um caminho" title="Colar ou digitar um caminho (Ctrl+L)">${icon('pencil', 16)}</button>
                         <button type="button" class="icon-btn" data-act="search" aria-label="Buscar">${icon('search', 18)}</button>
                         <button type="button" class="icon-btn fm-wide" data-act="new-folder" aria-label="Nova pasta">${icon('folderPlus', 18)}</button>
                         <button type="button" class="icon-btn fm-wide" data-act="upload" aria-label="Enviar arquivos">${icon('upload', 18)}</button>
@@ -358,6 +362,7 @@ export default class FilesSession {
             main: q('.fm-main'),
             toolbar: q('.fm-toolbar'),
             crumbs: q('.fm-crumbs'),
+            pathInput: q('.fm-path-input'),
             progress: q('.fm-progress'),
             search: q('.fm-search'),
             searchInput: q('.fm-search input'),
@@ -881,8 +886,90 @@ export default class FilesSession {
 
     // ---------- toolbar & bars ----------
 
+    /** Troca o caminho por um campo, para colar ou digitar. */
+    editPath() {
+        const { pathInput, crumbs } = this.el;
+        crumbs.hidden = true;
+        pathInput.hidden = false;
+        pathInput.value = this.path || '';
+        pathInput.focus();
+        pathInput.select();
+    }
+
+    closePathEdit() {
+        this.el.pathInput.hidden = true;
+        this.el.crumbs.hidden = false;
+    }
+
+    /** Vai para o caminho: pasta abre; arquivo abre a pasta dele, com ele selecionado. */
+    async goToPath(text) {
+        let path = cleanPath(text);
+        if (!path) return false;
+        if (!/^[/~]/.test(path) && this.path) path = `${this.path.replace(/\/+$/, '')}/${path}`;
+        try {
+            const data = await request('GET', 'list', { params: { source: this.source, path } });
+            this.closeResults();
+            await this.navigate(this.source, data.path || path);
+            return true;
+        } catch { /* pode ser um arquivo */ }
+        try {
+            const info = await request('GET', 'stat', { params: { source: this.source, path } });
+            const full = info.path || path;
+            this.closeResults();
+            await this.navigate(this.source, full.slice(0, full.lastIndexOf('/')) || '/');
+            this.selection.add(full);
+            this.renderList();
+            return true;
+        } catch {
+            toast(`Não achei ${path}.`, { tone: 'error' });
+            return false;
+        }
+    }
+
+    bindPathInput() {
+        const { pathInput } = this.el;
+        const submit = async () => {
+            if (await this.goToPath(pathInput.value)) this.closePathEdit();
+            else pathInput.select();
+        };
+        pathInput.addEventListener('keydown', e => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                this.closePathEdit();
+            }
+        });
+        // Colou um caminho inteiro no campo: já vai
+        pathInput.addEventListener('paste', e => {
+            const pasted = e.clipboardData?.getData('text') || '';
+            const replacesAll = pathInput.selectionStart === 0 && pathInput.selectionEnd === pathInput.value.length;
+            if (!replacesAll || !looksLikePath(pasted)) return;
+            e.preventDefault();
+            pathInput.value = cleanPath(pasted);
+            submit();
+        });
+        pathInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                if (document.activeElement !== pathInput && !pathInput.hidden) this.closePathEdit();
+            }, 150);
+        });
+        // Ctrl+V na lista, sem nada copiado aqui dentro: se for um caminho, vai até ele
+        this.panel.addEventListener('paste', e => {
+            if (e.target.closest?.('input, textarea, dialog, [contenteditable]') || shared.clipboard) return;
+            const pasted = e.clipboardData?.getData('text') || '';
+            if (!looksLikePath(pasted)) return;
+            e.preventDefault();
+            this.goToPath(pasted);
+        });
+    }
+
     bindToolbar() {
+        this.bindPathInput();
         this.el.toolbar.addEventListener('click', e => {
+            if (e.target === this.el.crumbs) return this.editPath(); // o vazio ao lado do caminho
             const crumb = e.target.closest('.fm-crumb');
             if (crumb) {
                 const c = this.crumbList[Number(crumb.dataset.i)];
@@ -900,6 +987,7 @@ export default class FilesSession {
                 case 'forward': return this.goForward();
                 case 'up': return this.goUp();
                 case 'search': return this.openSearch();
+                case 'edit-path': return this.editPath();
                 case 'new-folder': return this.newFolder();
                 case 'upload': return this.pickUpload();
                 case 'view': return this.setPref('view', this.prefs.view === 'grid' ? 'list' : 'grid');
@@ -1239,6 +1327,10 @@ export default class FilesSession {
             }
             if (mod && !e.altKey) {
                 const k = e.key.toLowerCase();
+                if (k === 'l') {
+                    handled();
+                    return this.editPath();
+                }
                 if (k === 'a') {
                     handled();
                     return this.selectAll();
@@ -1397,6 +1489,7 @@ export default class FilesSession {
         const hint = k => (coarse() ? '' : k);
         const list = one ? [
             { label: one.type === 'dir' ? 'Abrir' : 'Abrir / visualizar', icon: one.type === 'dir' ? 'folderOpen' : 'eye', hint: hint('Enter'), run: () => this.open(one) },
+            ...(this.canRun(one) ? [{ label: 'Executar página', icon: 'play', run: () => this.runPage(one) }] : []),
             ...(one.type === 'file' && !['text', 'code', 'json'].includes(kind)
                 ? [{ label: 'Abrir como texto', icon: 'fileText', run: () => this.openViewer(one, { asText: true }) }] : []),
             ...(this.results ? [{ label: 'Abrir pasta do item', icon: 'folderInput', run: () => {
@@ -1890,6 +1983,16 @@ export default class FilesSession {
         return this.visible.filter(e => e.type === 'file' && MEDIA.has(kindOf(e)));
     }
 
+    /** Página HTML do servidor: roda isolada no próprio app, sem navegador embutido. */
+    canRun(entry) {
+        return entry?.type !== 'dir' && entry?.source === 'local' && viewerKind(entry.path) === 'html';
+    }
+
+    runPage(entry) {
+        if (this.viewer?.dirty) toast('Mostrando a última versão salva. Salve para ver as mudanças.');
+        openFileViewer({ path: entry.path, onOpenInFiles: () => {} });
+    }
+
     async openViewer(entry, { asText = false } = {}) {
         if (this.viewer && !(await this.closeViewer())) return;
         const kind = asText ? 'text' : kindOf(entry);
@@ -1903,6 +2006,7 @@ export default class FilesSession {
             <div class="fm-viewer-bar">
                 <button type="button" class="icon-btn" data-v="close" aria-label="Fechar">${icon('chevronLeft', 20)}</button>
                 <div class="fm-viewer-title"><span class="fm-viewer-name"></span><small class="fm-viewer-meta"></small></div>
+                ${this.canRun(entry) ? `<button type="button" class="icon-btn fm-run" data-v="run" aria-label="Executar página" title="Executar página">${icon('play', 18)}</button>` : ''}
                 <button type="button" class="btn btn-primary btn-sm fm-save" data-v="save" hidden>${icon('save', 15)} Salvar</button>
                 <button type="button" class="icon-btn" data-v="wrap" hidden aria-label="Quebrar linhas">${icon('fileText', 18)}</button>
                 <button type="button" class="icon-btn" data-v="download" aria-label="Baixar">${icon('download', 18)}</button>
@@ -1919,6 +2023,7 @@ export default class FilesSession {
             const act = btn.dataset.v;
             if (act === 'close') this.closeViewer().then(ok => ok && this.focus());
             else if (act === 'save') this.saveText();
+            else if (act === 'run') this.runPage(entry);
             else if (act === 'wrap') {
                 v.wrap = !v.wrap;
                 prefs.set('files-wrap', v.wrap);

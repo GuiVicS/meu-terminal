@@ -1,13 +1,16 @@
 /**
  * liquidGlass.js
  * Vidro líquido (glisse) nas peças que flutuam. No PC com Chromium ele deforma o que passa atrás; no
- * iPhone o Safari não deixa filtrar o fundo vivo, então ficam o desfoque e o brilho na borda. Nos
- * outros casos o vidro de sempre continua, sem baixar nada. A conversa de propósito não é marcada
+ * iPhone o Safari não deixa filtrar o fundo vivo, então a lente vem de uma cópia da conversa
+ * (lensMirror.js). Nos outros casos o vidro de sempre continua, sem baixar nada. A conversa de propósito não é marcada
  * como fundo do glisse: isso filtraria o chat inteiro a cada quadro enquanto ele rola.
  * O pacote (React + glisse) vem de public/vendor/glisse.bundle.js, carregado depois da tela abrir.
  */
+import { attachLens } from './lensMirror.js';
+
 const DESKTOP_TARGETS = '.ag-composer, .tabstrip, .topbar-actions .icon-btn, .menu';
 const IPHONE_TARGETS = '.ag-composer, .session-pill, .topbar-actions .icon-btn, .ag-jump, .menu';
+const IPHONE_LENS = '.ag-composer, .session-pill, .topbar-actions .icon-btn, .ag-jump'; // o menu não fica sobre a conversa
 const mounted = new Map(); // peça -> { host, stop }
 
 export function liquidGlassSupported() {
@@ -30,7 +33,8 @@ export async function startLiquidGlass() {
         return false; // sem o pacote, fica o vidro de sempre
     }
     document.documentElement.setAttribute('data-liquid', '');
-    const targets = document.documentElement.hasAttribute('data-iphone') ? IPHONE_TARGETS : DESKTOP_TARGETS;
+    const iphone = document.documentElement.hasAttribute('data-iphone');
+    const targets = iphone ? IPHONE_TARGETS : DESKTOP_TARGETS;
 
     const scan = () => {
         for (const [el, { host, stop }] of mounted) {
@@ -44,7 +48,9 @@ export async function startLiquidGlass() {
             const host = document.createElement('span');
             host.className = 'liquid-host';
             el.prepend(host);
-            mounted.set(el, { host, stop: mountGlass(host) });
+            const stopGlass = mountGlass(host);
+            const stopLens = iphone && el.matches(IPHONE_LENS) ? attachLens(el) : null;
+            mounted.set(el, { host, stop: () => { stopLens?.(); stopGlass(); } });
         });
     };
     scan();

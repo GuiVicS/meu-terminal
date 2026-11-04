@@ -99,9 +99,9 @@
 
     /* hard offset shadows from the theme */
     --shadow-color: #000000;
-    --shadow-sm: 4px 4px 0 0 var(--shadow-color);
-    --shadow: 4px 4px 0 0 var(--shadow-color);
-    --shadow-lg: 6px 6px 0 0 var(--shadow-color);
+    --shadow-sm: none;
+    --shadow: none;
+    --shadow-lg: none;
 
     /* session identity colors */
     --c-green: #5CEB91;
@@ -249,7 +249,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
     background: var(--accent);
     color: var(--accent-fg);
     border: 1.5px solid var(--shadow-color);
-    box-shadow: 2px 2px 0 0 var(--shadow-color);
+    box-shadow: none;
     flex-shrink: 0;
 }
 .brand-title { font-weight: 600; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -613,7 +613,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
 }
 .btn-primary { background: var(--accent); color: var(--accent-fg); box-shadow: var(--shadow-sm); }
 .btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:active { transform: translate(4px, 4px); box-shadow: 0 0 0 0 var(--shadow-color); }
+.btn-primary:active { transform: translate(4px, 4px); box-shadow: none; }
 .btn-primary:disabled { opacity: 0.6; cursor: progress; }
 .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
 .btn-ghost:hover { background: var(--surface-2); }
@@ -706,7 +706,7 @@ button { cursor: pointer; background: none; border: none; -webkit-tap-highlight-
     background: var(--accent);
     color: var(--accent-fg);
     border-color: var(--shadow-color);
-    box-shadow: 2px 2px 0 0 var(--shadow-color);
+    box-shadow: none;
 }
 .shortcut-key.icon-key { display: grid; place-items: center; color: var(--text-2); }
 .shortcut-key.icon-key.recording {
@@ -1343,7 +1343,7 @@ body.page-login { overflow: auto; }
     background: var(--accent);
     color: var(--accent-fg);
     border: 1.5px solid var(--shadow-color);
-    box-shadow: 2px 2px 0 0 var(--shadow-color);
+    box-shadow: none;
 }
 .port-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .port-chips:empty { display: none; }
@@ -1417,7 +1417,7 @@ body.page-login { overflow: auto; }
 .btn-sm { height: 34px; padding: 0 14px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
 .btn-primary.btn-sm:active { transform: translate(2px, 2px); }
 .btn-danger { background: var(--danger); color: #fff; box-shadow: var(--shadow-sm); }
-.btn-danger:active { transform: translate(4px, 4px); box-shadow: 0 0 0 0 var(--shadow-color); }
+.btn-danger:active { transform: translate(4px, 4px); box-shadow: none; }
 .icon-btn.danger { color: var(--danger); }
 .prompt-dialog { width: min(440px, calc(100vw - 32px)); }
 .prompt-form { display: flex; flex-direction: column; min-height: 0; }
@@ -1610,7 +1610,7 @@ body.page-login { overflow: auto; }
     border-radius: 50%; background: var(--accent); color: var(--accent-fg); border: 1.5px solid var(--shadow-color); box-shadow: var(--shadow);
     transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.fm-fab:active { transform: translate(4px, 4px); box-shadow: 0 0 0 0 var(--shadow-color); }
+.fm-fab:active { transform: translate(4px, 4px); box-shadow: none; }
 .fm.has-bars .fm-fab { bottom: 84px; }
 .fm-uploads {
     position: absolute; right: 16px; bottom: 86px; z-index: 7; width: min(360px, calc(100% - 32px)); max-height: 46%;
@@ -2104,7 +2104,7 @@ audio.fm-media { width: min(520px, 90%); }
 .ui-select:hover:not(:disabled) .ui-select-chevron { color: var(--accent); }
 .ui-select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 /* Open: lifts with the theme's hard shadow */
-.ui-select.open { border-color: var(--shadow-color); box-shadow: 3px 3px 0 0 var(--shadow-color); transform: translate(-1px, -1px); }
+.ui-select.open { border-color: var(--shadow-color); box-shadow: none; transform: translate(-1px, -1px); }
 .ui-select.open .ui-select-chevron { transform: rotate(180deg); color: var(--accent); }
 .ui-select:active:not(:disabled) { transform: translate(1px, 1px); box-shadow: none; }
 .ui-select:disabled { opacity: .45; cursor: not-allowed; }
@@ -2119,7 +2119,7 @@ audio.fm-media { width: min(520px, 90%); }
 }
 .ag-select .ui-select.open { box-shadow: none; transform: none; }
 .ag-select:has(.ui-select.open), .ag-select:hover:has(.ui-select:not(:disabled)) { border-color: var(--accent); color: var(--accent); }
-.ag-select:has(.ui-select.open) { box-shadow: 2px 2px 0 0 var(--shadow-color); }
+.ag-select:has(.ui-select.open) { box-shadow: none; }
 .ag-select .ui-select:focus-visible { box-shadow: none; }
 .ag-select:has(.ui-select:focus-visible) { box-shadow: 0 0 0 3px var(--accent-soft); }
 .ag-select { cursor: pointer; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
@@ -2167,7 +2167,7 @@ audio.fm-media { width: min(520px, 90%); }
 .ui-select-menu.sheet {
     left: 0; right: 0; bottom: 0; top: auto; width: 100%; max-width: none; min-width: 0; max-height: 72vh; max-height: 72dvh;
     padding: 6px 10px calc(14px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0;
-    border-width: 1.5px 0 0; box-shadow: 0 -4px 0 0 var(--shadow-color);
+    border-width: 1.5px 0 0; box-shadow: none;
     transform-origin: bottom center; animation: ui-sheet-in 240ms cubic-bezier(.2, .9, .3, 1);
 }
 .ui-select-menu.sheet.closing { animation: ui-sheet-out 160ms var(--ease) forwards; }
@@ -2197,7 +2197,7 @@ audio.fm-media { width: min(520px, 90%); }
     background: repeating-conic-gradient(var(--surface-2) 0% 25%, var(--surface) 0% 50%) 50% / 16px 16px;
     box-shadow: var(--shadow-sm); cursor: zoom-in; transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.ag-media-img button:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 0 var(--shadow-color); }
+.ag-media-img button:hover { transform: translate(-1px, -1px); box-shadow: none; }
 .ag-media-img button:active { transform: translate(2px, 2px); box-shadow: none; }
 .ag-media-img img { display: block; max-width: 100%; max-height: 280px; object-fit: contain; animation: ag-media-in 300ms var(--ease); }
 @keyframes ag-media-in { from { opacity: 0; transform: scale(.98); } }
@@ -2429,7 +2429,7 @@ audio.fm-media { width: min(520px, 90%); }
 /* images inside answers */
 .md-img { display: inline-block; max-width: min(100%, 520px); margin: 4px 0; padding: 0; border: 1px solid var(--border); border-radius: 12px;
     overflow: hidden; background: var(--surface-2); cursor: zoom-in; vertical-align: top; transition: transform 160ms var(--ease, ease-out), box-shadow 160ms; }
-.md-img:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); }
+.md-img:hover { transform: translateY(-2px); box-shadow: none; }
 .md-img img { display: block; max-width: 100%; height: auto; }
 
 /* actions under an answer */
@@ -2678,7 +2678,7 @@ audio.fm-media { width: min(520px, 90%); }
     border-radius: 50%; background: var(--accent); color: var(--accent-fg); border: 1.5px solid var(--shadow-color); box-shadow: var(--shadow);
     transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.nt-fab:active { transform: translate(4px, 4px); box-shadow: 0 0 0 0 var(--shadow-color); }
+.nt-fab:active { transform: translate(4px, 4px); box-shadow: none; }
 
 /* Phones: one pane at a time (list, then the note on top of it) */
 @media (max-width: 719px) {
@@ -2741,7 +2741,7 @@ audio.fm-media { width: min(520px, 90%); }
 .admin-topbar .brand { display: flex; padding: 0; }
 .admin-topbar .brand-icon {
     width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: none;
-    background: var(--accent); color: var(--accent-fg); border: 1.5px solid var(--shadow-color); box-shadow: 2px 2px 0 0 var(--shadow-color);
+    background: var(--accent); color: var(--accent-fg); border: 1.5px solid var(--shadow-color); box-shadow: none;
 }
 .admin-nav-toggle { margin-left: auto; }
 @media (min-width: 900px) { .admin-nav-toggle { display: none; } }
@@ -2875,7 +2875,8 @@ audio.fm-media { width: min(520px, 90%); }
         inset -1px -1px 0.5px -0.5px rgba(255, 255, 255, 0.22),
         inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
         inset 0 0 14px rgba(255, 255, 255, 0.05);
-    --glass-shadow: 0 10px 28px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.22);
+    --glass-shadow: 0 4px 14px rgba(0, 0, 0, 0.20);
+    --float-shadow: var(--glass-shadow);
     --glass-blur: blur(14px) saturate(200%) brightness(1.06);
 }
 [data-theme="light"] {
@@ -2894,7 +2895,8 @@ audio.fm-media { width: min(520px, 90%); }
         inset -1px -1px 0.5px -0.5px rgba(255, 255, 255, 0.75),
         inset 0 0 0 0.5px rgba(0, 0, 0, 0.07),
         inset 0 0 16px rgba(255, 255, 255, 0.40);
-    --glass-shadow: 0 10px 26px rgba(30, 30, 60, 0.14), 0 1px 4px rgba(30, 30, 60, 0.10);
+    --glass-shadow: 0 4px 12px rgba(30, 30, 60, 0.08);
+    --float-shadow: var(--glass-shadow);
     --glass-blur: blur(14px) saturate(190%) brightness(1.04);
 }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -3750,7 +3752,7 @@ audio.fm-media { width: min(520px, 90%); }
 .cv-new {
     display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 24px 0 20px; border-radius: 26px;
     background: #FFFFFF; color: #111111; font-size: 17px; font-weight: 500;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--float-shadow);
 }
 [data-theme="light"] .cv-new { background: #111111; color: #FFFFFF; }
 .cv-new:active { transform: scale(0.97); }
@@ -4049,7 +4051,7 @@ audio.fm-media { width: min(520px, 90%); }
 .dk-agents[hidden] { display: none; }
 .dk-agent { flex: 1; min-width: 0; height: 26px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2);
     font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dk-agent[aria-selected="true"] { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.dk-agent[aria-selected="true"] { background: var(--bg); color: var(--text); box-shadow: none; }
 .dk-scroll { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; scrollbar-width: thin; }
 .dk-section { display: flex; align-items: baseline; gap: 6px; margin: 14px 8px 4px; font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: none; letter-spacing: 0; }
 .dk-folder { font: 11px var(--font-mono, monospace); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -4076,7 +4078,7 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .tab {
     flex: 0 1 220px; min-width: 120px; height: 36px; padding: 0 4px 0 12px; border: 1px solid transparent; border-radius: 10px;
 }
-:root[data-desktop] .tab.active { background: var(--bg); border-color: var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.16); }
+:root[data-desktop] .tab.active { background: var(--bg); border-color: var(--border); box-shadow: none; }
 :root[data-desktop] .tab.active::after, :root[data-desktop] .tab.active::before { display: none; }
 :root[data-desktop] .tab .tab-close { opacity: 0; }
 :root[data-desktop] .tab:hover .tab-close, :root[data-desktop] .tab.active .tab-close { opacity: 1; }
@@ -4096,7 +4098,7 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .ag-composer {
     width: min(760px, calc(100% - 48px)); margin: 0 auto 18px; box-sizing: border-box;
     border: 1px solid var(--border); border-radius: 22px; background: var(--surface);
-    box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 10px 10px 8px 14px;
+    box-shadow: var(--float-shadow); padding: 10px 10px 8px 14px;
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; column-gap: 6px;
     grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "input input input input input" "attach selectors mic stop send";
 }
@@ -4167,7 +4169,7 @@ audio.fm-media { width: min(520px, 90%); }
 
 /* ---- paleta ⌘K ---- */
 .cp-backdrop { position: fixed; inset: 0; z-index: 8000; display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; background: rgba(0,0,0,.4); }
-.cp { width: min(620px, calc(100vw - 48px)); max-height: 66vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+.cp { width: min(620px, calc(100vw - 48px)); max-height: 66vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--float-shadow); }
 .cp-search { display: flex; align-items: center; gap: 10px; padding: 0 16px; min-height: 52px; color: var(--text-3); border-bottom: 1px solid var(--border); }
 .cp-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 16px; }
 .cp-list { overflow-y: auto; padding: 6px; }
@@ -4185,7 +4187,7 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .settings-sheet.sheet-page .ag-sheet {
     position: relative; inset: auto; transform: none; opacity: 1; transition: none;
     width: min(960px, calc(100vw - 64px)); height: min(680px, calc(100vh - 64px)); max-height: none; margin: 0;
-    display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,.45);
+    display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--float-shadow);
 }
 :root[data-desktop] .settings-sheet .ag-sheet-head { flex-shrink: 0; }
 :root[data-desktop] .settings-sheet .sheet-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); padding: 0; overflow: hidden; }
@@ -4215,7 +4217,7 @@ audio.fm-media { width: min(520px, 90%); }
 .dk-agent[aria-selected="true"] { flex: 1 1 auto; }
 .dk-agent[aria-selected="false"] > span { display: none; }
 .ag-hello-logo { display: grid; place-items: center; width: 60px; height: 60px; margin-bottom: 8px; border-radius: 17px;
-    border: 1px solid var(--border); background: var(--surface); box-shadow: 0 6px 20px rgba(0, 0, 0, .14); }
+    border: 1px solid var(--border); background: var(--surface); box-shadow: var(--float-shadow); }
 
 /* ---- carregamento: logo numa peça arredondada, anel girando em volta ---- */
 .mt-loading {
@@ -4231,7 +4233,7 @@ audio.fm-media { width: min(520px, 90%); }
 .mt-loader-logo {
     position: relative; display: grid; place-items: center; width: 66px; height: 66px; border-radius: 19px;
     color: var(--mark); background: var(--surface); border: 1px solid color-mix(in srgb, var(--mark) 22%, var(--border));
-    box-shadow: 0 10px 30px color-mix(in srgb, var(--mark) 22%, transparent), 0 2px 6px rgba(0, 0, 0, .16);
+    box-shadow: var(--float-shadow);
 }
 .mt-loader-ring {
     position: absolute; inset: 0; border-radius: 50%;
@@ -4336,7 +4338,7 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .dk-icon { width: 44px; height: 44px; border-radius: 50%; color: var(--text); background-color: var(--glass-bg); background-image: var(--glass-sheen-img);
     border: 0.5px solid var(--glass-border); box-shadow: var(--glass-edge), var(--glass-shadow); }
 :root[data-desktop] .dk-new { justify-content: center; height: 48px; padding: 0 20px; border: none; border-radius: 26px; background: #FFFFFF; color: #111111; font-size: 15px; font-weight: 500;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, .25); white-space: nowrap; }
+    box-shadow: var(--float-shadow); white-space: nowrap; }
 :root[data-desktop] .dk-new:hover { filter: brightness(.96); }
 :root[data-desktop] .dk-new kbd { display: none; }
 :root[data-desktop] .dk-search { height: 42px; padding: 0 14px; border-radius: 21px; border: 0.5px solid var(--glass-border); background: var(--surface); }
@@ -4443,7 +4445,7 @@ audio.fm-media { width: min(520px, 90%); }
     isolation: isolate; width: min(820px, calc(100% - 48px)); padding: 0; bottom: 12px; border: none; border-radius: 0; box-shadow: none;
     background: none; background-color: transparent; background-image: none; -webkit-backdrop-filter: none; backdrop-filter: none;
     grid-template-rows: auto auto auto auto auto auto;
-    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "input input input input input" "attach . mic stop send" "selectors selectors selectors selectors selectors";
+    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "input input input input input" "attach . . stop send" "mic selectors selectors selectors selectors";
 }
 :root[data-desktop] .ag-composer:focus-within { box-shadow: none; border-color: transparent; }
 :root[data-desktop] .ag-composer::before {
@@ -4481,7 +4483,7 @@ audio.fm-media { width: min(520px, 90%); }
 /* com conversa: campo fino, tudo numa linha, e ele só cresce para cima conforme o texto */
 :root[data-desktop] .ag-composer {
     grid-template-rows: auto auto auto auto auto;
-    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "attach input mic stop send" "selectors selectors selectors selectors selectors";
+    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "attach input input stop send" "mic selectors selectors selectors selectors";
 }
 :root[data-desktop] .ag-composer::before { grid-row: 3 / 5; }
 :root[data-desktop] .ag-composer .ag-attach-btn { align-self: end; margin: 0 0 7px 7px; }
@@ -4493,7 +4495,7 @@ audio.fm-media { width: min(520px, 90%); }
 /* conversa nova: o campo grande, com os botões numa linha embaixo do texto */
 :root[data-desktop] .ag-is-empty .ag-composer {
     grid-template-rows: auto auto auto auto auto auto;
-    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "input input input input input" "attach . mic stop send" "selectors selectors selectors selectors selectors";
+    grid-template-areas: "queue queue queue queue queue" "suggest suggest suggest suggest suggest" "images images images images images" "input input input input input" "attach . . stop send" "mic selectors selectors selectors selectors";
 }
 :root[data-desktop] .ag-is-empty .ag-composer::before { grid-row: 3 / 6; }
 :root[data-desktop] .ag-is-empty .ag-composer textarea { min-height: 84px; padding: 16px 20px 4px; line-height: inherit; }
@@ -4687,7 +4689,7 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-liquid]:is([data-desktop], [data-iphone]) {
     --lg-glass: color-mix(in srgb, var(--surface) 32%, transparent);
     --lg-blur: 6px;
-    --lg-drop: rgba(0, 0, 0, 0.28);
+    --lg-drop: rgba(0, 0, 0, 0.12);
 }
 :root[data-liquid][data-iphone] { --lg-blur: 10px; } /* sem a lente, o texto atrás precisa de mais desfoque */
 /* Onde se lê ou escreve, o vidro continua vendo o fundo: quem separa o texto é o desfoque */
@@ -4719,9 +4721,12 @@ audio.fm-media { width: min(520px, 90%); }
 @media (prefers-reduced-motion: reduce) { .ag-mic.recording { animation: none; } }
 :root[data-iphone] .ag-input-row .ag-wave { grid-area: text; }
 :root[data-desktop] .ag-composer .ag-wave { grid-area: input; align-self: center; }
-:root[data-desktop] .ag-composer .ag-mic { grid-area: mic; width: 34px; height: 34px; align-self: end; margin: 0 6px 7px 0; border-radius: 10px; }
+/* PC: abaixo do campo, antes da pasta */
+:root[data-desktop] .ag-composer .ag-mic { grid-area: mic; width: 30px; height: 30px; align-self: center; margin: 8px 0 0 9px; border-radius: 10px; background: transparent; }
+:root[data-desktop] .ag-composer .ag-mic:hover { background: var(--glass-fill); color: var(--text); }
+:root[data-desktop] .ag-composer .ag-mic.recording { background: var(--danger); }
+:root[data-desktop] .ag-composer .ag-selectors { padding-left: 8px; }
 :root[data-desktop] .ag-composer .ag-mic.recording { color: #fff; }
-:root[data-desktop] .ag-is-empty .ag-composer .ag-mic { align-self: center; margin: 0 6px 12px 0; }
 
 /* ---- pontas da conversa: desfoque progressivo, forte na borda e sumindo aos poucos, sem escurecer ---- */
 .ag-edge { display: none; position: absolute; left: 0; right: 0; z-index: 2; pointer-events: none; --edge-dir: to bottom; }
@@ -4738,11 +4743,15 @@ audio.fm-media { width: min(520px, 90%); }
 .ag-edge-top { top: 0; height: var(--ag-edge-top, 48px); }
 .ag-edge-bottom { bottom: 0; height: calc(var(--ag-composer-h, 100px) + 40px); --edge-dir: to top; }
 .ag-is-empty .ag-edge { display: none !important; }
-/* Só no PC por enquanto: ainda sem medição de fluidez no iPhone real */
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    :root[data-desktop] .ag-edge { display: block; }
-    :root[data-desktop] .ag-log.edge-fade { -webkit-mask-image: none; mask-image: none; }
+    .ag-edge { display: block; }
+    .edge-fade { -webkit-mask-image: none; mask-image: none; }
+    :root[data-iphone] .ag-main::after { background: none; }
 }
+/* Mesmo desfoque nas outras áreas roláveis: terminal, listas, Arquivos, notas (ui/edgeFade.js) */
+.edge-auto { z-index: 3; left: auto; right: auto; }
+.edge-auto:not([data-on]) { display: none !important; }
+.edge-auto-bottom { --edge-dir: to top; }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
     .ag-edge { display: none !important; }
 }
@@ -4750,14 +4759,19 @@ audio.fm-media { width: min(520px, 90%); }
 /* Versão leve, quando o desfoque trava o aparelho (ui/edgeBlur.js): a película fica, a conversa esmaece */
 :root[data-edge-lite] .ag-edge i { display: none; }
 :root[data-edge-lite] .ag-edge-bottom { display: none; }
+:root[data-edge-lite] .edge-auto { display: none !important; }
+:root[data-edge-lite] .edge-fade:not(.ag-log) {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
+}
 :root[data-edge-lite] .ag-log.edge-fade {
     -webkit-mask-image: linear-gradient(to bottom, transparent var(--ag-over, 0px), #000 calc(var(--ag-over, 0px) + 24px), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
     mask-image: linear-gradient(to bottom, transparent var(--ag-over, 0px), #000 calc(var(--ag-over, 0px) + 24px), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
 }
 
-/* Topo como o Reels (PC): a conversa vai até a borda, atrás das barras, com o desfoque crescendo em direção
+/* Topo como o Reels: a conversa vai até a borda, atrás das barras, com o desfoque crescendo em direção
    à borda e uma película suave da cor do fundo (escura no tema escuro, clara no claro) */
-:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active {
+:is(:root[data-desktop], :root[data-iphone]) body:not(:has(.terminal-panels.split)) .agent-panel.active {
     --ag-over: calc(var(--ag-topbar-h, 64px) + var(--ag-head-h, 48px));
     --ag-edge-top: calc(var(--ag-over) + 72px);
 }
@@ -4773,19 +4787,60 @@ audio.fm-media { width: min(520px, 90%); }
         color-mix(in srgb, var(--bg) 12%, transparent) 75%,
         transparent 100%);
 }
-:root[data-desktop] body:has(.agent-panel.active):not(:has(.terminal-panels.split)) .topbar {
+:is(:root[data-desktop], :root[data-iphone]) body:has(.agent-panel.active):not(:has(.terminal-panels.split)) .topbar {
     position: relative; z-index: 20; margin-bottom: calc(-1 * var(--ag-topbar-h, 64px)); background: transparent; border-bottom: none;
 }
-:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-head {
+:is(:root[data-desktop], :root[data-iphone]) body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-head {
     position: absolute; z-index: 6; top: var(--ag-topbar-h, 64px); left: 0; right: 0; background: transparent; border-bottom: none;
 }
-:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-banner {
+:is(:root[data-desktop], :root[data-iphone]) body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-banner {
     position: absolute; z-index: 6; top: var(--ag-over); left: 0; right: 0;
 }
 :root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-side { margin-top: var(--ag-over); }
-:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-log { padding-top: calc(var(--ag-over) + 12px); }
-:root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active.ag-is-empty .ag-log { padding-top: var(--ag-over); }
+:is(:root[data-desktop], :root[data-iphone]) body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-log { padding-top: calc(var(--ag-over) + 12px); }
+:is(:root[data-desktop], :root[data-iphone]) body:not(:has(.terminal-panels.split)) .agent-panel.active.ag-is-empty .ag-log { padding-top: var(--ag-over); }
 
 /* plano para aprovar: já formatado, com a opção de abrir em tela cheia */
 .ag-perm-detail.is-doc { max-height: 420px; padding: 4px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
 .ag-perm-open { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 2px; }
+
+/* colar um caminho: nos Arquivos e na escolha da pasta */
+.fm-path-input { flex: 1; min-width: 0; height: 34px; margin: 0 4px; padding: 0 12px; border: 1.5px solid var(--accent); border-radius: 10px; background: var(--input-bg); color: var(--text); font: inherit; font-size: 14px; outline: none; }
+.fm-path-input[hidden], .fm-crumbs[hidden] { display: none; }
+.fp-go { box-sizing: border-box; width: 100%; height: 40px; margin: 0 0 10px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--input-bg); color: var(--text); font-size: 16px; outline: none; }
+.fp-go:focus { border-color: var(--accent); }
+
+/* lente do iPhone (ui/lensMirror.js): a cópia da conversa fica atrás do vidro, que perde o desfoque próprio */
+.lens-mirror { display: none; }
+[data-lens] > .lens-mirror {
+    display: block; position: absolute; inset: 0; z-index: -2; overflow: hidden; border-radius: inherit; pointer-events: none;
+    background: var(--bg); -webkit-user-select: none; user-select: none;
+}
+.lens-copy.ag-log {
+    position: absolute; top: 0; left: 0; flex: none; height: auto; min-height: 0; padding: 0; overflow: visible; transform-origin: 0 0;
+    -webkit-mask-image: none; mask-image: none; pointer-events: none;
+}
+.lens-copy .liquid-host { display: none; }
+:root[data-liquid][data-iphone] [data-lens] { --lg-blur: 0px; }
+
+/* O desfoque é só do conteúdo: barra de rolagem e peças flutuantes ficam fora dele */
+.ag-edge-top, .ag-edge-bottom { right: var(--ag-bar-w, 0px); }
+.ag-jump, .ag-pending, .fm-fab, .fm-bars, .fm-uploads, .fm-drop, .fm-progress, .nt-fab, .term-search, .terminal-search { z-index: 4; }
+/* A barra da conversa começa abaixo da barra de abas e do título, sem passar atrás deles */
+@supports selector(::-webkit-scrollbar) {
+    :root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-log { scrollbar-width: auto; scrollbar-color: auto; }
+    :root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-log::-webkit-scrollbar { width: 8px; }
+    :root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-log::-webkit-scrollbar-track { margin-top: var(--ag-over); background: transparent; }
+    :root[data-desktop] body:not(:has(.terminal-panels.split)) .agent-panel.active .ag-log::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--border-strong); }
+}
+
+/* iPhone: o pedido de permissão flutua em vidro sobre a conversa, acima do campo */
+:root[data-iphone] .ag-pending {
+    position: absolute; left: 10px; right: 10px; bottom: calc(var(--ag-composer-h, 120px) + 16px); margin: 0; padding: 10px 12px; border-radius: 24px;
+    background-color: color-mix(in srgb, var(--c-orange) 8%, var(--glass-bg)); background-image: var(--glass-sheen-img);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+    border: 0.5px solid color-mix(in srgb, var(--c-orange) 55%, var(--glass-border));
+    box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+:root[data-iphone] .ag-main:has(.ag-pending:not([hidden])) .ag-log { padding-bottom: calc(var(--ag-composer-h, 120px) + var(--ag-pending-h, 110px) + 32px); }
+:root[data-iphone] .ag-main:has(.ag-pending:not([hidden])) .ag-jump { bottom: calc(var(--ag-composer-h, 120px) + var(--ag-pending-h, 110px) + 26px); }

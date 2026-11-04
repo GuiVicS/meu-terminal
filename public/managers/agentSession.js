@@ -24,6 +24,7 @@ import { haptic } from '../ui/haptics.js';
 import { keepScreenOn } from '../ui/permissions.js';
 import { openFileViewer, viewerKind } from '../agent/fileViewer.js';
 import { locateFile } from '../agent/locateFile.js';
+import { permissionTitle } from '../agent/permissionDoc.js';
 import { agentIconName, agentIdFromName } from '../ui/agent-logos.js';
 import { loaderHtml } from '../ui/loading.js';
 
@@ -129,9 +130,12 @@ export default class AgentSession {
         const topbar = document.querySelector('.topbar');
         this.overlayHeights = new ResizeObserver(() => {
             this.panel.style.setProperty('--ag-head-h', `${head.offsetHeight}px`);
+            const log = this.el?.log;
+            if (log) this.panel.style.setProperty('--ag-bar-w', `${log.offsetWidth - log.clientWidth}px`);
             document.documentElement.style.setProperty('--ag-topbar-h', `${topbar?.offsetHeight || 0}px`);
         });
         this.overlayHeights.observe(head);
+        if (this.el?.log) this.overlayHeights.observe(this.el.log);
         if (topbar) this.overlayHeights.observe(topbar);
     }
 
@@ -271,7 +275,7 @@ export default class AgentSession {
         this.el.jump.addEventListener('click', () => {
             this.el.log.scrollTop = this.el.log.scrollHeight;
         });
-        this.logFade = attachEdgeFade(this.el.log);
+        this.logFade = attachEdgeFade(this.el.log, { overlay: false }); // tem as camadas dela (.ag-edge-top/bottom)
         this.watchOverlayHeights();
         watchEdgeBlur();
         this.probeEvery = setInterval(() => {
@@ -776,6 +780,7 @@ export default class AgentSession {
 
     /** Sticky bar above the message box: pending permissions never scroll out of sight. */
     renderPending() {
+        this.later?.(() => this.panel.style.setProperty('--ag-pending-h', `${this.el.pending.offsetHeight}px`), 0);
         const list = [...this.pending.entries()];
         this.el.pending.hidden = !list.length;
         if (!list.length) {
@@ -785,7 +790,7 @@ export default class AgentSession {
         const [permissionId, d] = list[0];
         const options = d.options || [];
         this.el.pending.innerHTML = `
-            <button type="button" class="ag-pending-title" data-goto>${icon('shield', 15)} <span>${esc(d.title)}</span>${list.length > 1 ? ` <em>+${list.length - 1}</em>` : ''}</button>
+            <button type="button" class="ag-pending-title" data-goto>${icon('shield', 15)} <span>${esc(permissionTitle(d))}</span>${list.length > 1 ? ` <em>+${list.length - 1}</em>` : ''}</button>
             <div class="ag-pending-actions">${options.map(o => `<button type="button" class="btn ${o.kind === 'allow_once' ? 'btn-primary' : o.kind.startsWith('reject') ? 'btn-ghost' : ''}" data-perm="${esc(permissionId)}" data-option="${esc(o.id)}">${esc(o.name)}</button>`).join('')}</div>`;
     }
 

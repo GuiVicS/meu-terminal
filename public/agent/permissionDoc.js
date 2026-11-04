@@ -2,6 +2,7 @@
  * permissionDoc.js
  * Plano ou documento novo pedindo aprovação: é lido já formatado, não como código em verde.
  * Editar um documento que já existe continua mostrando o que muda (diff).
+ * E o título não repete o comando, que já aparece inteiro logo abaixo.
  */
 const MARKDOWN = /\.(md|markdown)$/i;
 const nameOf = path => String(path).split(/[\\/]/).pop();
@@ -20,4 +21,14 @@ export function permissionDocument(d) {
         return { text: input.content, name: nameOf(path) };
     }
     return null;
+}
+
+const oneLine = text => String(text ?? '').replace(/`/g, '').replace(/\s+/g, ' ').trim();
+
+/** Título do pedido: quando é só o próprio comando, vira um nome curto. */
+export function permissionTitle(d) {
+    const command = oneLine(d.input?.command);
+    const title = oneLine(d.title).replace(/(\.{3}|…)$/, '').trim();
+    if (command && title && (title === command || (title.length >= 8 && command.startsWith(title)))) return 'Executar comando';
+    return d.title;
 }

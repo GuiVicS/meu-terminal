@@ -7,6 +7,7 @@ import { icon } from './icons.js';
 import { showMenu } from './contextMenu.js';
 import { openSheet } from './sheet.js';
 import { toast } from './toast.js';
+import { cleanPath, looksLikePath } from './pathInput.js';
 
 const basePath = () => (window.appConfig?.basePath || '').replace(/\/+$/, '');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -25,6 +26,7 @@ function browseFolders(start, onPick) {
     let state = null;
     sheet.body.innerHTML = `
         <p class="fp-path mono"></p>
+        <input type="text" class="fp-go mono" placeholder="Cole ou digite um caminho" aria-label="Caminho da pasta" autocapitalize="off" autocorrect="off" spellcheck="false">
         <ul class="fp-list"></ul>
         <div class="fp-actions"><button type="button" class="btn btn-primary" data-fp="use">Usar esta pasta</button></div>`;
     const list = sheet.body.querySelector('.fp-list');
@@ -44,6 +46,25 @@ function browseFolders(start, onPick) {
             toast(e.message, { tone: 'error' });
         }
     };
+    const typed = sheet.body.querySelector('.fp-go');
+    const goTyped = () => {
+        const path = cleanPath(typed.value);
+        if (!path) return;
+        go(path);
+        typed.value = '';
+    };
+    typed.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        goTyped();
+    });
+    typed.addEventListener('paste', e => {
+        const pasted = e.clipboardData?.getData('text') || '';
+        if (typed.value || !looksLikePath(pasted)) return;
+        e.preventDefault();
+        typed.value = pasted;
+        goTyped();
+    });
     sheet.body.addEventListener('click', e => {
         const row = e.target.closest('[data-dir]');
         if (row) return void go(row.dataset.dir);

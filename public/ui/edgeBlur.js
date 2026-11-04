@@ -1,6 +1,6 @@
 /**
  * edgeBlur.js
- * O desfoque das pontas da conversa pesa em aparelho sem aceleração de vídeo. Mede a fluidez enquanto
+ * O desfoque das pontas das áreas roláveis pesa em aparelho sem aceleração de vídeo. Mede a fluidez enquanto
  * ele está à vista: se travar duas vezes, fica a versão leve (película e esmaecimento, sem desfoque).
  */
 const SAMPLE_MS = 1000;
@@ -12,10 +12,10 @@ const RETRY_MS = 3000;
 let started = false;
 
 const visible = () => document.visibilityState === 'visible'
-    && !!document.querySelector('.agent-panel.active:not(.ag-is-empty) .ag-edge');
+    && !!document.querySelector('.agent-panel.active:not(.ag-is-empty) .ag-edge-top, .edge-auto[data-on]');
 
 export function watchEdgeBlur() {
-    if (started || !document.documentElement.hasAttribute('data-desktop')) return;
+    if (started) return;
     started = true;
     let strikes = 0;
     let done = 0;
