@@ -624,7 +624,19 @@ export default class FilesSession {
 
     // ---------- rendering ----------
 
+    /** A pasta aberta acabou de ser lida: a árvore mostra o que há nela agora. */
+    syncTreeWithList() {
+        if (!isDesktop() || this.source !== 'local' || !this.treeKids?.has(this.path)) return;
+        const dirs = (this.entries || []).filter(e => e.type === 'dir' && !e.name.startsWith('.'))
+            .sort((a, b) => collator.compare(a.name, b.name));
+        const names = list => list.map(d => d.name).join('/');
+        if (names(dirs) === names(this.treeKids.get(this.path))) return;
+        this.treeKids.set(this.path, dirs);
+        this.renderSide();
+    }
+
     render() {
+        this.syncTreeWithList();
         if (this.el && isDesktop() && this.source === 'local' && this.path && this.path !== this.treePath) {
             this.treePath = this.path;
             this.expandTreeTo(this.path);
@@ -1620,6 +1632,8 @@ export default class FilesSession {
         const folderAt = target => {
             const row = target.closest?.('.fm-row[data-kind="dir"]');
             if (row) return this.visible[Number(row.dataset.i)];
+            const tree = target.closest?.('.fm-tree-item');
+            if (tree) return { source: tree.dataset.go, path: tree.dataset.path, name: tree.textContent.trim() };
             const crumb = target.closest?.('.fm-crumb');
             if (crumb) {
                 const c = this.crumbList[Number(crumb.dataset.i)];
@@ -1643,7 +1657,7 @@ export default class FilesSession {
             }
             e.preventDefault();
             e.dataTransfer.dropEffect = internal(e) ? (e.ctrlKey || e.altKey ? 'copy' : 'move') : 'copy';
-            mark(folder ? e.target.closest('.fm-row, .fm-crumb') : null);
+            mark(folder ? e.target.closest('.fm-row, .fm-crumb, .fm-tree-row') : null);
         });
         main.addEventListener('dragenter', e => {
             if (!hasFiles(e)) return;

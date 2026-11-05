@@ -94,7 +94,7 @@ export default class TerminalSession {
         this.timers = new Set();
 
         this.panel = document.createElement('div');
-        this.panel.className = 'terminal-panel';
+        this.panel.className = 'terminal-panel plain-terminal';
         this.panel.id = `panel-${id}`;
         this.panel.setAttribute('role', 'tabpanel');
         this.panel.setAttribute('aria-labelledby', `tab-${id}`);
@@ -132,14 +132,56 @@ export default class TerminalSession {
                 return { top: b.viewportY > 0, bottom: b.viewportY < b.baseY };
             },
         });
+        const paintUnder = this.mountUnderBar(term);
         const update = () => {
             sync();
             fade.schedule();
+            paintUnder();
         };
         term.onScroll(update);
         term.onWriteParsed?.(update);
         // O xterm só avisa da rolagem por conteúdo novo: a roda do mouse vem do elemento
-        viewport?.addEventListener('scroll', sync, { passive: true });
+        viewport?.addEventListener('scroll', () => {
+            sync();
+            paintUnder();
+        }, { passive: true });
+        term.onResize?.(paintUnder);
+    }
+
+    /**
+     * Atrás da barra de abas transparente: as linhas do histórico logo acima da tela, só para ver
+     * (desfocadas). O terminal em si fica abaixo da barra, com o mesmo tamanho, sem esconder nenhuma
+     * linha; programas de tela cheia não têm histórico, e ali nada aparece.
+     */
+    mountUnderBar(term) {
+        const under = document.createElement('div');
+        under.className = 'term-under mono';
+        under.setAttribute('aria-hidden', 'true');
+        this.panel.appendChild(under);
+        let frame = 0;
+        const paint = () => {
+            frame = 0;
+            const screen = this.panel.querySelector('.xterm-screen');
+            if (!screen || !under.offsetHeight || !term.rows) return;
+            const cell = screen.offsetHeight / term.rows;
+            if (!cell) return;
+            const b = term.buffer.active;
+            const count = Math.ceil(under.offsetHeight / cell);
+            const lines = [];
+            if (b.type !== 'alternate') {
+                for (let y = Math.max(0, b.viewportY - count); y < b.viewportY; y++) {
+                    lines.push(b.getLine(y)?.translateToString(true) || ' ');
+                }
+            }
+            under.style.fontFamily = term.options.fontFamily;
+            under.style.fontSize = `${term.options.fontSize}px`;
+            under.style.lineHeight = `${cell}px`;
+            under.style.left = `${screen.getBoundingClientRect().left - this.panel.getBoundingClientRect().left}px`;
+            under.textContent = lines.join('\n');
+        };
+        return () => {
+            if (!frame) frame = requestAnimationFrame(paint);
+        };
     }
 
     mount(parent) {

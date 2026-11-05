@@ -6,6 +6,7 @@
  */
 const LAYERS = '<i></i><i></i><i></i><i></i>';
 const EDGE_HEIGHT = 110; // a mesma rampa do topo do chat
+const COVER_EXTRA = 60;
 
 function edgeLayer(side) {
     const layer = document.createElement('div');
@@ -55,7 +56,8 @@ export function attachEdgeFade(el, { read = atScroller(el), scroller = el, obser
         const left = cover ? 0 : area.left - box.left + parent.scrollLeft;
         const top = cover ? 0 : area.top - box.top + parent.scrollTop;
         const right = area.right - box.left - barWidth();
-        const height = Math.min(EDGE_HEIGHT, el.offsetHeight / 3);
+        // Com "cover", a rampa termina logo abaixo da barra de abas: quase todas as linhas ficam legíveis
+        const height = cover ? area.top - box.top + COVER_EXTRA : Math.min(EDGE_HEIGHT, el.offsetHeight / 3);
         Object.assign(topLayer.style, {
             top: `${top}px`, left: `${left}px`, width: `${Math.max(0, right - left)}px`, height: `${height}px`,
             borderRadius: cover ? '0' : getComputedStyle(el).borderTopLeftRadius, // listas com cantos arredondados
@@ -116,4 +118,13 @@ export function watchScrollAreas() {
         requestAnimationFrame(scan);
     }).observe(document.body, { childList: true, subtree: true });
     scan();
+}
+
+/** A altura da barra de abas, para o conteúdo passar atrás dela. */
+export function watchTopbarHeight() {
+    const topbar = document.querySelector('.topbar');
+    if (!topbar || typeof ResizeObserver === 'undefined') return;
+    const apply = () => document.documentElement.style.setProperty('--ag-topbar-h', `${topbar.offsetHeight}px`);
+    new ResizeObserver(apply).observe(topbar);
+    apply();
 }
