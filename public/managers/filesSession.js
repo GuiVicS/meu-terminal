@@ -116,6 +116,14 @@ const KIND_ICON = {
     dir: 'folder', image: 'fileImage', video: 'fileVideo', audio: 'fileAudio', pdf: 'fileText', archive: 'fileArchive',
     sheet: 'fileSheet', json: 'fileJson', key: 'fileKey', code: 'fileCode', text: 'fileText', other: 'file',
 };
+const KIND_LABEL = {
+    dir: 'Pasta', image: 'Imagem', video: 'Vídeo', audio: 'Áudio', pdf: 'PDF', archive: 'Arquivo compactado',
+    sheet: 'Planilha', json: 'JSON', key: 'Chave', code: 'Código', text: 'Texto',
+};
+const SORTS = [['name', 'Nome'], ['mtime', 'Data de modificação'], ['type', 'Tipo'], ['size', 'Tamanho']];
+const PREVIEW_TEXT_MAX = 100 * 1024;
+const isDesktop = () => document.documentElement.hasAttribute('data-desktop');
+const isIphone = () => document.documentElement.hasAttribute('data-iphone');
 const MEDIA = new Set(['image', 'video', 'audio']);
 
 function extOf(name) {
@@ -317,7 +325,8 @@ export default class FilesSession {
                         <button type="button" class="icon-btn" data-act="side" aria-label="Locais e favoritos">${icon('panelLeft', 18)}</button>
                         <button type="button" class="icon-btn fm-wide" data-act="back" aria-label="Voltar" disabled>${icon('chevronLeft', 18)}</button>
                         <button type="button" class="icon-btn fm-wide" data-act="forward" aria-label="Avançar" disabled>${icon('chevronRight', 18)}</button>
-                        <button type="button" class="icon-btn" data-act="up" aria-label="Pasta acima">${icon('arrowUp', 18)}</button>
+                        <button type="button" class="icon-btn" data-act="up" aria-label="Pasta acima">${icon(isIphone() ? 'chevronLeft' : 'arrowUp', 18)}</button>
+                        <button type="button" class="icon-btn fm-only-desk" data-act="reload" aria-label="Atualizar" title="Atualizar (F5)">${icon('refresh', 18)}</button>
                         <nav class="fm-crumbs" aria-label="Caminho"></nav>
                         <input type="text" class="fm-path-input" hidden aria-label="Caminho da pasta" placeholder="Cole ou digite o caminho" autocapitalize="off" autocorrect="off" spellcheck="false">
                         <button type="button" class="icon-btn" data-act="edit-path" aria-label="Colar ou digitar um caminho" title="Colar ou digitar um caminho (Ctrl+L)">${icon('pencil', 16)}</button>
@@ -326,6 +335,30 @@ export default class FilesSession {
                         <button type="button" class="icon-btn fm-wide" data-act="upload" aria-label="Enviar arquivos">${icon('upload', 18)}</button>
                         <button type="button" class="icon-btn fm-wide" data-act="view" aria-label="Alternar lista/grade"></button>
                         <button type="button" class="icon-btn" data-act="more" aria-label="Mais ações da pasta">${icon('more', 18)}</button>
+                    </div>
+                    <div class="fm-large"><h2 class="fm-large-title"></h2><span class="fm-large-sub"></span></div>
+                    <div class="fm-actions" role="toolbar" aria-label="Ações">
+                        <button type="button" class="btn btn-primary btn-sm" data-do="new-folder">${icon('plus', 16)} Nova pasta</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-do="new-file">${icon('filePlus', 16)} Novo arquivo</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-do="upload">${icon('upload', 16)} Enviar</button>
+                        <span class="fm-sep"></span>
+                        <button type="button" class="icon-btn" data-do="cut" aria-label="Recortar" title="Recortar (Ctrl+X)">${icon('scissors', 17)}</button>
+                        <button type="button" class="icon-btn" data-do="copy" aria-label="Copiar" title="Copiar (Ctrl+C)">${icon('copy', 17)}</button>
+                        <button type="button" class="icon-btn" data-do="paste" aria-label="Colar" title="Colar (Ctrl+V)">${icon('clipboard', 17)}</button>
+                        <button type="button" class="icon-btn" data-do="rename" aria-label="Renomear" title="Renomear (F2)">${icon('pencil', 17)}</button>
+                        <button type="button" class="icon-btn" data-do="download" aria-label="Baixar" title="Baixar">${icon('download', 17)}</button>
+                        <button type="button" class="icon-btn" data-do="delete" aria-label="Excluir" title="Excluir (Del)">${icon('trash', 17)}</button>
+                        <span class="fm-sep"></span>
+                        <select class="fm-sort-select" aria-label="Ordenar por">${SORTS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+                        <button type="button" class="icon-btn" data-do="sort-dir" aria-label="Inverter ordem" title="Inverter ordem">${icon('chevronUp', 17)}</button>
+                        <span class="fm-grow"></span>
+                        <button type="button" class="icon-btn" data-do="view-list" aria-label="Detalhes" title="Detalhes">${icon('listView', 17)}</button>
+                        <button type="button" class="icon-btn" data-do="view-grid" aria-label="Ícones grandes" title="Ícones grandes">${icon('grid', 17)}</button>
+                        <button type="button" class="icon-btn" data-do="details" aria-label="Painel de detalhes" title="Painel de detalhes">${icon('panelLeft', 17)}</button>
+                    </div>
+                    <div class="fm-iossort">
+                        <button type="button" class="fm-iossort-btn" data-do="sort-menu"></button>
+                        <button type="button" class="icon-btn" data-do="view-toggle" aria-label="Alternar lista e grade"></button>
                     </div>
                     <div class="fm-progress" hidden></div>
                     <form class="fm-search" hidden role="search">
@@ -338,8 +371,9 @@ export default class FilesSession {
                     <div class="fm-results-bar" hidden></div>
                     <div class="fm-head" role="presentation">
                         <button type="button" data-sort="name">Nome</button>
+                        <button type="button" data-sort="mtime">Data de modificação</button>
+                        <button type="button" class="fm-only-desk" data-sort="type">Tipo</button>
                         <button type="button" data-sort="size">Tamanho</button>
-                        <button type="button" data-sort="mtime">Modificado</button>
                         <span></span>
                     </div>
                     <div class="fm-list" role="listbox" aria-multiselectable="true" tabindex="0" aria-label="Arquivos"></div>
@@ -350,7 +384,9 @@ export default class FilesSession {
                     <button type="button" class="fm-fab" aria-label="Novo">${icon('plus', 24)}</button>
                     <div class="fm-uploads" hidden></div>
                     <div class="fm-drop" hidden><div>${icon('upload', 28)}<span></span></div></div>
+                    <div class="fm-status" role="status"></div>
                 </div>
+                <aside class="fm-details" aria-label="Detalhes"></aside>
                 <div class="fm-viewer" hidden role="dialog" aria-modal="false"></div>
                 <input type="file" class="fm-file-input" multiple hidden>
             </div>`;
@@ -375,10 +411,18 @@ export default class FilesSession {
             uploads: q('.fm-uploads'),
             drop: q('.fm-drop'),
             viewer: q('.fm-viewer'),
+            actions: q('.fm-actions'),
+            sortSelect: q('.fm-sort-select'),
+            iosSort: q('.fm-iossort'),
+            largeTitle: q('.fm-large-title'),
+            largeSub: q('.fm-large-sub'),
+            status: q('.fm-status'),
+            details: q('.fm-details'),
             fileInput: q('.fm-file-input'),
         };
         this.applySidePref();
         this.bindToolbar();
+        this.bindExplorer();
         this.bindList();
         this.bindKeyboard();
         this.bindDrop();
@@ -581,6 +625,10 @@ export default class FilesSession {
     // ---------- rendering ----------
 
     render() {
+        if (this.el && isDesktop() && this.source === 'local' && this.path && this.path !== this.treePath) {
+            this.treePath = this.path;
+            this.expandTreeTo(this.path);
+        }
         this.computeVisible();
         this.renderCrumbs();
         this.renderList();
@@ -639,6 +687,201 @@ export default class FilesSession {
             b.innerHTML = `${esc(b.textContent.replace(/[↑↓]/g, '').trim())}${on ? (this.prefs.desc ? ' ↓' : ' ↑') : ''}`;
         });
         this.el.fab.hidden = !!this.results;
+        this.renderExplorer();
+    }
+
+    /** O que muda junto com a pasta e a seleção: ações, título, status e detalhes. */
+    renderExplorer() {
+        const { actions, sortSelect, iosSort, largeTitle, largeSub, status, root } = this.el;
+        const selected = this.selectedEntries();
+        const has = selected.length > 0;
+        const set = (name, enabled) => { actions.querySelector(`[data-do="${name}"]`).disabled = !enabled; };
+        set('cut', has);
+        set('copy', has);
+        set('paste', !!shared.clipboard);
+        set('rename', selected.length === 1);
+        set('download', has);
+        set('delete', has);
+        sortSelect.value = this.prefs.sort;
+        actions.querySelector('[data-do="sort-dir"]').innerHTML = icon(this.prefs.desc ? 'chevronDown' : 'chevronUp', 17);
+        actions.querySelector('[data-do="view-list"]').classList.toggle('on', this.prefs.view !== 'grid');
+        actions.querySelector('[data-do="view-grid"]').classList.toggle('on', this.prefs.view === 'grid');
+        actions.querySelector('[data-do="details"]').classList.toggle('on', this.prefs.details !== false);
+        root.classList.toggle('details-closed', this.prefs.details === false);
+
+        const crumbs = this.crumbs();
+        largeTitle.textContent = this.results ? 'Resultados' : crumbs.at(-1)?.label || '';
+        const count = this.visible?.length || 0;
+        largeSub.textContent = `${count} ${count === 1 ? 'item' : 'itens'}`;
+        const sortName = (SORTS.find(([k]) => k === this.prefs.sort) || SORTS[0])[1];
+        iosSort.querySelector('[data-do="sort-menu"]').innerHTML = `${esc(sortName)} ${icon(this.prefs.desc ? 'chevronDown' : 'chevronUp', 14)}`;
+        iosSort.querySelector('[data-do="view-toggle"]').innerHTML = icon(this.prefs.view === 'grid' ? 'listView' : 'grid', 18);
+
+        const size = selected.reduce((sum, e) => sum + (e.size || 0), 0);
+        const clip = shared.clipboard;
+        status.innerHTML = `<span>${count} ${count === 1 ? 'item' : 'itens'}</span>`
+            + (has ? `<span>${selected.length} selecionado${selected.length > 1 ? 's' : ''} · ${esc(formatSize(size))}</span>` : '')
+            + (clip ? `<span>${clip.items.length} na área de transferência (${clip.op === 'move' ? 'recortar' : 'copiar'})</span>` : '')
+            + '<span class="fm-grow"></span><span class="fm-status-hint mono">Setas · Enter · F2 · Del · Ctrl+C/X/V · Ctrl+L</span>';
+        this.renderDetails(selected);
+    }
+
+    renderDetails(selected) {
+        const { details } = this.el;
+        if (!isDesktop() || this.prefs.details === false) return;
+        const seq = ++this.detailSeq;
+        if (selected.length > 1) {
+            const size = selected.reduce((sum, e) => sum + (e.size || 0), 0);
+            const dirs = selected.filter(e => e.type === 'dir').length;
+            details.innerHTML = `<div class="fm-art">${icon('copy', 56)}</div><h3>${selected.length} itens selecionados</h3>
+                <dl><dt>Tamanho</dt><dd>${esc(formatSize(size))}</dd><dt>Pastas</dt><dd>${dirs}</dd><dt>Arquivos</dt><dd>${selected.length - dirs}</dd></dl>`;
+            return;
+        }
+        const entry = selected[0] || null;
+        const name = entry ? entry.name : (this.crumbs().at(-1)?.label || this.path);
+        const kind = entry ? kindOf(entry) : 'dir';
+        const isImage = entry && kind === 'image' && entry.source === 'local' && (entry.size || 0) < THUMB_MAX;
+        const art = isImage
+            ? `<div class="fm-art"><img alt="" src="${esc(this.rawUrl(entry, { render: extOf(entry.name) === 'svg' ? 1 : undefined }))}"></div>`
+            : `<div class="fm-art kind-${kind}">${icon(KIND_ICON[kind], 64)}</div>`;
+        const where = entry ? entry.path.slice(0, Math.max(1, entry.path.length - entry.name.length - 1)) : this.path;
+        const rows = [['Tipo', KIND_LABEL[kind] || (extOf(name).toUpperCase() || 'Arquivo')]];
+        if (!entry) rows.push(['Itens', String(this.entries?.length || 0)]);
+        if (entry && entry.type !== 'dir') rows.push(['Tamanho', formatSize(entry.size)]);
+        if (entry?.mtime) rows.push(['Modificado', formatDate(entry.mtime)]);
+        rows.push(['Local', this.prettyPath(where, entry?.source || this.source)]);
+        details.innerHTML = `${art}<h3></h3>
+            ${this.canRun(entry) ? `<button type="button" class="btn btn-primary btn-sm" data-do="run">${icon('play', 15)} Executar página</button>` : ''}
+            <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+            ${entry ? '' : '<p class="fm-details-hint">Selecione um item para ver detalhes.</p>'}`;
+        details.querySelector('h3').textContent = name;
+        // Texto e código: as primeiras linhas no lugar do ícone
+        if (entry && entry.source === 'local' && ['text', 'code', 'json'].includes(kind) && (entry.size || 0) < PREVIEW_TEXT_MAX) {
+            request('GET', 'text', { params: { source: entry.source, path: entry.path } }).then(data => {
+                if (seq !== this.detailSeq || data.text == null) return;
+                const box = details.querySelector('.fm-art');
+                box.className = 'fm-art is-text mono';
+                box.textContent = data.text.slice(0, 1200);
+            }).catch(() => {});
+        }
+    }
+
+    bindExplorer() {
+        const { actions, iosSort, details, sortSelect, search, side, toolbar } = this.el;
+        this.detailSeq = 0;
+        this.treeOpen = new Set();
+        this.treeKids = new Map();
+        // PC e iPhone: a busca fica sempre à vista
+        if (isDesktop()) {
+            toolbar.insertBefore(search, toolbar.querySelector('[data-act="more"]'));
+        }
+        if (isIphone()) this.el.iosSort.before(search); // como no iOS: título, busca, ordenação
+        if (isDesktop() || isIphone()) search.hidden = false;
+        sortSelect.addEventListener('change', () => {
+            this.prefs.sort = sortSelect.value;
+            this.prefs.desc = sortSelect.value !== 'name';
+            this.savePrefs();
+            this.render();
+        });
+        const run = btn => {
+            const items = this.selectedEntries();
+            switch (btn.dataset.do) {
+                case 'new-folder': return this.newFolder();
+                case 'new-file': return this.newFile();
+                case 'upload': return this.pickUpload();
+                case 'cut': return this.copyItems(items, 'move');
+                case 'copy': return this.copyItems(items, 'copy');
+                case 'paste': return this.paste();
+                case 'rename': return items[0] && this.rename(items[0]);
+                case 'download': return this.download(items);
+                case 'delete': return this.remove(items);
+                case 'sort-dir':
+                    this.prefs.desc = !this.prefs.desc;
+                    this.savePrefs();
+                    return this.render();
+                case 'view-list': return this.setPref('view', 'list');
+                case 'view-grid': return this.setPref('view', 'grid');
+                case 'view-toggle': return this.setPref('view', this.prefs.view === 'grid' ? 'list' : 'grid');
+                case 'details':
+                    this.prefs.details = this.prefs.details === false;
+                    this.savePrefs();
+                    return this.render();
+                case 'run': return this.runPage(this.selectedEntries()[0]);
+                case 'sort-menu':
+                    return showMenu(SORTS.map(([key, label]) => ({
+                        label,
+                        checked: this.prefs.sort === key,
+                        run: () => {
+                            if (this.prefs.sort === key) this.prefs.desc = !this.prefs.desc;
+                            else {
+                                this.prefs.sort = key;
+                                this.prefs.desc = key !== 'name';
+                            }
+                            this.savePrefs();
+                            this.render();
+                        },
+                    })), { anchor: btn, label: 'Ordenar por' });
+                default: return undefined;
+            }
+        };
+        for (const box of [actions, iosSort, details]) {
+            box.addEventListener('click', e => {
+                const btn = e.target.closest('[data-do]');
+                if (btn && !btn.disabled) run(btn);
+            });
+        }
+        side.addEventListener('click', e => {
+            const toggle = e.target.closest('[data-tree]');
+            if (!toggle) return;
+            e.stopPropagation();
+            this.toggleTree(toggle.dataset.tree);
+        }, true);
+    }
+
+    async loadTree(path) {
+        if (this.treeKids.has(path)) return;
+        const data = await request('GET', 'list', { params: { source: 'local', path } });
+        const dirs = (data.entries || []).filter(e => e.type === 'dir' && !e.name.startsWith('.'))
+            .sort((a, b) => collator.compare(a.name, b.name));
+        this.treeKids.set(path, dirs);
+    }
+
+    async toggleTree(path) {
+        if (this.treeOpen.has(path)) this.treeOpen.delete(path);
+        else {
+            this.treeOpen.add(path);
+            await this.loadTree(path).catch(() => this.treeKids.set(path, []));
+        }
+        this.renderSide();
+    }
+
+    /** Abre na árvore o caminho até a pasta atual. */
+    async expandTreeTo(path) {
+        const home = shared.sources?.home;
+        const root = home && (path === home || path.startsWith(`${home}/`)) ? home : '/';
+        const rest = path.slice(root === '/' ? 1 : root.length + 1).split('/').filter(Boolean);
+        let at = root;
+        for (const part of ['', ...rest]) {
+            if (part) at = `${at === '/' ? '' : at}/${part}`;
+            if (at === path) break;
+            this.treeOpen.add(at);
+            await this.loadTree(at).catch(() => this.treeKids.set(at, []));
+        }
+        this.renderSide();
+    }
+
+    treeHtml(path, label, iconName, depth = 0) {
+        const open = this.treeOpen.has(path);
+        const known = this.treeKids.get(path);
+        const current = this.source === 'local' && this.path === path;
+        const row = `<div class="fm-tree-row${current ? ' current' : ''}" style="--depth:${depth}">
+            <button type="button" class="fm-tree-toggle${open ? ' open' : ''}${known && !known.length ? ' empty' : ''}" data-tree="${esc(path)}" aria-label="${open ? 'Recolher' : 'Expandir'} ${esc(label)}">${icon('chevronRight', 12)}</button>
+            <button type="button" class="fm-tree-item" data-go="local" data-path="${esc(path)}" title="${esc(path)}">${icon(iconName, 16)}<span>${esc(label)}</span></button>
+        </div>`;
+        if (!open || !known) return row;
+        const home = shared.sources?.home;
+        const kids = path === '/' && home ? known.filter(d => `/${d.name}` !== home) : known; // a pasta "Início" já tem a sua árvore
+        return row + kids.map(d => this.treeHtml(d.path || `${path === '/' ? '' : path}/${d.name}`, d.name, 'folder', depth + 1)).join('');
     }
 
     rowHtml(e, i) {
@@ -658,8 +901,9 @@ export default class FilesSession {
             + `<span class="fm-icon kind-${kind}">${thumb}</span>`
             + `<span class="fm-name"><span class="fm-title">${esc(e.name)}${e.link ? ' <span class="fm-link" title="Atalho (link simbólico)">↗</span>' : ''}</span>`
             + `<span class="fm-sub">${esc(sub)}</span></span>`
-            + `<span class="fm-size">${e.type === 'dir' ? '—' : esc(formatSize(e.size))}</span>`
             + `<span class="fm-date">${esc(formatDate(e.mtime))}</span>`
+            + `<span class="fm-type">${esc(KIND_LABEL[kind] || (extOf(e.name).toUpperCase() || 'Arquivo'))}</span>`
+            + `<span class="fm-size">${e.type === 'dir' ? '' : esc(formatSize(e.size))}</span>`
             + `<button type="button" class="icon-btn fm-more" tabindex="-1" aria-label="Ações de ${esc(e.name)}">${icon('more', 17)}</button>`
             + '</div>';
     }
@@ -708,6 +952,7 @@ export default class FilesSession {
 
     renderBars() {
         if (!this.el) return;
+        this.renderExplorer();
         const n = this.selection.size;
         this.process = n ? `${n} selecionado${n > 1 ? 's' : ''}` : null;
         const { selbar, pastebar } = this.el;
@@ -750,6 +995,18 @@ export default class FilesSession {
                 ${icon(iconName, 17)}<span class="fm-side-text"><span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</span>
             </button>${extra}</li>`;
         const home = src?.home || '';
+        if (isDesktop()) {
+            const favRows = favs.map((f, i) => item(`data-go="${esc(f.source)}" data-path="${esc(f.path)}"`, 'star',
+                f.name || f.path.split(/[\\/]/).filter(Boolean).pop() || f.path, '', here(f.source, f.path),
+                `<button type="button" class="icon-btn fm-side-remove" data-unfav="${i}" aria-label="Remover dos favoritos">${icon('x', 14)}</button>`)).join('');
+            const remotes = (src?.sources || []).filter(s => s.remote);
+            this.el.side.innerHTML = `<div class="fm-side-head"><span>Favoritos</span></div>
+                <ul>${item(`data-go="local" data-path="${esc(home)}"`, 'house', 'Início', '', here('local', home))}${favRows}</ul>
+                <div class="fm-side-head"><span>Pastas</span></div>
+                ${home && home !== '/' ? this.treeHtml(home, 'Início', 'house') : ''}${this.treeHtml('/', 'Raiz do servidor', 'hardDrive')}
+                ${remotes.length ? `<div class="fm-side-head"><span>Nuvem</span></div><ul>${remotes.map(r => item(`data-go="${esc(r.id)}" data-path="/"`, 'cloud', r.name, '', this.source === r.id)).join('')}</ul>` : ''}`;
+            return;
+        }
         let html = `<div class="fm-side-head"><span>Locais</span>
             <button type="button" class="icon-btn fm-side-close" data-side="close" aria-label="Fechar">${icon('x', 16)}</button></div>
             <ul>
@@ -987,6 +1244,7 @@ export default class FilesSession {
                 case 'forward': return this.goForward();
                 case 'up': return this.goUp();
                 case 'search': return this.openSearch();
+                case 'reload': return this.refresh();
                 case 'edit-path': return this.editPath();
                 case 'new-folder': return this.newFolder();
                 case 'upload': return this.pickUpload();
@@ -1103,7 +1361,7 @@ export default class FilesSession {
     }
 
     closeSearch() {
-        this.el.search.hidden = true;
+        this.el.search.hidden = !(isDesktop() || isIphone());
         this.filter = '';
         this.el.searchInput.value = '';
         this.closeResults();

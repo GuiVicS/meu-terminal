@@ -126,7 +126,7 @@ export default class ConversationDrawer {
         this.dim.hidden = true;
         app.appendChild(this.dim);
         this.list = this.el.querySelector('.cv-list');
-        attachEdgeFade(this.list);
+        attachEdgeFade(this.list, { overlay: false }); // aqui é sombra, sem desfoque
         this.account = createAccountRow({
             getAgentId: () => this.getAgent()?.agentId || null,
             getSession: () => this.getAgent(),

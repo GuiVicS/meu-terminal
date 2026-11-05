@@ -166,7 +166,6 @@ export default class AgentSession {
                     <div class="ag-pending" hidden></div>
                     <div class="ag-composer"></div>
                     <div class="ag-edge ag-edge-top" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-                    <div class="ag-edge ag-edge-bottom" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
                 </div>
                 <aside class="ag-side" aria-label="Painel do agente"></aside>
                 <div class="ag-side-scrim" hidden></div>
