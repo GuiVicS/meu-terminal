@@ -1,14 +1,19 @@
 /**
  * edgeBlur.js
- * O desfoque das pontas das áreas roláveis pesa em aparelho sem aceleração de vídeo. Mede a fluidez enquanto
- * ele está à vista: se travar duas vezes, fica a versão leve (película e esmaecimento, sem desfoque).
+ * Lente e desfoque pesam em aparelho mais fraco. Mede a fluidez enquanto eles estão à vista e, se
+ * travar, reduz por etapas, sempre avisando: primeiro tira a lente, que é o mais pesado; se ainda
+ * travar, tira o desfoque (fica a película e o esmaecimento).
  */
+import { toast } from './toast.js';
+
 const SAMPLE_MS = 1000;
 const MIN_FPS = 15;
 const STRIKES = 2;
 const SAMPLES = 3;
 const RETRY_MS = 3000;
+const FIRST_SAMPLE_MS = 4000; // a abertura da conversa ocupa o aparelho, e isso não é o efeito pesando
 
+const root = document.documentElement;
 let started = false;
 
 const visible = () => document.visibilityState === 'visible'
@@ -21,8 +26,22 @@ export function watchEdgeBlur() {
     let done = 0;
     let measuring = false;
 
+    /** @returns {boolean} ainda há o que reduzir */
+    const reduce = () => {
+        strikes = 0;
+        done = 0;
+        if (document.querySelector('[data-lens]')) {
+            root.setAttribute('data-lens-off', '');
+            toast('A lente do vidro foi desligada para manter o app fluido.');
+            return true;
+        }
+        root.setAttribute('data-edge-lite', '');
+        toast('O desfoque foi reduzido para manter o app fluido.');
+        return false;
+    };
+
     const measure = () => {
-        if (measuring || strikes >= STRIKES) return;
+        if (measuring || root.hasAttribute('data-edge-lite')) return;
         if (!visible()) {
             if (done < SAMPLES) setTimeout(measure, RETRY_MS);
             return;
@@ -45,16 +64,17 @@ export function watchEdgeBlur() {
             }
             done++;
             if (frames < MIN_FPS * (SAMPLE_MS / 1000)) strikes++;
-            if (strikes >= STRIKES) document.documentElement.setAttribute('data-edge-lite', '');
-            else if (done < SAMPLES) setTimeout(measure, RETRY_MS / 2);
+            if (strikes >= STRIKES) {
+                if (reduce()) setTimeout(measure, RETRY_MS);
+            } else if (done < SAMPLES) setTimeout(measure, RETRY_MS / 2);
         }, SAMPLE_MS);
     };
 
-    setTimeout(measure, RETRY_MS / 2);
+    setTimeout(measure, FIRST_SAMPLE_MS);
     // Rolar é o pior caso: mede também na primeira rolagem da conversa
     document.addEventListener('scroll', e => {
         if (!e.target.classList?.contains('ag-log')) return;
         done = Math.min(done, SAMPLES - 1);
         measure();
-    }, { capture: true, passive: true, once: false });
+    }, { capture: true, passive: true });
 }

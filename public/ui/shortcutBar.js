@@ -7,6 +7,7 @@
 import { icon } from './icons.js';
 import { toast } from './toast.js';
 import Dictation from './dictation.js';
+import MicWave from './micWave.js';
 import { haptic } from './haptics.js';
 
 // Arrow/navigation keys: [normal mode, application cursor mode, xterm modifier final]
@@ -88,31 +89,52 @@ export default class ShortcutBar {
         this.el.setAttribute('role', 'toolbar');
         this.el.setAttribute('aria-label', 'Teclas de atalho do terminal');
 
-        // Live transcript while dictating
+        // Enquanto ouve: ondas sonoras. O texto vai para o terminal, sem Enter, ao apertar de novo
         this.preview = document.createElement('div');
         this.preview.className = 'dictation-preview';
         this.preview.hidden = true;
-        this.preview.setAttribute('role', 'status');
-        this.preview.setAttribute('aria-live', 'polite');
+        this.preview.setAttribute('role', 'img');
+        this.preview.setAttribute('aria-label', 'Ouvindo');
+        const waveEl = document.createElement('canvas');
+        waveEl.className = 'dictation-wave';
+        this.preview.appendChild(waveEl);
         this.el.appendChild(this.preview);
+        this.wave = new MicWave(waveEl);
 
         if (Dictation.supported) {
+            let heard = false;
+            let failed = false;
             this.dictation = new Dictation({
-                // Keep the newest words visible without growing the bar
-                onInterim: text => {
-                    this.preview.textContent = !text ? 'Ouvindo…'
-                        : (text.length > 90 ? '…' + text.slice(-90) : text);
+                onInterim: () => this.wave.pulse(),
+                onFinal: text => {
+                    heard = true;
+                    this.getSession()?.sendInput(text);
                 },
-                onFinal: text => this.getSession()?.sendInput(text),
+                onConflict: () => {
+                    if (!this.wave.usingMic) return false;
+                    this.wave.dropMic(); // o aparelho não deixou os dois ouvirem juntos: o texto vem primeiro
+                    return true;
+                },
                 onStateChange: listening => {
                     const btn = this.el.querySelector('[data-key="mic"]');
                     btn?.classList.toggle('recording', listening);
                     btn?.setAttribute('aria-pressed', String(listening));
+                    btn?.setAttribute('aria-label', listening ? 'Parar e transcrever' : 'Transcrever voz');
                     this.preview.hidden = !listening;
-                    if (listening) this.preview.textContent = 'Ouvindo…';
+                    if (listening) {
+                        heard = false;
+                        this.wave.start();
+                    } else {
+                        this.wave.stop();
+                        if (!heard && !failed) toast('Não ouvi nada para transcrever.');
+                        failed = false;
+                    }
                 },
-                onError: message => toast(message, { tone: 'error' }),
-            });
+                onError: message => {
+                    failed = true;
+                    toast(message, { tone: 'error' });
+                },
+            }, { keepListening: true });
         }
 
         const top = document.createElement('div');
@@ -290,6 +312,7 @@ export default class ShortcutBar {
         if (!visible) {
             this.clearModifiers();
             this.dictation?.stop();
+            this.wave?.stop();
         }
     }
 }

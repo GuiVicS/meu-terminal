@@ -4844,3 +4844,15 @@ audio.fm-media { width: min(520px, 90%); }
 }
 :root[data-iphone] .ag-main:has(.ag-pending:not([hidden])) .ag-log { padding-bottom: calc(var(--ag-composer-h, 120px) + var(--ag-pending-h, 110px) + 32px); }
 :root[data-iphone] .ag-main:has(.ag-pending:not([hidden])) .ag-jump { bottom: calc(var(--ag-composer-h, 120px) + var(--ag-pending-h, 110px) + 26px); }
+
+/* ondas do microfone do terminal */
+.dictation-wave { display: block; width: 100%; height: 32px; color: var(--text); }
+
+/* Ordem explícita, sem depender de z-index negativo (o Safari desenhava o vidro por cima do conteúdo):
+   cópia da lente, vidro e só então o conteúdo da peça */
+:root[data-liquid] :is(.session-pill, .topbar-actions .icon-btn, .ag-jump, .menu) > .liquid-host > .lg-glass { z-index: 1; }
+:root[data-liquid] :is(.session-pill, .topbar-actions .icon-btn, .ag-jump) > .lens-mirror { z-index: 0; }
+:root[data-liquid] :is(.session-pill, .topbar-actions .icon-btn, .ag-jump, .menu) > :not(.liquid-host, .lens-mirror) { position: relative; z-index: 2; }
+/* O desfoque das pontas fica preso à área de trabalho: barras e menus sempre acima dele */
+:is(:root[data-desktop], :root[data-iphone]) body:has(.agent-panel.active) .workspace { position: relative; z-index: 0; isolation: isolate; }
+:is(:root[data-desktop], :root[data-iphone]) body:has(.agent-panel.active):not(:has(.terminal-panels.split)) .topbar { transform: translateZ(0); }
