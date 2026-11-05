@@ -116,6 +116,63 @@ const KIND_ICON = {
     dir: 'folder', image: 'fileImage', video: 'fileVideo', audio: 'fileAudio', pdf: 'fileText', archive: 'fileArchive',
     sheet: 'fileSheet', json: 'fileJson', key: 'fileKey', code: 'fileCode', text: 'fileText', other: 'file',
 };
+// O explorador de referência: os mesmos ícones e nomes de tipo
+const P = {
+    folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+    text: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8M16 13H8M16 17H8"/>',
+    image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+    back: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>', fwd: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>', up: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+    refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+    home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+    trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+    copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+    cut: '<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>',
+    paste: '<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+    pencil: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+    plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    list: '<path d="M3 12h.01M3 18h.01M3 6h.01M8 12h13M8 18h13M8 6h13"/>',
+    grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+    panel: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
+    chev: '<path d="m9 18 6-6-6-6"/>',
+    moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+    star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+    music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+    video: '<path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
+    code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+    archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+    sheet: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+    desktop: '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/>',
+    sortUp: '<path d="m18 15-6-6-6 6"/>', sortDn: '<path d="m6 9 6 6 6-6"/>',
+    undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+};
+const ic = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[name] || P.file}</svg>`;
+const TYPES = {
+    pdf: ['PDF', 'doc', 'file'], docx: ['Documento Word', 'doc', 'text'], pptx: ['Apresentação', 'doc', 'file'], txt: ['Texto', 'text', 'text'], md: ['Markdown', 'text', 'text'],
+    xlsx: ['Planilha Excel', 'sheet', 'sheet'], csv: ['Planilha CSV', 'sheet', 'sheet'], png: ['Imagem PNG', 'image', 'image'], jpg: ['Imagem JPEG', 'image', 'image'],
+    svg: ['Imagem SVG', 'image', 'image'], gif: ['Imagem GIF', 'image', 'image'], mp3: ['Áudio MP3', 'audio', 'music'], mp4: ['Vídeo MP4', 'video', 'video'],
+    zip: ['Arquivo ZIP', 'archive', 'archive'], js: ['JavaScript', 'code', 'code'], ts: ['TypeScript', 'code', 'code'], html: ['HTML', 'code', 'code'],
+    css: ['CSS', 'code', 'code'], json: ['JSON', 'code', 'code'], py: ['Python', 'code', 'code'],
+};
+/** @returns {[string, string, string]} nome do tipo, classe da cor, ícone */
+function typeOf(entry) {
+    if (entry.type === 'dir') return ['Pasta', 'folder', 'folder'];
+    const ext = extOf(entry.name);
+    return TYPES[ext] || [ext ? `${ext.toUpperCase()} arquivo` : 'Arquivo', 'text', 'file'];
+}
+const fullDate = ms => (ms ? new Date(ms).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+function refSize(bytes) {
+    let b = bytes || 0;
+    if (b < 1024) return `${b} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let i = -1;
+    do {
+        b /= 1024;
+        i++;
+    } while (b >= 1024 && i < 3);
+    return `${b.toLocaleString('pt-BR', { maximumFractionDigits: b < 10 ? 1 : 0 })} ${units[i]}`;
+}
 const KIND_LABEL = {
     dir: 'Pasta', image: 'Imagem', video: 'Vídeo', audio: 'Áudio', pdf: 'PDF', archive: 'Arquivo compactado',
     sheet: 'Planilha', json: 'JSON', key: 'Chave', code: 'Código', text: 'Texto',
@@ -323,10 +380,10 @@ export default class FilesSession {
                 <div class="fm-main">
                     <div class="fm-toolbar">
                         <button type="button" class="icon-btn" data-act="side" aria-label="Locais e favoritos">${icon('panelLeft', 18)}</button>
-                        <button type="button" class="icon-btn fm-wide" data-act="back" aria-label="Voltar" disabled>${icon('chevronLeft', 18)}</button>
-                        <button type="button" class="icon-btn fm-wide" data-act="forward" aria-label="Avançar" disabled>${icon('chevronRight', 18)}</button>
-                        <button type="button" class="icon-btn" data-act="up" aria-label="Pasta acima">${icon(isIphone() ? 'chevronLeft' : 'arrowUp', 18)}</button>
-                        <button type="button" class="icon-btn fm-only-desk" data-act="reload" aria-label="Atualizar" title="Atualizar (F5)">${icon('refresh', 18)}</button>
+                        <button type="button" class="icon-btn fm-wide" data-act="back" aria-label="Voltar" title="Voltar (Alt+←)" disabled>${isDesktop() ? ic('back') : icon('chevronLeft', 18)}</button>
+                        <button type="button" class="icon-btn fm-wide" data-act="forward" aria-label="Avançar" title="Avançar (Alt+→)" disabled>${isDesktop() ? ic('fwd') : icon('chevronRight', 18)}</button>
+                        <button type="button" class="icon-btn" data-act="up" aria-label="Pasta acima">${isDesktop() ? ic('up') : icon(isIphone() ? 'chevronLeft' : 'arrowUp', 18)}</button>
+                        <button type="button" class="icon-btn fm-only-desk" data-act="reload" aria-label="Atualizar" title="Atualizar (F5)">${ic('refresh')}</button>
                         <nav class="fm-crumbs" aria-label="Caminho"></nav>
                         <input type="text" class="fm-path-input" hidden aria-label="Caminho da pasta" placeholder="Cole ou digite o caminho" autocapitalize="off" autocorrect="off" spellcheck="false">
                         <button type="button" class="icon-btn" data-act="edit-path" aria-label="Colar ou digitar um caminho" title="Colar ou digitar um caminho (Ctrl+L)">${icon('pencil', 16)}</button>
@@ -338,23 +395,24 @@ export default class FilesSession {
                     </div>
                     <div class="fm-large"><h2 class="fm-large-title"></h2><span class="fm-large-sub"></span></div>
                     <div class="fm-actions" role="toolbar" aria-label="Ações">
-                        <button type="button" class="btn btn-primary btn-sm" data-do="new-folder">${icon('plus', 16)} Nova pasta</button>
-                        <button type="button" class="btn btn-ghost btn-sm" data-do="new-file">${icon('filePlus', 16)} Novo arquivo</button>
-                        <button type="button" class="btn btn-ghost btn-sm" data-do="upload">${icon('upload', 16)} Enviar</button>
+                        <button type="button" class="btn-x primary" data-do="new-folder">${ic('plus')}Nova pasta</button>
+                        <button type="button" class="btn-x" data-do="new-file">${ic('text')}Novo arquivo</button>
                         <span class="fm-sep"></span>
-                        <button type="button" class="icon-btn" data-do="cut" aria-label="Recortar" title="Recortar (Ctrl+X)">${icon('scissors', 17)}</button>
-                        <button type="button" class="icon-btn" data-do="copy" aria-label="Copiar" title="Copiar (Ctrl+C)">${icon('copy', 17)}</button>
-                        <button type="button" class="icon-btn" data-do="paste" aria-label="Colar" title="Colar (Ctrl+V)">${icon('clipboard', 17)}</button>
-                        <button type="button" class="icon-btn" data-do="rename" aria-label="Renomear" title="Renomear (F2)">${icon('pencil', 17)}</button>
-                        <button type="button" class="icon-btn" data-do="download" aria-label="Baixar" title="Baixar">${icon('download', 17)}</button>
-                        <button type="button" class="icon-btn" data-do="delete" aria-label="Excluir" title="Excluir (Del)">${icon('trash', 17)}</button>
+                        <button type="button" class="btn-x sq" data-do="cut" aria-label="Recortar" title="Recortar (Ctrl+X)">${ic('cut')}</button>
+                        <button type="button" class="btn-x sq" data-do="copy" aria-label="Copiar" title="Copiar (Ctrl+C)">${ic('copy')}</button>
+                        <button type="button" class="btn-x sq" data-do="paste" aria-label="Colar" title="Colar (Ctrl+V)">${ic('paste')}</button>
+                        <button type="button" class="btn-x sq" data-do="rename" aria-label="Renomear" title="Renomear (F2)">${ic('pencil')}</button>
+                        <button type="button" class="btn-x sq" data-do="delete" aria-label="Excluir" title="Excluir (Del)">${ic('trash')}</button>
+                        <button type="button" class="btn-x sq" data-do="undo" aria-label="Desfazer" title="Desfazer (Ctrl+Z)">${ic('undo')}</button>
+                        <button type="button" class="btn-x" data-do="empty-trash" hidden>${ic('trash')}Esvaziar lixeira</button>
                         <span class="fm-sep"></span>
-                        <select class="fm-sort-select" aria-label="Ordenar por">${SORTS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
-                        <button type="button" class="icon-btn" data-do="sort-dir" aria-label="Inverter ordem" title="Inverter ordem">${icon('chevronUp', 17)}</button>
+                        <select class="fm-sort-select" title="Ordenar por" aria-label="Ordenar por">${SORTS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+                        <button type="button" class="btn-x sq" data-do="sort-dir" aria-label="Inverter ordem" title="Inverter ordem"></button>
                         <span class="fm-grow"></span>
-                        <button type="button" class="icon-btn" data-do="view-list" aria-label="Detalhes" title="Detalhes">${icon('listView', 17)}</button>
-                        <button type="button" class="icon-btn" data-do="view-grid" aria-label="Ícones grandes" title="Ícones grandes">${icon('grid', 17)}</button>
-                        <button type="button" class="icon-btn" data-do="details" aria-label="Painel de detalhes" title="Painel de detalhes">${icon('panelLeft', 17)}</button>
+                        <button type="button" class="btn-x sq" data-do="view-list" aria-label="Detalhes" title="Detalhes">${ic('list')}</button>
+                        <button type="button" class="btn-x sq" data-do="view-grid" aria-label="Ícones grandes" title="Ícones grandes">${ic('grid')}</button>
+                        <button type="button" class="btn-x sq" data-do="details" aria-label="Painel de detalhes" title="Painel de detalhes">${ic('panel')}</button>
+                        <button type="button" class="btn-x sq" data-do="theme" aria-label="Alternar tema" title="Alternar tema"></button>
                     </div>
                     <div class="fm-iossort">
                         <button type="button" class="fm-iossort-btn" data-do="sort-menu"></button>
@@ -362,9 +420,9 @@ export default class FilesSession {
                     </div>
                     <div class="fm-progress" hidden></div>
                     <form class="fm-search" hidden role="search">
-                        ${icon('search', 16)}
+                        ${icon('search', 18)}
                         <input type="search" enterkeyhint="search" autocapitalize="off" autocorrect="off" spellcheck="false"
-                            placeholder="Filtrar nesta pasta" aria-label="Filtrar nesta pasta">
+                            placeholder="${isDesktop() ? 'Pesquisar nesta pasta (Ctrl+F)' : 'Filtrar nesta pasta'}" aria-label="Pesquisar nesta pasta">
                         <button type="submit" class="btn btn-ghost btn-sm">Buscar em subpastas</button>
                         <button type="button" class="icon-btn" data-act="search-close" aria-label="Fechar busca">${icon('x', 16)}</button>
                     </form>
@@ -676,9 +734,9 @@ export default class FilesSession {
         const crumbs = this.crumbs();
         this.el.crumbs.innerHTML = crumbs.map((c, i) => {
             const last = i === crumbs.length - 1;
-            const lead = i === 0 ? icon(this.source === 'local' ? (c.home ? 'house' : 'hardDrive') : 'cloud', 15) : '';
-            return `${i ? `<span class="fm-crumb-sep" aria-hidden="true">${icon('chevronRight', 14)}</span>` : ''}`
-                + `<button type="button" class="fm-crumb" data-i="${i}" ${last ? 'aria-current="page"' : ''}>${lead}<span>${esc(c.label)}</span></button>`;
+            const lead = i === 0 ? (isDesktop() ? ic(this.inTrash() ? 'trash' : c.home ? 'home' : 'desktop') : icon(this.source === 'local' ? (c.home ? 'house' : 'hardDrive') : 'cloud', 15)) : '';
+            return `${i ? `<span class="fm-crumb-sep" aria-hidden="true">${isDesktop() ? ic('chev') : icon('chevronRight', 14)}</span>` : ''}`
+                + `<button type="button" class="fm-crumb" data-i="${i}" ${last ? 'aria-current="page"' : ''}>${lead}<span>${esc(isDesktop() && c.label === '/' ? 'Este computador' : isDesktop() && c.label === '~' ? 'Início' : c.label)}</span></button>`;
         }).join('');
         this.crumbList = crumbs;
         // Keep the current folder in view on narrow screens
@@ -696,6 +754,11 @@ export default class FilesSession {
         this.el.head.querySelectorAll('[data-sort]').forEach(b => {
             const on = b.dataset.sort === this.prefs.sort;
             b.classList.toggle('sorted', on);
+            if (isDesktop()) {
+                const label = b.dataset.label || (b.dataset.label = b.textContent.trim());
+                b.innerHTML = `${esc(label)}${on ? ic(this.prefs.desc ? 'sortDn' : 'sortUp') : ''}`;
+                return;
+            }
             b.innerHTML = `${esc(b.textContent.replace(/[↑↓]/g, '').trim())}${on ? (this.prefs.desc ? ' ↓' : ' ↑') : ''}`;
         });
         this.el.fab.hidden = !!this.results;
@@ -708,14 +771,19 @@ export default class FilesSession {
         const selected = this.selectedEntries();
         const has = selected.length > 0;
         const set = (name, enabled) => { actions.querySelector(`[data-do="${name}"]`).disabled = !enabled; };
-        set('cut', has);
+        const inTrash = this.inTrash();
+        set('new-folder', !inTrash);
+        set('new-file', !inTrash);
+        set('cut', has && !inTrash);
         set('copy', has);
-        set('paste', !!shared.clipboard);
-        set('rename', selected.length === 1);
-        set('download', has);
+        set('paste', !!shared.clipboard && !inTrash);
+        set('rename', selected.length === 1 && !inTrash);
         set('delete', has);
+        set('undo', this.undoStack.length > 0);
+        actions.querySelector('[data-do="empty-trash"]').hidden = !inTrash;
+        actions.querySelector('[data-do="theme"]').innerHTML = ic(document.documentElement.dataset.theme === 'light' ? 'moon' : 'sun');
         sortSelect.value = this.prefs.sort;
-        actions.querySelector('[data-do="sort-dir"]').innerHTML = icon(this.prefs.desc ? 'chevronDown' : 'chevronUp', 17);
+        actions.querySelector('[data-do="sort-dir"]').innerHTML = ic(this.prefs.desc ? 'sortDn' : 'sortUp');
         actions.querySelector('[data-do="view-list"]').classList.toggle('on', this.prefs.view !== 'grid');
         actions.querySelector('[data-do="view-grid"]').classList.toggle('on', this.prefs.view === 'grid');
         actions.querySelector('[data-do="details"]').classList.toggle('on', this.prefs.details !== false);
@@ -732,9 +800,9 @@ export default class FilesSession {
         const size = selected.reduce((sum, e) => sum + (e.size || 0), 0);
         const clip = shared.clipboard;
         status.innerHTML = `<span>${count} ${count === 1 ? 'item' : 'itens'}</span>`
-            + (has ? `<span>${selected.length} selecionado${selected.length > 1 ? 's' : ''} · ${esc(formatSize(size))}</span>` : '')
+            + (has ? `<span>${selected.length} selecionado${selected.length > 1 ? 's' : ''} · ${esc(refSize(size))}</span>` : '')
             + (clip ? `<span>${clip.items.length} na área de transferência (${clip.op === 'move' ? 'recortar' : 'copiar'})</span>` : '')
-            + '<span class="fm-grow"></span><span class="fm-status-hint mono">Setas · Enter · F2 · Del · Ctrl+C/X/V · Ctrl+L</span>';
+            + '<span class="fm-grow"></span><span class="fm-status-hint">Setas · Enter · F2 · Del · Ctrl+C/X/V/Z · digite para localizar</span>';
         this.renderDetails(selected);
     }
 
@@ -745,42 +813,264 @@ export default class FilesSession {
         if (selected.length > 1) {
             const size = selected.reduce((sum, e) => sum + (e.size || 0), 0);
             const dirs = selected.filter(e => e.type === 'dir').length;
-            details.innerHTML = `<div class="fm-art">${icon('copy', 56)}</div><h3>${selected.length} itens selecionados</h3>
-                <dl><dt>Tamanho</dt><dd>${esc(formatSize(size))}</dd><dt>Pastas</dt><dd>${dirs}</dd><dt>Arquivos</dt><dd>${selected.length - dirs}</dd></dl>`;
+            details.innerHTML = `<div class="fm-art">${ic('copy')}</div><h3>${selected.length} itens selecionados</h3>
+                <dl><dt>Tamanho</dt><dd>${esc(refSize(size))}</dd><dt>Pastas</dt><dd>${dirs}</dd><dt>Arquivos</dt><dd>${selected.length - dirs}</dd></dl>`;
             return;
         }
         const entry = selected[0] || null;
-        const name = entry ? entry.name : (this.crumbs().at(-1)?.label || this.path);
-        const kind = entry ? kindOf(entry) : 'dir';
-        const isImage = entry && kind === 'image' && entry.source === 'local' && (entry.size || 0) < THUMB_MAX;
-        const art = isImage
+        const current = { type: 'dir', source: this.source, path: this.path, name: this.crumbs().at(-1)?.label || this.path };
+        const item = entry || current;
+        const [typeName, typeClass, typeIcon] = typeOf(item);
+        const image = entry && typeClass === 'image' && entry.source === 'local' && (entry.size || 0) < THUMB_MAX;
+        const art = image
             ? `<div class="fm-art"><img alt="" src="${esc(this.rawUrl(entry, { render: extOf(entry.name) === 'svg' ? 1 : undefined }))}"></div>`
-            : `<div class="fm-art kind-${kind}">${icon(KIND_ICON[kind], 64)}</div>`;
-        const where = entry ? entry.path.slice(0, Math.max(1, entry.path.length - entry.name.length - 1)) : this.path;
-        const rows = [['Tipo', KIND_LABEL[kind] || (extOf(name).toUpperCase() || 'Arquivo')]];
-        if (!entry) rows.push(['Itens', String(this.entries?.length || 0)]);
-        if (entry && entry.type !== 'dir') rows.push(['Tamanho', formatSize(entry.size)]);
-        if (entry?.mtime) rows.push(['Modificado', formatDate(entry.mtime)]);
-        rows.push(['Local', this.prettyPath(where, entry?.source || this.source)]);
+            : `<div class="fm-art ic-${typeClass}">${ic(typeIcon)}</div>`;
+        const where = entry ? entry.path.slice(0, Math.max(1, entry.path.length - entry.name.length - 1)) : (this.parent || this.path);
+        const isDir = item.type === 'dir';
         details.innerHTML = `${art}<h3></h3>
-            ${this.canRun(entry) ? `<button type="button" class="btn btn-primary btn-sm" data-do="run">${icon('play', 15)} Executar página</button>` : ''}
-            <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+            ${this.canRun(entry) ? `<button type="button" class="btn-x primary" data-do="run">${icon('play', 15)} Executar página</button>` : ''}
+            <dl><dt>Tipo</dt><dd>${esc(typeName)}</dd>${!entry ? `<dt>Itens</dt><dd>${(this.entries || []).filter(e => this.prefs.hidden || !e.name.startsWith('.')).length}</dd>` : ''}
+            <dt>Tamanho</dt><dd class="fm-det-size">${isDir ? '…' : esc(refSize(item.size))}</dd>
+            ${item.mtime ? `<dt>Modificado</dt><dd>${esc(fullDate(item.mtime))}</dd>` : ''}
+            <dt>Local</dt><dd>${esc(this.prettyPath(where, item.source).split('/').filter(Boolean).join(' › ') || where)}</dd></dl>
             ${entry ? '' : '<p class="fm-details-hint">Selecione um item para ver detalhes.</p>'}`;
-        details.querySelector('h3').textContent = name;
+        details.querySelector('h3').textContent = item.name;
+        if (isDir && item.source === 'local') {
+            request('GET', 'size', { params: { source: item.source, path: item.path } }).then(data => {
+                if (seq === this.detailSeq) details.querySelector('.fm-det-size').textContent = refSize(data.size);
+            }).catch(() => {
+                if (seq === this.detailSeq) details.querySelector('.fm-det-size').textContent = '—';
+            });
+        } else if (isDir) details.querySelector('.fm-det-size').textContent = '—';
         // Texto e código: as primeiras linhas no lugar do ícone
-        if (entry && entry.source === 'local' && ['text', 'code', 'json'].includes(kind) && (entry.size || 0) < PREVIEW_TEXT_MAX) {
+        if (entry && entry.source === 'local' && entry.type !== 'dir' && ['text', 'code', 'json'].includes(kindOf(entry)) && (entry.size || 0) < PREVIEW_TEXT_MAX) {
             request('GET', 'text', { params: { source: entry.source, path: entry.path } }).then(data => {
                 if (seq !== this.detailSeq || data.text == null) return;
                 const box = details.querySelector('.fm-art');
-                box.className = 'fm-art is-text mono';
+                box.className = 'fm-art is-text';
                 box.textContent = data.text.slice(0, 1200);
             }).catch(() => {});
+        }
+    }
+
+    // ---------- lixeira e desfazer ----------
+
+    trashDir() {
+        const home = shared.sources?.home;
+        return home ? `${home.replace(/\/+$/, '')}/.meuterminal/lixeira` : null;
+    }
+
+    inTrash() {
+        const dir = this.trashDir();
+        return !!dir && this.source === 'local' && (this.path === dir || this.path?.startsWith(`${dir}/`));
+    }
+
+    async trashNames() {
+        const dir = this.trashDir();
+        const data = await request('GET', 'list', { params: { source: 'local', path: dir } }).catch(() => null);
+        return data ? (data.entries || []).map(e => e.name) : null;
+    }
+
+    async ensureTrash() {
+        const dir = this.trashDir();
+        if (await this.trashNames()) return dir;
+        const home = shared.sources.home;
+        await request('POST', 'op', { body: { op: 'mkdir', source: 'local', path: home, name: '.meuterminal' } }).catch(() => {});
+        await request('POST', 'op', { body: { op: 'mkdir', source: 'local', path: `${home.replace(/\/+$/, '')}/.meuterminal`, name: 'lixeira' } }).catch(() => {});
+        return dir;
+    }
+
+    async readOrigins() {
+        const data = await request('GET', 'text', { params: { source: 'local', path: `${this.trashDir()}/.origens.json` } }).catch(() => null);
+        try {
+            return JSON.parse(data?.text || '{}');
+        } catch {
+            return {};
+        }
+    }
+
+    async writeOrigins(map) {
+        const path = `${this.trashDir()}/.origens.json`;
+        await request('PUT', 'text', { body: { source: 'local', path, text: JSON.stringify(map), force: true } });
+    }
+
+    /** Move para a lixeira, guardando de onde cada item veio. @returns {Promise<Array<{name: string, from: string, name0: string, type: string}>>} */
+    async moveToTrash(items) {
+        const dir = await this.ensureTrash();
+        const origins = await this.readOrigins();
+        const moved = [];
+        for (const item of items) {
+            const before = new Set(await this.trashNames() || []);
+            await request('POST', 'op', { body: { op: 'move', items: [{ source: 'local', path: item.path, name: item.name, type: item.type }], dest: { source: 'local', path: dir } } });
+            const name = (await this.trashNames() || []).find(n => !before.has(n)) || item.name;
+            const from = item.path.slice(0, Math.max(1, item.path.length - item.name.length - 1));
+            origins[name] = { from, name: item.name };
+            moved.push({ name, from, name0: item.name, type: item.type });
+        }
+        await this.writeOrigins(origins);
+        return moved;
+    }
+
+    async restoreFromTrash(names) {
+        const dir = this.trashDir();
+        const origins = await this.readOrigins();
+        for (const { name, type } of names) {
+            const dest = origins[name]?.from || shared.sources.home;
+            await request('POST', 'op', { body: { op: 'move', items: [{ source: 'local', path: `${dir}/${name}`, name, type }], dest: { source: 'local', path: dest } } });
+            // Na lixeira ele pode ter ganhado outro nome: volta com o de antes, se ainda estiver livre
+            const original = origins[name]?.name;
+            if (original && original !== name) {
+                await request('POST', 'op', { body: { op: 'rename', source: 'local', path: `${dest === '/' ? '' : dest}/${name}`, name: original } }).catch(() => {});
+            }
+            delete origins[name];
+        }
+        await this.writeOrigins(origins);
+    }
+
+    pushUndo(step) {
+        this.undoStack.push(step);
+        if (this.undoStack.length > 40) this.undoStack.shift();
+    }
+
+    async undo() {
+        const step = this.undoStack.pop();
+        if (!step) {
+            toast('Nada para desfazer');
+            return;
+        }
+        try {
+            await step();
+            toast('Ação desfeita');
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+        }
+        this.refresh();
+        this.refreshTrashCount();
+    }
+
+    async refreshTrashCount() {
+        const names = await this.trashNames();
+        const count = (names || []).filter(n => !n.startsWith('.')).length;
+        if (count === this.trashCount) return;
+        this.trashCount = count;
+        this.renderSide();
+    }
+
+    async emptyTrash() {
+        const dir = this.trashDir();
+        const names = ((await this.trashNames()) || []).filter(n => !n.startsWith('.'));
+        if (!names.length) return;
+        const ok = await askConfirm({ title: 'Esvaziar a lixeira?', message: `${names.length} ${names.length === 1 ? 'item será apagado' : 'itens serão apagados'} de vez.`, confirm: 'Esvaziar', danger: true });
+        if (!ok) return;
+        await request('POST', 'op', { body: { op: 'delete', source: 'local', paths: names.map(n => `${dir}/${n}`) } });
+        await this.writeOrigins({});
+        this.selection.clear();
+        this.undoStack.length = 0;
+        toast('Lixeira esvaziada');
+        this.refresh();
+        this.refreshTrashCount();
+    }
+
+    // ---------- renomear na própria linha ----------
+
+    startInlineRename(entry) {
+        if (!entry) return;
+        this.renaming = entry.path;
+        this.renderList();
+        const input = this.el.list.querySelector('.fm-ren');
+        if (!input) return;
+        input.focus();
+        const dot = entry.name.lastIndexOf('.');
+        input.setSelectionRange(0, entry.type === 'dir' || dot <= 0 ? entry.name.length : dot);
+        let done = false;
+        const finish = async commit => {
+            if (done) return;
+            done = true;
+            this.renaming = null;
+            const name = input.value.trim();
+            const problem = name ? badName(name) : null;
+            if (!commit || !name || name === entry.name) {
+                this.renderList();
+                this.el.list.focus();
+                return;
+            }
+            if (problem) {
+                toast(problem, { tone: 'error' });
+                this.renderList();
+                return;
+            }
+            try {
+                await request('POST', 'op', { body: { op: 'rename', source: entry.source, path: entry.path, name } });
+                const dir = entry.path.slice(0, Math.max(1, entry.path.length - entry.name.length - 1));
+                const old = entry.name;
+                const src = entry.source;
+                this.pushUndo(() => request('POST', 'op', { body: { op: 'rename', source: src, path: `${dir === '/' ? '' : dir}/${name}`, name: old } }));
+                await this.refresh();
+                this.focusEntry(name);
+            } catch (e) {
+                toast(e.message, { tone: 'error' });
+                this.renderList();
+            }
+        };
+        input.addEventListener('keydown', e => {
+            e.stopPropagation();
+            if (e.key === 'Enter') finish(true);
+            else if (e.key === 'Escape') finish(false);
+        });
+        input.addEventListener('blur', () => finish(true));
+    }
+
+    freeNameHere(base) {
+        const used = new Set((this.entries || []).map(e => e.name.toLowerCase()));
+        if (!used.has(base.toLowerCase())) return base;
+        const dot = base.lastIndexOf('.');
+        const stem = dot > 0 ? base.slice(0, dot) : base;
+        const ext = dot > 0 ? base.slice(dot) : '';
+        let i = 2;
+        while (used.has(`${stem} (${i})${ext}`.toLowerCase())) i++;
+        return `${stem} (${i})${ext}`;
+    }
+
+    /** Pasta ou arquivo novo, como no explorador: nasce com um nome e já entra em edição. */
+    async createHere(op, base) {
+        const name = this.freeNameHere(base);
+        try {
+            await request('POST', 'op', { body: { op, source: this.source, path: this.path, name } });
+            const path = `${this.path === '/' ? '' : this.path}/${name}`;
+            const type = op === 'mkdir' ? 'dir' : 'file';
+            if (this.source === 'local') this.pushUndo(() => this.moveToTrash([{ path, name, type }]));
+            await this.refresh();
+            const entry = this.entries.find(e => e.name === name);
+            if (entry) {
+                this.focusEntry(name);
+                this.startInlineRename(entry);
+            }
+        } catch (e) {
+            toast(e.message, { tone: 'error' });
+        }
+    }
+
+    typeToFind(key) {
+        this.findBuffer = (this.findBuffer || '') + key.toLowerCase();
+        clearTimeout(this.findTimer);
+        this.findTimer = setTimeout(() => { this.findBuffer = ''; }, 800);
+        const i = this.visible.findIndex(e => e.name.toLowerCase().startsWith(this.findBuffer));
+        if (i >= 0) {
+            this.selectOnly(i);
+            this.el.list.querySelector(`[data-i="${i}"]`)?.scrollIntoView({ block: 'nearest' });
         }
     }
 
     bindExplorer() {
         const { actions, iosSort, details, sortSelect, search, side, toolbar } = this.el;
         this.detailSeq = 0;
+        this.undoStack = [];
+        this.trashCount = 0;
+        this.el.list.addEventListener('mousedown', e => { if (e.target.closest('.fm-ren')) e.stopPropagation(); }, true);
+        this.el.list.addEventListener('pointerdown', e => { if (e.target.closest('.fm-ren')) e.stopPropagation(); }, true);
+        this.el.list.addEventListener('click', e => { if (e.target.closest('.fm-ren')) e.stopPropagation(); }, true);
+        this.el.list.addEventListener('dblclick', e => { if (e.target.closest('.fm-ren')) e.stopPropagation(); }, true);
+        shared.loadSources().then(() => this.refreshTrashCount());
         this.treeOpen = new Set();
         this.treeKids = new Map();
         // PC e iPhone: a busca fica sempre à vista
@@ -800,12 +1090,13 @@ export default class FilesSession {
             switch (btn.dataset.do) {
                 case 'new-folder': return this.newFolder();
                 case 'new-file': return this.newFile();
-                case 'upload': return this.pickUpload();
+                case 'undo': return this.undo();
+                case 'empty-trash': return this.emptyTrash();
+                case 'theme': return this.settings.set('theme', document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
                 case 'cut': return this.copyItems(items, 'move');
                 case 'copy': return this.copyItems(items, 'copy');
                 case 'paste': return this.paste();
                 case 'rename': return items[0] && this.rename(items[0]);
-                case 'download': return this.download(items);
                 case 'delete': return this.remove(items);
                 case 'sort-dir':
                     this.prefs.desc = !this.prefs.desc;
@@ -869,9 +1160,8 @@ export default class FilesSession {
 
     /** Abre na árvore o caminho até a pasta atual. */
     async expandTreeTo(path) {
-        const home = shared.sources?.home;
-        const root = home && (path === home || path.startsWith(`${home}/`)) ? home : '/';
-        const rest = path.slice(root === '/' ? 1 : root.length + 1).split('/').filter(Boolean);
+        const root = '/';
+        const rest = path.slice(1).split('/').filter(Boolean);
         let at = root;
         for (const part of ['', ...rest]) {
             if (part) at = `${at === '/' ? '' : at}/${part}`;
@@ -887,20 +1177,20 @@ export default class FilesSession {
         const known = this.treeKids.get(path);
         const current = this.source === 'local' && this.path === path;
         const row = `<div class="fm-tree-row${current ? ' current' : ''}" style="--depth:${depth}">
-            <button type="button" class="fm-tree-toggle${open ? ' open' : ''}${known && !known.length ? ' empty' : ''}" data-tree="${esc(path)}" aria-label="${open ? 'Recolher' : 'Expandir'} ${esc(label)}">${icon('chevronRight', 12)}</button>
-            <button type="button" class="fm-tree-item" data-go="local" data-path="${esc(path)}" title="${esc(path)}">${icon(iconName, 16)}<span>${esc(label)}</span></button>
+            <button type="button" class="fm-tree-toggle${open ? ' open' : ''}${known && !known.length ? ' empty' : ''}" data-tree="${esc(path)}" aria-label="${open ? 'Recolher' : 'Expandir'} ${esc(label)}">${ic('chev')}</button>
+            <button type="button" class="fm-tree-item" data-go="local" data-path="${esc(path)}" title="${esc(path)}">${ic(iconName)}<span>${esc(label)}</span></button>
         </div>`;
         if (!open || !known) return row;
-        const home = shared.sources?.home;
-        const kids = path === '/' && home ? known.filter(d => `/${d.name}` !== home) : known; // a pasta "Início" já tem a sua árvore
-        return row + kids.map(d => this.treeHtml(d.path || `${path === '/' ? '' : path}/${d.name}`, d.name, 'folder', depth + 1)).join('');
+        return row + known.map(d => this.treeHtml(d.path || `${path === '/' ? '' : path}/${d.name}`, d.name, 'folder', depth + 1)).join('');
     }
 
     rowHtml(e, i) {
         const kind = kindOf(e);
         const selected = this.selection.has(e.path);
         const cut = shared.clipboard?.op === 'move' && shared.clipboard.items.some(c => c.path === e.path && c.source === e.source);
-        const thumb = this.prefs.view === 'grid' && kind === 'image' && e.source === 'local' && (e.size || 0) < THUMB_MAX
+        const [typeName, typeClass, typeIcon] = typeOf(e);
+        const useRef = isDesktop() || this.prefs.view === 'grid';
+        const thumb = useRef ? ic(typeIcon) : this.prefs.view === 'grid' && kind === 'image' && e.source === 'local' && (e.size || 0) < THUMB_MAX
             ? `<img loading="lazy" decoding="async" alt="" src="${esc(this.rawUrl(e, { render: extOf(e.name) === 'svg' ? 1 : undefined }))}">`
             : icon(e.link && e.type === 'dir' ? 'folderSymlink' : KIND_ICON[kind], this.prefs.view === 'grid' ? 34 : 20);
         const sub = this.results
@@ -910,12 +1200,12 @@ export default class FilesSession {
             + `${e.name.startsWith('.') ? ' dotfile' : ''}" role="option" id="${this.id}-r${i}" data-i="${i}"`
             + ` aria-selected="${selected}" data-kind="${kind}"${coarse() ? '' : ' draggable="true"'}>`
             + `<span class="fm-check" aria-hidden="true">${icon(selected ? 'squareCheck' : 'square', 18)}</span>`
-            + `<span class="fm-icon kind-${kind}">${thumb}</span>`
-            + `<span class="fm-name"><span class="fm-title">${esc(e.name)}${e.link ? ' <span class="fm-link" title="Atalho (link simbólico)">↗</span>' : ''}</span>`
+            + `<span class="fm-icon kind-${kind}${useRef ? ` ic-${typeClass}` : ''}">${thumb}</span>`
+            + `<span class="fm-name">${this.renaming === e.path ? `<input class="fm-ren" value="${esc(e.name)}" aria-label="Novo nome" spellcheck="false">` : ''}<span class="fm-title"${this.renaming === e.path ? ' hidden' : ''}>${esc(e.name)}${e.link ? ' <span class="fm-link" title="Atalho (link simbólico)">↗</span>' : ''}</span>`
             + `<span class="fm-sub">${esc(sub)}</span></span>`
-            + `<span class="fm-date">${esc(formatDate(e.mtime))}</span>`
-            + `<span class="fm-type">${esc(KIND_LABEL[kind] || (extOf(e.name).toUpperCase() || 'Arquivo'))}</span>`
-            + `<span class="fm-size">${e.type === 'dir' ? '' : esc(formatSize(e.size))}</span>`
+            + `<span class="fm-date">${esc(isDesktop() ? fullDate(e.mtime) : formatDate(e.mtime))}</span>`
+            + `<span class="fm-type">${esc(typeName)}</span>`
+            + `<span class="fm-size">${e.type === 'dir' ? '' : esc(isDesktop() ? refSize(e.size) : formatSize(e.size))}</span>`
             + `<button type="button" class="icon-btn fm-more" tabindex="-1" aria-label="Ações de ${esc(e.name)}">${icon('more', 17)}</button>`
             + '</div>';
     }
@@ -1008,15 +1298,16 @@ export default class FilesSession {
             </button>${extra}</li>`;
         const home = src?.home || '';
         if (isDesktop()) {
-            const favRows = favs.map((f, i) => item(`data-go="${esc(f.source)}" data-path="${esc(f.path)}"`, 'star',
-                f.name || f.path.split(/[\\/]/).filter(Boolean).pop() || f.path, '', here(f.source, f.path),
-                `<button type="button" class="icon-btn fm-side-remove" data-unfav="${i}" aria-label="Remover dos favoritos">${icon('x', 14)}</button>`)).join('');
-            const remotes = (src?.sources || []).filter(s => s.remote);
-            this.el.side.innerHTML = `<div class="fm-side-head"><span>Favoritos</span></div>
-                <ul>${item(`data-go="local" data-path="${esc(home)}"`, 'house', 'Início', '', here('local', home))}${favRows}</ul>
-                <div class="fm-side-head"><span>Pastas</span></div>
-                ${home && home !== '/' ? this.treeHtml(home, 'Início', 'house') : ''}${this.treeHtml('/', 'Raiz do servidor', 'hardDrive')}
-                ${remotes.length ? `<div class="fm-side-head"><span>Nuvem</span></div><ul>${remotes.map(r => item(`data-go="${esc(r.id)}" data-path="/"`, 'cloud', r.name, '', this.source === r.id)).join('')}</ul>` : ''}`;
+            const row = (attrs, name, label, current, extra = '') => `<div class="fm-tree-row fm-flat${current ? ' current' : ''}">
+                <button type="button" class="fm-tree-item" ${attrs}>${ic(name)}<span>${esc(label)}</span></button>${extra}</div>`;
+            const favRows = favs.map(f => row(`data-go="${esc(f.source)}" data-path="${esc(f.path)}"`, 'star',
+                f.name || f.path.split(/[\\/]/).filter(Boolean).pop() || f.path, here(f.source, f.path))).join('');
+            const remotes = (src?.sources || []).filter(r => r.remote);
+            const trash = this.trashDir();
+            this.el.side.innerHTML = `<h6>Favoritos</h6>${row(`data-go="local" data-path="${esc(home)}"`, 'home', 'Início', here('local', home))}${favRows}
+                <h6>Pastas</h6>${this.treeHtml('/', 'Este computador', 'desktop')}
+                ${remotes.length ? `<h6>Nuvem</h6>${remotes.map(r => row(`data-go="${esc(r.id)}" data-path="/"`, 'folder', r.name, this.source === r.id)).join('')}` : ''}
+                <h6>Sistema</h6>${row(`data-go="local" data-path="${esc(trash || '')}"`, 'trash', 'Lixeira', this.inTrash(), `<span class="fm-badge">${this.trashCount || 0}</span>`)}`;
             return;
         }
         let html = `<div class="fm-side-head"><span>Locais</span>
@@ -1617,6 +1908,18 @@ export default class FilesSession {
                     handled();
                     return this.newFolder();
                 }
+                if (k === 'z') {
+                    handled();
+                    return this.undo();
+                }
+                if (k === 'f' && isDesktop()) {
+                    handled();
+                    return this.openSearch();
+                }
+            }
+            if (isDesktop() && e.key.length === 1 && !mod && !e.altKey) {
+                handled();
+                return this.typeToFind(e.key);
             }
             return undefined;
         });
@@ -1724,6 +2027,29 @@ export default class FilesSession {
             this.setPref('sort', key);
         } });
         const current = { source: this.source, path: this.path, name: this.crumbList?.at(-1)?.label || this.path, type: 'dir' };
+        if (isDesktop()) {
+            const trash = this.inTrash();
+            showMenu(trash ? [{ label: 'Esvaziar lixeira', icon: 'trash', danger: true, run: () => this.emptyTrash() }] : [
+                { label: 'Nova pasta', icon: 'folder', run: () => this.newFolder() },
+                { label: 'Novo arquivo de texto', icon: 'fileText', run: () => this.newFile() },
+                'separator',
+                { label: 'Colar', icon: 'clipboard', hint: 'Ctrl+V', disabled: !shared.clipboard, run: () => this.paste() },
+                { label: 'Desfazer', icon: 'undo-2', hint: 'Ctrl+Z', disabled: !this.undoStack.length, run: () => this.undo() },
+                'separator',
+                this.prefs.view === 'grid'
+                    ? { label: 'Ver em detalhes', icon: 'listView', run: () => this.setPref('view', 'list') }
+                    : { label: 'Ver em ícones grandes', icon: 'grid', run: () => this.setPref('view', 'grid') },
+                { label: 'Atualizar', icon: 'refresh', hint: 'F5', run: () => this.refresh() },
+                'separator',
+                { label: 'Enviar arquivos', icon: 'upload', run: () => this.pickUpload() },
+                { label: 'Enviar pasta', icon: 'folderInput', run: () => this.folderInput.click() },
+                { label: 'Mostrar ocultos', icon: this.prefs.hidden ? 'eye' : 'eyeOff', checked: this.prefs.hidden, run: () => this.setPref('hidden', !this.prefs.hidden) },
+                { label: fav ? 'Remover dos favoritos' : 'Adicionar aos favoritos', icon: fav ? 'starOff' : 'star', run: () => this.toggleFavorite(current) },
+                ...(local ? [{ label: 'Abrir terminal aqui', icon: 'terminal', run: () => this.openTerminal(this.path) }] : []),
+                { label: 'Copiar caminho', icon: 'link', run: () => this.copyPath(current) },
+            ], { anchor, x: pos.x, y: pos.y, label: 'Ações da pasta' });
+            return;
+        }
         showMenu([
             { label: 'Nova pasta', icon: 'folderPlus', run: () => this.newFolder() },
             { label: 'Novo arquivo', icon: 'filePlus', run: () => this.newFile() },
@@ -1759,6 +2085,36 @@ export default class FilesSession {
         const kind = one ? kindOf(one) : null;
         const fav = one?.type === 'dir' && (shared.favorites || []).some(f => f.source === one.source && f.path === one.path);
         const hint = k => (coarse() ? '' : k);
+        if (isDesktop()) {
+            if (this.inTrash()) {
+                showMenu([
+                    { label: 'Restaurar', icon: 'undo-2', run: async () => {
+                        await this.restoreFromTrash(items.map(i => ({ name: i.name, type: i.type })));
+                        this.selection.clear();
+                        toast('Restaurado');
+                        this.refresh();
+                        this.refreshTrashCount();
+                    } },
+                    { label: 'Excluir permanentemente', icon: 'trash', danger: true, hint: 'Del', run: () => this.remove(items) },
+                ], { anchor, x, y, label: 'Lixeira' });
+                return;
+            }
+            showMenu([
+                { label: 'Abrir', icon: 'folder', hint: 'Enter', disabled: !one, run: () => this.open(one) },
+                'separator',
+                { label: 'Recortar', icon: 'scissors', hint: 'Ctrl+X', run: () => this.copyItems(items, 'move') },
+                { label: 'Copiar', icon: 'copy', hint: 'Ctrl+C', run: () => this.copyItems(items, 'copy') },
+                { label: 'Renomear', icon: 'pencil', hint: 'F2', disabled: !one, run: () => this.rename(one) },
+                'separator',
+                { label: 'Mover para a Lixeira', icon: 'trash', danger: true, hint: 'Del', run: () => this.remove(items) },
+                'separator',
+                ...(this.canRun(one) ? [{ label: 'Executar página', icon: 'play', run: () => this.runPage(one) }] : []),
+                { label: 'Baixar', icon: 'download', run: () => this.download(items) },
+                ...(one ? [{ label: 'Copiar caminho', icon: 'link', run: () => this.copyPath(one) }, { label: 'Propriedades', icon: 'info', run: () => this.properties(one) }] : []),
+                ...(one?.type === 'dir' ? [{ label: fav ? 'Remover dos favoritos' : 'Adicionar aos favoritos', icon: fav ? 'starOff' : 'star', run: () => this.toggleFavorite(one) }] : []),
+            ], { anchor, x, y, label: one ? `Ações de ${one.name}` : `${items.length} itens` });
+            return;
+        }
         const list = one ? [
             { label: one.type === 'dir' ? 'Abrir' : 'Abrir / visualizar', icon: one.type === 'dir' ? 'folderOpen' : 'eye', hint: hint('Enter'), run: () => this.open(one) },
             ...(this.canRun(one) ? [{ label: 'Executar página', icon: 'play', run: () => this.runPage(one) }] : []),
@@ -1848,6 +2204,12 @@ export default class FilesSession {
 
     copyItems(items, op) {
         if (!items.length) return;
+        if (isDesktop()) {
+            shared.setClipboard({ op, items: items.map(({ source, path, name, type }) => ({ source, path, name, type })) });
+            this.renderList();
+            toast(`${items.length} ${op === 'move' ? 'item(ns) recortado(s)' : 'item(ns) copiado(s)'}`);
+            return;
+        }
         shared.setClipboard({ op, items: items.map(({ source, path, name, type }) => ({ source, path, name, type })) });
         this.clearSelection();
         this.renderList();
@@ -1860,7 +2222,16 @@ export default class FilesSession {
     async paste() {
         const clip = shared.clipboard;
         if (!clip) return;
-        const ok = await this.transfer(clip.items, { source: this.source, path: this.path }, clip.op);
+        const dest = { source: this.source, path: this.path };
+        const ok = await this.transfer(clip.items, dest, clip.op);
+        if (ok && clip.op === 'move' && clip.items.every(i => i.source === 'local') && dest.source === 'local') {
+            const back = clip.items.map(i => ({ ...i, from: i.path.slice(0, Math.max(1, i.path.length - i.name.length - 1)) }));
+            this.pushUndo(async () => {
+                for (const i of back) {
+                    await request('POST', 'op', { body: { op: 'move', items: [{ source: 'local', path: `${dest.path === '/' ? '' : dest.path}/${i.name}`, name: i.name, type: i.type }], dest: { source: 'local', path: i.from } } });
+                }
+            });
+        }
         if (ok && clip.op === 'move') shared.setClipboard(null);
     }
 
@@ -1890,6 +2261,7 @@ export default class FilesSession {
     }
 
     async newFolder() {
+        if (isDesktop()) return this.createHere('mkdir', 'Nova pasta');
         const name = await askText({ title: 'Nova pasta', label: 'Nome da pasta', value: 'Nova pasta', confirm: 'Criar', validate: badName });
         if (!name) return;
         try {
@@ -1902,6 +2274,7 @@ export default class FilesSession {
     }
 
     async newFile() {
+        if (isDesktop()) return this.createHere('touch', 'Novo documento.txt');
         const name = await askText({ title: 'Novo arquivo', label: 'Nome do arquivo', value: 'novo.txt', confirm: 'Criar',
             selectStem: true, validate: badName });
         if (!name) return;
@@ -1917,6 +2290,7 @@ export default class FilesSession {
 
     async rename(entry) {
         if (!entry) return;
+        if (isDesktop()) return this.startInlineRename(entry);
         const name = await askText({ title: 'Renomear', label: 'Novo nome', value: entry.name, confirm: 'Renomear',
             selectStem: entry.type === 'file', validate: badName });
         if (!name || name === entry.name) return;
@@ -1932,13 +2306,27 @@ export default class FilesSession {
 
     async remove(items) {
         if (!items.length) return;
+        // No servidor, excluir vai para a lixeira. Na lixeira, excluir é de vez (pergunta abaixo)
+        if (items[0].source === 'local' && this.trashDir() && !this.inTrash()) {
+            try {
+                const moved = await this.moveToTrash(items);
+                this.pushUndo(() => this.restoreFromTrash(moved));
+                this.selection.clear();
+                toast(`${items.length} item(ns) movido(s) para a Lixeira (Ctrl+Z desfaz)`);
+            } catch (e) {
+                toast(e.message, { tone: 'error', duration: 6000 });
+            }
+            this.refresh();
+            this.refreshTrashCount();
+            return;
+        }
         const remote = items[0].source !== 'local';
         const dirs = items.filter(i => i.type === 'dir').length;
         const ok = await askConfirm({
             title: items.length === 1 ? `Excluir "${items[0].name}"?` : `Excluir ${items.length} itens?`,
             message: (dirs ? 'Pastas são apagadas com tudo o que têm dentro. ' : '')
                 + (remote ? 'No Google Drive, os arquivos vão para a lixeira do Drive (outros remotes podem apagar de vez).'
-                    : 'Isso não pode ser desfeito: não há lixeira no servidor.'),
+                    : 'Isso apaga de vez e não pode ser desfeito.'),
             details: items.length > 1 ? items.map(i => i.name + (i.type === 'dir' ? '/' : '')) : [],
             confirm: 'Excluir',
             danger: true,
@@ -1954,6 +2342,7 @@ export default class FilesSession {
             toast(e.message, { tone: 'error', duration: 6000 });
         }
         this.selection.clear();
+        this.refreshTrashCount();
         if (this.results) {
             const gone = new Set(items.map(i => i.path));
             this.results.entries = this.results.entries.filter(e => !gone.has(e.path));
