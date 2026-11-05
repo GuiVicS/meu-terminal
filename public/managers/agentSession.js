@@ -123,20 +123,17 @@ export default class AgentSession {
 
     // ---------- view ----------
 
-    /** A conversa passa por trás da barra de abas e do título: a altura deles vira espaço no início dela. */
+    /** A conversa passa por trás do título: a altura dele vira espaço no início dela. */
     watchOverlayHeights() {
         if (typeof ResizeObserver === 'undefined') return;
         const head = this.panel.querySelector('.ag-head');
-        const topbar = document.querySelector('.topbar');
         this.overlayHeights = new ResizeObserver(() => {
             this.panel.style.setProperty('--ag-head-h', `${head.offsetHeight}px`);
             const log = this.el?.log;
             if (log) this.panel.style.setProperty('--ag-bar-w', `${log.offsetWidth - log.clientWidth}px`);
-            document.documentElement.style.setProperty('--ag-topbar-h', `${topbar?.offsetHeight || 0}px`);
         });
         this.overlayHeights.observe(head);
         if (this.el?.log) this.overlayHeights.observe(this.el.log);
-        if (topbar) this.overlayHeights.observe(topbar);
     }
 
     mount(parent) {
@@ -788,9 +785,24 @@ export default class AgentSession {
         }
         const [permissionId, d] = list[0];
         const options = d.options || [];
+        this.later(() => this.watchPermissionCard(permissionId), 60);
         this.el.pending.innerHTML = `
             <button type="button" class="ag-pending-title" data-goto>${icon('shield', 15)} <span>${esc(permissionTitle(d))}</span>${list.length > 1 ? ` <em>+${list.length - 1}</em>` : ''}</button>
             <div class="ag-pending-actions">${options.map(o => `<button type="button" class="btn ${o.kind === 'allow_once' ? 'btn-primary' : o.kind.startsWith('reject') ? 'btn-ghost' : ''}" data-perm="${esc(permissionId)}" data-option="${esc(o.id)}">${esc(o.name)}</button>`).join('')}</div>`;
+    }
+
+    /** Com o cartão do pedido à vista, ele já tem os botões: a barra só aparece quando ele sai da tela. */
+    watchPermissionCard(permissionId) {
+        this.permissionSeen?.disconnect();
+        this.permissionSeen = null;
+        const { pending, log } = this.el;
+        pending.classList.remove('card-seen');
+        const card = log.querySelector(`.ag-perm[data-permission-id="${CSS.escape(permissionId)}"]`);
+        if (!card || typeof IntersectionObserver === 'undefined') return;
+        this.permissionSeen = new IntersectionObserver(([entry]) => {
+            pending.classList.toggle('card-seen', entry.isIntersecting);
+        }, { root: log, rootMargin: `0px 0px -${pending.offsetHeight + (this.composer?.el?.offsetHeight || 0)}px 0px`, threshold: 0.5 });
+        this.permissionSeen.observe(card);
     }
 
     // ---------- actions ----------

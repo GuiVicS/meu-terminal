@@ -229,6 +229,10 @@ export function openFileViewer({ path = null, text = null, name = null, kind = n
         }
     });
     document.addEventListener('keydown', onKey, true);
+    // Um quadro que abre (PDF, página) pega o foco, e as teclas param de chegar aqui: o Esc não fecharia
+    body.addEventListener('load', e => {
+        if (e.target.tagName === 'IFRAME') body.focus({ preventScroll: true });
+    }, true);
     document.body.appendChild(box);
     if (box.showPopover) box.showPopover();
     body.focus({ preventScroll: true }); // leaves the arrow keys scrolling the document
