@@ -1513,7 +1513,7 @@ body.page-login { overflow: auto; }
 
 /* list header (desktop list view) */
 .fm-head {
-    flex-shrink: 0; display: grid; grid-template-columns: 1fr 110px 150px 40px; gap: 8px; padding: 0 12px 0 60px;
+    flex-shrink: 0; display: grid; grid-template-columns: 1fr 150px 110px 40px; gap: 8px; padding: 0 12px 0 60px;
     border-bottom: 1px solid var(--divider); font-size: 12px; color: var(--text-3);
 }
 .fm-head button { height: 30px; text-align: left; color: inherit; font-weight: 500; }
@@ -1527,7 +1527,7 @@ body.page-login { overflow: auto; }
     scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
 .fm-row {
-    position: relative; display: grid; grid-template-columns: 0 28px 1fr 110px 150px 40px; align-items: center; gap: 8px;
+    position: relative; display: grid; grid-template-columns: 0 28px 1fr 150px 110px 40px; align-items: center; gap: 8px;
     min-height: 44px; padding: 3px 6px 3px 12px; border-radius: var(--radius-md); cursor: default; user-select: none;
     -webkit-user-select: none; -webkit-touch-callout: none; color: var(--text);
 }
@@ -1540,7 +1540,7 @@ body.page-login { overflow: auto; }
 .fm-row.drop-target { background: var(--accent-soft); outline: 1.5px dashed var(--accent); }
 .fm-check { display: inline-grid; visibility: hidden; overflow: hidden; color: var(--text-3); }
 .fm-row.selected .fm-check { color: var(--accent); }
-.fm-list.selecting .fm-row { grid-template-columns: 26px 28px 1fr 110px 150px 40px; }
+.fm-list.selecting .fm-row { grid-template-columns: 26px 28px 1fr 150px 110px 40px; }
 .fm-list.selecting .fm-check { visibility: visible; }
 .fm-icon { display: grid; place-items: center; color: var(--text-2); }
 .fm-icon.kind-dir { color: var(--accent); }
@@ -4539,13 +4539,14 @@ audio.fm-media { width: min(520px, 90%); }
 /* Ao subir a conversa: enquanto as mensagens anteriores chegam */
 .ag-older { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px; font-size: 12.5px; color: var(--text-muted); }
 
-/* Edge fade: o conteúdo some nas bordas da área rolável, sem desfoque. --fade-inset: faixa de baixo sempre vazia */
+/* Sombra nas pontas (lista lateral e versão leve do desfoque). --fade-inset: faixa de baixo sempre vazia */
 @property --fade-top { syntax: '<length>'; inherits: false; initial-value: 0px; }
 @property --fade-bottom { syntax: '<length>'; inherits: false; initial-value: 0px; }
 .edge-fade {
     --fade-inset: 0px;
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
-    mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
+    --fade-mask: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
+    -webkit-mask-image: var(--fade-mask);
+    mask-image: var(--fade-mask);
     transition: --fade-top .18s ease, --fade-bottom .18s ease;
 }
 .edge-fade[data-fade-top] { --fade-top: 46px; }
@@ -4697,8 +4698,6 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-liquid][data-desktop] .ag-composer { --lg-glass: color-mix(in srgb, var(--surface) 30%, transparent); --lg-blur: 5px; }
 :root[data-liquid][data-iphone] .ag-composer { --lg-glass: color-mix(in srgb, var(--surface) 38%, transparent); --lg-blur: 8px; }
 /* O vidro precisa ter o que mostrar: a conversa não some antes de passar atrás do campo */
-:root[data-liquid][data-iphone] .ag-main::after { background: none; }
-:root[data-liquid]:is([data-desktop], [data-iphone]) .ag-log.edge-fade[data-fade-bottom] { --fade-bottom: 12px; }
 :root[data-liquid]:is([data-desktop], [data-iphone]) .liquid-host { display: contents; border-radius: inherit; }
 :root[data-liquid]:is([data-desktop], [data-iphone]) .liquid-host > .lg-glass { position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; }
 :root[data-liquid][data-desktop] :is(.tabstrip, .topbar-actions .icon-btn, .menu),
@@ -4728,20 +4727,19 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-desktop] .ag-composer .ag-selectors { padding-left: 8px; }
 :root[data-desktop] .ag-composer .ag-mic.recording { color: #fff; }
 
-/* ---- pontas da conversa: desfoque progressivo, forte na borda e sumindo aos poucos, sem escurecer ---- */
+/* ---- topo das áreas roláveis: desfoque progressivo, forte na borda e sumindo aos poucos, sem escurecer ---- */
 .ag-edge { display: none; position: absolute; left: 0; right: 0; z-index: 2; pointer-events: none; --edge-dir: to bottom; }
 .ag-edge i { position: absolute; inset: 0; }
-.ag-edge i:nth-child(1) { --edge-blur: 1.5px; --edge-full: 62%; --edge-end: 100%; }
-.ag-edge i:nth-child(2) { --edge-blur: 3px; --edge-full: 44%; --edge-end: 82%; }
-.ag-edge i:nth-child(3) { --edge-blur: 6px; --edge-full: 26%; --edge-end: 62%; }
-.ag-edge i:nth-child(4) { --edge-blur: 12px; --edge-full: 10%; --edge-end: 42%; }
+.ag-edge i:nth-child(1) { --edge-blur: 1.5px; --edge-full: 74%; --edge-end: 100%; }
+.ag-edge i:nth-child(2) { --edge-blur: 3px; --edge-full: 64%; --edge-end: 90%; }
+.ag-edge i:nth-child(3) { --edge-blur: 6px; --edge-full: 54%; --edge-end: 80%; }
+.ag-edge i:nth-child(4) { --edge-blur: 18px; --edge-full: 44%; --edge-end: 70%; }
 .ag-edge i {
     -webkit-backdrop-filter: blur(var(--edge-blur)); backdrop-filter: blur(var(--edge-blur));
     -webkit-mask-image: linear-gradient(var(--edge-dir), #000 var(--edge-full), transparent var(--edge-end));
     mask-image: linear-gradient(var(--edge-dir), #000 var(--edge-full), transparent var(--edge-end));
 }
 .ag-edge-top { top: 0; height: var(--ag-edge-top, 48px); }
-.ag-edge-bottom { bottom: 0; height: calc(var(--ag-composer-h, 100px) + 40px); --edge-dir: to top; }
 .ag-is-empty .ag-edge { display: none !important; }
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .ag-edge { display: block; }
@@ -4749,21 +4747,16 @@ audio.fm-media { width: min(520px, 90%); }
     :root[data-iphone] .ag-main::after { background: none; }
 }
 /* Mesmo desfoque nas outras áreas roláveis: terminal, listas, Arquivos, notas (ui/edgeFade.js) */
-.edge-auto { z-index: 3; left: auto; right: auto; }
+.edge-auto { z-index: 3; left: auto; right: auto; overflow: hidden; }
 .edge-auto:not([data-on]) { display: none !important; }
-.edge-auto-bottom { --edge-dir: to top; }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
     .ag-edge { display: none !important; }
 }
 
 /* Versão leve, quando o desfoque trava o aparelho (ui/edgeBlur.js): a película fica, a conversa esmaece */
 :root[data-edge-lite] .ag-edge i { display: none; }
-:root[data-edge-lite] .ag-edge-bottom { display: none; }
 :root[data-edge-lite] .edge-auto { display: none !important; }
-:root[data-edge-lite] .edge-fade:not(.ag-log) {
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
-    mask-image: linear-gradient(to bottom, transparent, #000 var(--fade-top), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
-}
+:root[data-edge-lite] .edge-fade:not(.ag-log) { -webkit-mask-image: var(--fade-mask); mask-image: var(--fade-mask); }
 :root[data-edge-lite] .ag-log.edge-fade {
     -webkit-mask-image: linear-gradient(to bottom, transparent var(--ag-over, 0px), #000 calc(var(--ag-over, 0px) + 24px), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
     mask-image: linear-gradient(to bottom, transparent var(--ag-over, 0px), #000 calc(var(--ag-over, 0px) + 24px), #000 calc(100% - var(--fade-inset) - var(--fade-bottom)), transparent calc(100% - var(--fade-inset)));
@@ -4775,11 +4768,7 @@ audio.fm-media { width: min(520px, 90%); }
     --ag-over: calc(var(--ag-topbar-h, 64px) + var(--ag-head-h, 48px));
     --ag-edge-top: calc(var(--ag-over) + 72px);
 }
-.ag-edge-top i:nth-child(1) { --edge-blur: 1.5px; --edge-full: 74%; --edge-end: 100%; }
-.ag-edge-top i:nth-child(2) { --edge-blur: 3px; --edge-full: 64%; --edge-end: 90%; }
-.ag-edge-top i:nth-child(3) { --edge-blur: 6px; --edge-full: 54%; --edge-end: 80%; }
-.ag-edge-top i:nth-child(4) { --edge-blur: 18px; --edge-full: 44%; --edge-end: 70%; }
-.ag-edge-top::after {
+.ag-edge::after {
     content: ''; position: absolute; inset: 0;
     background: linear-gradient(to bottom,
         color-mix(in srgb, var(--bg) 52%, transparent) 0%,
@@ -4824,7 +4813,7 @@ audio.fm-media { width: min(520px, 90%); }
 :root[data-liquid][data-iphone] [data-lens] { --lg-blur: 0px; }
 
 /* O desfoque é só do conteúdo: barra de rolagem e peças flutuantes ficam fora dele */
-.ag-edge-top, .ag-edge-bottom { right: var(--ag-bar-w, 0px); }
+.ag-edge-top { right: var(--ag-bar-w, 0px); }
 .ag-jump, .ag-pending, .fm-fab, .fm-bars, .fm-uploads, .fm-drop, .fm-progress, .nt-fab, .term-search, .terminal-search { z-index: 4; }
 /* A barra da conversa começa abaixo da barra de abas e do título, sem passar atrás deles */
 @supports selector(::-webkit-scrollbar) {
@@ -4851,8 +4840,115 @@ audio.fm-media { width: min(520px, 90%); }
 /* Ordem explícita, sem depender de z-index negativo (o Safari desenhava o vidro por cima do conteúdo):
    cópia da lente, vidro e só então o conteúdo da peça */
 :root[data-liquid] :is(.session-pill, .topbar-actions .icon-btn, .ag-jump, .menu) > .liquid-host > .lg-glass { z-index: 1; }
-:root[data-liquid] :is(.session-pill, .topbar-actions .icon-btn, .ag-jump) > .lens-mirror { z-index: 0; }
+:root[data-liquid] .ag-jump > .lens-mirror { z-index: 0; }
 :root[data-liquid] :is(.session-pill, .topbar-actions .icon-btn, .ag-jump, .menu) > :not(.liquid-host, .lens-mirror) { position: relative; z-index: 2; }
 /* O desfoque das pontas fica preso à área de trabalho: barras e menus sempre acima dele */
 :is(:root[data-desktop], :root[data-iphone]) body:has(.agent-panel.active) .workspace { position: relative; z-index: 0; isolation: isolate; }
 :is(:root[data-desktop], :root[data-iphone]) body:has(.agent-panel.active):not(:has(.terminal-panels.split)) .topbar { transform: translateZ(0); }
+
+/* Só em cima: embaixo nada desfoca nem esmaece. No PC, o texto para atrás do campo, antes da linha da pasta */
+.ag-log.edge-fade { --log-cut: linear-gradient(to bottom, #000 calc(100% - var(--fade-inset)), transparent calc(100% - var(--fade-inset))); }
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root[data-desktop]:not([data-edge-lite]) .agent-panel:not(.ag-is-empty) .ag-log.edge-fade { -webkit-mask-image: var(--log-cut); mask-image: var(--log-cut); }
+}
+
+/* Lista lateral de conversas: sombra nas pontas, sem desfoque */
+:is(.dk-scroll, .cv-list).edge-fade { -webkit-mask-image: var(--fade-mask); mask-image: var(--fade-mask); }
+
+/* ===== Explorador de arquivos ===== */
+.fm-only-desk, .fm-type, .fm-large, .fm-actions, .fm-iossort, .fm-status, .fm-details { display: none; }
+.fm-actions .icon-btn:disabled { opacity: .35; }
+
+/* PC: navegação, ações, árvore, colunas, detalhes e status */
+:root[data-desktop] .fm-only-desk { display: inline-flex; }
+:root[data-desktop] .fm-toolbar { gap: 4px; margin: 0; padding: 8px 12px; border: none; border-radius: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-desktop] .fm-toolbar [data-act="new-folder"], :root[data-desktop] .fm-toolbar [data-act="upload"],
+:root[data-desktop] .fm-toolbar [data-act="view"], :root[data-desktop] .fm-toolbar [data-act="search"],
+:root[data-desktop] .fm-toolbar [data-act="edit-path"], :root[data-desktop] .fm-fab, :root[data-desktop] .fm-selbar { display: none !important; }
+:root[data-desktop] .fm-crumbs, :root[data-desktop] .fm-path-input {
+    height: 38px; margin: 0 2px; padding: 0 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); cursor: text;
+    -webkit-mask-image: none; mask-image: none; font-family: inherit;
+}
+:root[data-desktop] .fm-path-input { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); font-family: var(--font-mono); font-size: 13px; padding: 0 12px; }
+:root[data-desktop] .fm-crumb { height: 28px; cursor: pointer; }
+:root[data-desktop] .fm-toolbar .fm-search {
+    flex: 0 0 260px; height: 38px; margin: 0 0 0 2px; padding: 0 12px; display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+}
+:root[data-desktop] .fm-toolbar .fm-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+:root[data-desktop] .fm-toolbar .fm-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; box-shadow: none !important; font-size: 13.5px; }
+:root[data-desktop] .fm-toolbar .fm-search .btn, :root[data-desktop] .fm-toolbar .fm-search [data-act="search-close"] { display: none; }
+:root[data-desktop] .fm-actions { display: flex; flex-shrink: 0; align-items: center; gap: 2px; padding: 2px 12px 8px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+:root[data-desktop] .fm-actions .btn { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; white-space: nowrap; }
+:root[data-desktop] .fm-actions .icon-btn { width: 34px; height: 34px; flex-shrink: 0; border-radius: 10px; }
+:root[data-desktop] .fm-actions .icon-btn.on { background: var(--accent-soft); color: var(--accent); }
+.fm-sep { flex-shrink: 0; width: 1px; height: 20px; margin: 0 6px; background: var(--border); }
+.fm-grow { flex: 1; min-width: 8px; }
+.fm-sort-select { flex-shrink: 0; height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+
+:root[data-desktop] .fm-side { width: 250px; padding: 12px 8px; }
+:root[data-desktop] .fm-side-head { padding: 10px 10px 6px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.fm-tree-row { display: flex; align-items: center; gap: 2px; height: 32px; padding-left: calc(4px + var(--depth, 0) * 14px); padding-right: 6px; border-radius: 10px; }
+.fm-tree-row:hover { background: var(--surface-2); }
+.fm-tree-row.current { background: var(--accent-soft); font-weight: 500; }
+.fm-tree-toggle { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border: 0; border-radius: 6px; background: none; color: var(--text-3); cursor: pointer; }
+.fm-tree-toggle svg { transition: transform .12s; }
+.fm-tree-toggle.open svg { transform: rotate(90deg); }
+.fm-tree-toggle.empty { visibility: hidden; }
+.fm-tree-item { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; height: 100%; border: 0; background: none; color: var(--text); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.fm-tree-item svg { flex: none; color: var(--accent); }
+.fm-tree-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Cabeçalho com a mesma grade das linhas, para as colunas baterem */
+:root[data-desktop] .fm-head, :root[data-desktop] .fm[data-view="list"] .fm-head { grid-template-columns: 0 28px minmax(180px, 1fr) 170px 150px 90px 34px; margin: 0 6px; padding: 4px 6px 4px 12px; }
+:root[data-desktop] .fm-head [data-sort="name"] { grid-column: 3; padding-left: 0; }
+:root[data-desktop] .fm-head button { display: flex; align-items: center; padding: 0; }
+:root[data-desktop] .fm-head [data-sort="size"] { justify-content: flex-end; }
+:root[data-desktop] .fm-row { grid-template-columns: 0 28px minmax(180px, 1fr) 170px 150px 90px 34px; min-height: 38px; border-radius: 10px; }
+:root[data-desktop] .fm-list.selecting .fm-row { grid-template-columns: 0 28px minmax(180px, 1fr) 170px 150px 90px 34px; }
+:root[data-desktop] .fm-list.selecting .fm-check { display: none; }
+:root[data-desktop] .fm-type { display: block; font-size: 12.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root[data-desktop] .fm-row .fm-sub { display: none; }
+:root[data-desktop] .fm-row .fm-size { text-align: right; }
+:root[data-desktop] .fm-row.selected { background: var(--accent-soft); }
+:root[data-desktop] .fm[data-view="grid"] .fm-type { display: none; }
+
+:root[data-desktop] .fm-status { display: flex; flex-shrink: 0; align-items: center; gap: 14px; height: 34px; padding: 0 14px; border-top: 1px solid var(--border); background: var(--surface); color: var(--text-3); font-size: 12.5px; }
+.fm-status-hint { font-size: 11px; }
+:root[data-desktop] .fm-details { display: flex; flex-direction: column; gap: 14px; flex-shrink: 0; width: 300px; padding: 20px; overflow-y: auto; border-left: 1px solid var(--border); background: var(--surface); }
+:root[data-desktop] .fm.details-closed .fm-details { display: none; }
+.fm-art { display: grid; place-items: center; flex-shrink: 0; height: 170px; border-radius: 16px; overflow: hidden; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); color: var(--text-3); }
+.fm-art img { width: 100%; height: 100%; object-fit: contain; }
+.fm-art.kind-dir svg { color: var(--accent); }
+.fm-art.is-text { display: block; padding: 14px; font-size: 11px; line-height: 1.5; white-space: pre-wrap; color: var(--text-2); background: var(--bg); }
+.fm-details h3 { margin: 0; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.fm-details .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.fm-details dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 0; font-size: 13px; }
+.fm-details dt { color: var(--text-3); }
+.fm-details dd { margin: 0; overflow-wrap: anywhere; }
+.fm-details-hint { margin: 0; font-size: 12px; color: var(--text-3); }
+@media (max-width: 1100px) { :root[data-desktop] .fm-details { display: none; } :root[data-desktop] .fm-toolbar .fm-search { flex-basis: 180px; } }
+
+/* iPhone: como o app Arquivos do iOS */
+:root[data-iphone] .fm-large { display: flex; flex-direction: column; flex-shrink: 0; gap: 2px; padding: 4px 18px 8px; }
+.fm-large-title { margin: 0; font-size: 32px; line-height: 1.15; font-weight: 700; letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fm-large-sub { font-size: 13px; color: var(--text-3); }
+:root[data-iphone] .fm-crumbs { visibility: hidden; }
+:root[data-iphone] .fm-toolbar [data-act="search"], :root[data-iphone] .fm-toolbar [data-act="view"] { display: none; }
+:root[data-iphone] .fm-search { display: flex; flex-shrink: 0; align-items: center; gap: 8px; height: 40px; margin: 0 16px 8px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--surface-2); color: var(--text-3); }
+:root[data-iphone] .fm-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; box-shadow: none !important; font-size: 16px; }
+:root[data-iphone] .fm-search .btn { display: none; }
+:root[data-iphone] .fm-search:not(:focus-within) [data-act="search-close"] { display: none; }
+:root[data-iphone] .fm-iossort { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; padding: 0 12px 4px 18px; }
+.fm-iossort-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 40px; border: 0; background: none; color: var(--accent); font: inherit; font-size: 14px; font-weight: 500; }
+:root[data-iphone] .fm-iossort .icon-btn { width: 40px; height: 40px; color: var(--accent); }
+:root[data-iphone] .fm[data-view="list"] .fm-list { padding: 0 0 120px; }
+:root[data-iphone] .fm[data-view="list"] .fm-row, :root[data-iphone] .fm[data-view="list"] .fm-list.selecting .fm-row { min-height: 62px; margin: 0; padding: 6px 12px 6px 18px; border-radius: 0; }
+:root[data-iphone] .fm[data-view="list"] .fm-row::before { content: ''; position: absolute; left: 66px; right: 0; bottom: 0; height: .5px; background: var(--border); }
+:root[data-iphone] .fm[data-view="list"] .fm-row.selected { background: var(--accent-soft); }
+:root[data-iphone] .fm[data-view="list"] .fm-icon { width: 38px; height: 38px; }
+:root[data-iphone] .fm[data-view="list"] .fm-icon svg { width: 34px; height: 34px; stroke-width: 1.5; }
+:root[data-iphone] .fm[data-view="list"] .fm-title { font-size: 16px; }
+:root[data-iphone] .fm[data-view="list"] .fm-sub { display: block; font-size: 13px; color: var(--text-3); }
+:root[data-iphone] .fm[data-view="list"] .fm-more { opacity: .55; width: 36px; height: 44px; background: none; }
+.fm-iossort-btn:focus-visible { border-radius: 8px; outline-offset: 2px; }

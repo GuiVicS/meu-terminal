@@ -125,6 +125,7 @@ export default class TerminalSession {
         // não têm histórico, e a linha do prompt nunca fica apagada
         const fade = attachEdgeFade(this.panel.querySelector('.xterm'), {
             scroller: viewport || this.panel,
+            cover: this.panel,
             observe: false,
             read: () => {
                 const b = term.buffer.active;

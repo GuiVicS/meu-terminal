@@ -104,7 +104,7 @@ export default class DesktopSidebar {
         this.reopen.innerHTML = icon('panelLeft', 18);
         document.body.appendChild(this.reopen);
         this.convs = this.el.querySelector('.dk-convs');
-        attachEdgeFade(this.el.querySelector('.dk-scroll'));
+        attachEdgeFade(this.el.querySelector('.dk-scroll'), { overlay: false }); // aqui é sombra, sem desfoque
         this.agentsEl = this.el.querySelector('.dk-agents');
         this.input = this.el.querySelector('.dk-search input');
         this.setCollapsed(localStorage.getItem(COLLAPSED_KEY) === '1', false);

@@ -1,12 +1,11 @@
 /**
  * edgeFade.js
- * O conteúdo fica cada vez mais desfocado ao chegar nas bordas de uma área rolável, em vez de ser
- * cortado. A borda só age se ainda há conteúdo além dela: no fim da conversa ou na linha do prompt,
- * nada fica desfocado. O desfoque vem de camadas sobre a área (.ag-edge); a máscara do CSS (.edge-fade)
- * é a versão leve, para quem não aguenta o desfoque. Aqui só se liga e desliga cada borda.
+ * O conteúdo fica cada vez mais desfocado ao chegar no topo de uma área rolável, em vez de ser cortado.
+ * Só age se ainda há conteúdo acima. O desfoque vem de camadas sobre a área (.ag-edge); a máscara do
+ * CSS (.edge-fade) é a versão leve, para quem não aguenta o desfoque.
  */
 const LAYERS = '<i></i><i></i><i></i><i></i>';
-const EDGE_HEIGHT = 56;
+const EDGE_HEIGHT = 110; // a mesma rampa do topo do chat
 
 function edgeLayer(side) {
     const layer = document.createElement('div');
@@ -27,14 +26,14 @@ const atScroller = el => () => ({
  * @param {() => {top: boolean, bottom: boolean}} [opts.read] - o padrão lê a rolagem do próprio elemento
  * @param {EventTarget} [opts.scroller] - quem avisa da rolagem (o padrão é o próprio elemento)
  * @param {boolean} [opts.observe] - acompanhar sozinho mudanças de tamanho e de conteúdo
- * @param {boolean} [opts.overlay] - criar as camadas de desfoque (a conversa tem as dela)
+ * @param {boolean} [opts.overlay] - criar a camada de desfoque (a conversa tem a dela)
+ * @param {HTMLElement} [opts.cover] - o desfoque vai de ponta a ponta deste elemento (o terminal tem margens)
  * @returns {{ schedule: () => void, destroy: () => void }}
  */
-export function attachEdgeFade(el, { read = atScroller(el), scroller = el, observe = true, overlay = true } = {}) {
+export function attachEdgeFade(el, { read = atScroller(el), scroller = el, observe = true, overlay = true, cover = null } = {}) {
     el.classList.add('edge-fade');
     let frame = 0;
     let topLayer = null;
-    let bottomLayer = null;
     // A barra pode ser a nativa (da área ou de quem rola por ela) ou a desenhada pelo terminal
     const barWidth = () => {
         const own = el.offsetWidth - el.clientWidth;
@@ -43,18 +42,24 @@ export function attachEdgeFade(el, { read = atScroller(el), scroller = el, obser
         return Math.max(own, outer, drawn);
     };
     const place = () => {
-        const parent = el.parentElement;
+        const parent = cover || el.parentElement;
         if (!parent || !el.offsetWidth) return;
         if (!topLayer) {
             topLayer = edgeLayer('top');
-            bottomLayer = edgeLayer('bottom');
             if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
-            parent.append(topLayer, bottomLayer);
+            parent.append(topLayer);
         }
+        const box = parent.getBoundingClientRect();
+        const area = el.getBoundingClientRect();
+        // Com "cover", vai de ponta a ponta da área, colado no topo dela; a barra de rolagem nunca desfoca
+        const left = cover ? 0 : area.left - box.left + parent.scrollLeft;
+        const top = cover ? 0 : area.top - box.top + parent.scrollTop;
+        const right = area.right - box.left - barWidth();
         const height = Math.min(EDGE_HEIGHT, el.offsetHeight / 3);
-        const width = Math.max(0, el.offsetWidth - barWidth()); // a barra de rolagem nunca desfoca
-        Object.assign(topLayer.style, { top: `${el.offsetTop}px`, left: `${el.offsetLeft}px`, width: `${width}px`, height: `${height}px` });
-        Object.assign(bottomLayer.style, { top: `${el.offsetTop + el.offsetHeight - height}px`, left: `${el.offsetLeft}px`, width: `${width}px`, height: `${height}px` });
+        Object.assign(topLayer.style, {
+            top: `${top}px`, left: `${left}px`, width: `${Math.max(0, right - left)}px`, height: `${height}px`,
+            borderRadius: cover ? '0' : getComputedStyle(el).borderTopLeftRadius, // listas com cantos arredondados
+        });
     };
     const apply = () => {
         frame = 0;
@@ -64,7 +69,6 @@ export function attachEdgeFade(el, { read = atScroller(el), scroller = el, obser
         if (overlay) {
             place();
             topLayer?.toggleAttribute('data-on', top);
-            bottomLayer?.toggleAttribute('data-on', bottom);
         }
     };
     const schedule = () => {
@@ -84,7 +88,6 @@ export function attachEdgeFade(el, { read = atScroller(el), scroller = el, obser
             size?.disconnect();
             content?.disconnect();
             topLayer?.remove();
-            bottomLayer?.remove();
         },
     };
 }

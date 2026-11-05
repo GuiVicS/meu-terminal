@@ -81,7 +81,7 @@ export function attachLens(piece) {
     const layer = document.createElement('div');
     layer.className = 'lens-mirror';
     layer.setAttribute('aria-hidden', 'true');
-    layer.style.filter = `url(#${id}) blur(1.5px)`;
+    layer.style.filter = `url(#${id}) blur(5px)`; // o mesmo desfoque do vidro do campo no PC
     const copy = document.createElement('div');
     copy.className = 'ag-log lens-copy';
     copy.inert = true;

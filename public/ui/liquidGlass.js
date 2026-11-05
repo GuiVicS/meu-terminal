@@ -10,7 +10,8 @@ import { attachLens } from './lensMirror.js';
 
 const DESKTOP_TARGETS = '.ag-composer, .tabstrip, .topbar-actions .icon-btn, .menu';
 const IPHONE_TARGETS = '.ag-composer, .session-pill, .topbar-actions .icon-btn, .ag-jump, .menu';
-const IPHONE_LENS = '.ag-composer, .session-pill, .topbar-actions .icon-btn, .ag-jump'; // o menu não fica sobre a conversa
+// Só onde a conversa passa nítida. No topo ela já vem desfocada: uma cópia ali aparece mais nítida que o entorno
+const IPHONE_LENS = '.ag-composer, .ag-jump';
 const mounted = new Map(); // peça -> { host, stop }
 
 export function liquidGlassSupported() {
