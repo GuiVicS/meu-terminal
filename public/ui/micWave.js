@@ -111,6 +111,7 @@ export default class MicWave {
         if (!this.running) return;
         if (time - this.last >= STEP_MS) {
             this.last = time;
+            if (!this.width) this.resize(); // a barra pode ter aparecido depois de começar
             this.levels.push(this.level(time));
             const fit = Math.ceil(this.width / (BAR + GAP));
             if (this.levels.length > fit) this.levels.splice(0, this.levels.length - fit);

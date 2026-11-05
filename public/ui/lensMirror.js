@@ -4,7 +4,7 @@
  * um elemento comum: cada peça leva uma cópia das mensagens que estão atrás dela, deformada por um
  * mapa de deslocamento só perto da borda. Só as mensagens próximas da peça são copiadas, e a cópia
  * acompanha a rolagem da conversa. Fora de uma conversa, ou com o aparelho travando
- * (data-edge-lite), a peça volta ao desfoque comum.
+ * (data-lens-off, ui/edgeBlur.js), a peça volta ao desfoque comum.
  */
 const NS = 'http://www.w3.org/2000/svg';
 const MARGIN = 500; // copia um pouco além da peça, para a rolagem não refazer a cópia a cada quadro
@@ -154,7 +154,7 @@ export function attachLens(piece) {
 
     /** A conversa à vista pode mudar (troca de aba): a lente segue a dela. */
     const follow = () => {
-        const lite = document.documentElement.hasAttribute('data-edge-lite');
+        const lite = document.documentElement.matches('[data-edge-lite], [data-lens-off]');
         const next = lite ? null : document.querySelector('.terminal-panel.active .ag-log:not(.lens-copy)');
         if (next === log) return;
         log?.removeEventListener('scroll', placeSoon);
